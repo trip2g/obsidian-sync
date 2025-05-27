@@ -59,7 +59,7 @@ export default class MyPlugin extends Plugin {
 		const data = encoder.encode(content);
 		const hashBuffer = await crypto.subtle.digest('SHA-256', data);
 		const hashArray = new Uint8Array(hashBuffer);
-		return btoa(String.fromCharCode(...hashArray)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+		return btoa(String.fromCharCode(...hashArray)).replace(/\+/g, '-').replace(/\//g, '_');
 	}
 
 	async testConnection(syncDir: SyncDir): Promise<string | null> {
@@ -120,27 +120,10 @@ export default class MyPlugin extends Plugin {
 		}
 	}
 
-	private extractAssetPaths(content: string): string[] {
-		const assetPaths: string[] = [];
-		// Match image references: ![alt](path) and [[path]]
-		const imageRegex = /!\[.*?\]\(([^)]+)\)|!\[\[([^\]]+)\]\]/g;
-		let match;
-		
-		while ((match = imageRegex.exec(content)) !== null) {
-			const path = match[1] || match[2];
-			if (path && !path.startsWith('http')) {
-				assetPaths.push(path);
-			}
-		}
-		
-		return assetPaths;
-	}
-
 	private async uploadAsset(apiUrl: string, apiKey: string, noteId: string, assetPath: string, relativePath: string, sha256Hash: string): Promise<void> {
 		try {
 			const file = this.app.vault.getAbstractFileByPath(assetPath);
 			if (!file || !(file instanceof TFile)) {
-				console.warn(`Asset not found: ${assetPath}`);
 				return;
 			}
 
@@ -160,9 +143,11 @@ export default class MyPlugin extends Plugin {
 				query: `mutation($input: UploadNoteAssetInput!) { 
 					uploadNoteAsset(input: $input) { 
 						... on ErrorPayload { 
+							__typename
 							message 
 						} 
 						... on UploadNoteAssetPayload { 
+							__typename
 							uploadSkipped 
 						} 
 					} 
@@ -191,13 +176,21 @@ export default class MyPlugin extends Plugin {
 			const result = await response.json();
 			if (result.errors) {
 				console.error(`Asset upload error for ${relativePath}:`, result.errors);
+				return;
+			}
+
+			const payload = result.data?.uploadNoteAsset;
+			if (payload?.__typename === 'ErrorPayload') {
+				new Notice(`Asset upload failed: ${payload.message}`);
+			} else if (payload?.__typename === 'UploadNoteAssetPayload' && !payload.uploadSkipped) {
+				new Notice(`✅ Asset uploaded: ${relativePath}`);
 			}
 		} catch (error) {
 			console.error(`Failed to upload asset ${relativePath}:`, error);
 		}
 	}
 
-	private async pushUpdatesGraphql(apiUrl: string, apiKey: string, updates: Array<{path: string, content: string}>): Promise<void> {
+	private async pushUpdatesGraphql(apiUrl: string, apiKey: string, updates: Array<{path: string, content: string}>, syncBaseFolder?: TFolder): Promise<void> {
 		const query = `
 			mutation PushNotes($input: PushNotesInput!) {
 				pushNotes(input: $input) {
@@ -250,10 +243,7 @@ export default class MyPlugin extends Plugin {
 					
 					// Process assets for each note
 					for (const note of pushResult.notes) {
-						const update = updates.find(u => u.path === note.path);
-						if (update) {
-							await this.processNoteAssets(apiUrl, apiKey, note, update.content);
-						}
+						await this.processNoteAssets(apiUrl, apiKey, note, syncBaseFolder);
 					}
 				}
 			}
@@ -263,60 +253,46 @@ export default class MyPlugin extends Plugin {
 		}
 	}
 
-	private async processNoteAssets(apiUrl: string, apiKey: string, note: any, content: string): Promise<void> {
-		const assetPaths = this.extractAssetPaths(content);
-		if (assetPaths.length === 0) return;
-
-		// Get existing assets from server
-		const existingAssets = new Map<string, string>();
-		if (note.assets) {
-			for (const asset of note.assets) {
-				existingAssets.set(asset.path, asset.sha256Hash);
-			}
+	private async processNoteAssets(apiUrl: string, apiKey: string, note: any, syncBaseFolder?: TFolder): Promise<void> {
+		if (!note.assets || note.assets.length === 0) {
+			return;
 		}
 
-		for (const relativePath of assetPaths) {
+		for (const asset of note.assets) {
 			try {
-				// Resolve absolute path from relative path in note content
-				const absolutePath = this.resolveAssetPath(relativePath, note.path);
+				const relativePath = asset.path;
+				const serverHash = asset.sha256Hash;
+				
+				const absolutePath = this.resolveAssetPath(relativePath, note.path, syncBaseFolder);
 				const file = this.app.vault.getAbstractFileByPath(absolutePath);
 				
 				if (!file || !(file instanceof TFile)) {
-					console.warn(`Asset not found: ${absolutePath} (from ${relativePath})`);
 					continue;
 				}
 
-				// Calculate hash of local asset
 				const arrayBuffer = await this.app.vault.readBinary(file);
 				const localHash = await this.sha256HashBuffer(arrayBuffer);
 				
-				// Check if asset needs to be uploaded
-				const existingHash = existingAssets.get(relativePath);
-				if (existingHash !== localHash) {
-					console.log(`Uploading asset: ${relativePath} (${localHash})`);
+				if (!serverHash || serverHash !== localHash) {
+					new Notice(`Uploading asset: ${relativePath}`);
 					await this.uploadAsset(apiUrl, apiKey, note.id, absolutePath, relativePath, localHash);
-				} else {
-					console.log(`Asset up to date: ${relativePath}`);
 				}
 			} catch (error) {
-				console.error(`Error processing asset ${relativePath}:`, error);
+				console.error(`Error processing asset ${asset.path}:`, error);
 			}
 		}
 	}
 
-	private resolveAssetPath(relativePath: string, notePath: string): string {
-		// If path starts with '/', it's absolute from vault root
+	private resolveAssetPath(relativePath: string, notePath: string, syncBaseFolder?: TFolder): string {
 		if (relativePath.startsWith('/')) {
 			return relativePath.slice(1);
 		}
 		
-		// If path starts with './', resolve relative to note directory
 		if (relativePath.startsWith('./')) {
 			const noteDir = notePath.split('/').slice(0, -1).join('/');
 			return noteDir ? `${noteDir}/${relativePath.slice(2)}` : relativePath.slice(2);
 		}
 		
-		// If path starts with '../', resolve relative to parent directories
 		if (relativePath.startsWith('../')) {
 			const notePathParts = notePath.split('/').slice(0, -1);
 			const relativePathParts = relativePath.split('/');
@@ -330,15 +306,33 @@ export default class MyPlugin extends Plugin {
 			return [...notePathParts, ...relativePathParts.slice(i)].join('/');
 		}
 		
-		// Otherwise, assume relative to note directory
+		const candidatePaths = [];
+		
 		const noteDir = notePath.split('/').slice(0, -1).join('/');
-		return noteDir ? `${noteDir}/${relativePath}` : relativePath;
+		if (noteDir) {
+			candidatePaths.push(`${noteDir}/${relativePath}`);
+		}
+		
+		if (syncBaseFolder && syncBaseFolder.path) {
+			candidatePaths.push(`${syncBaseFolder.path}/${relativePath}`);
+		}
+		
+		candidatePaths.push(relativePath);
+		
+		for (const candidatePath of candidatePaths) {
+			const file = this.app.vault.getAbstractFileByPath(candidatePath);
+			if (file) {
+				return candidatePath;
+			}
+		}
+		
+		return candidatePaths[0] || relativePath;
 	}
 
 	private async sha256HashBuffer(buffer: ArrayBuffer): Promise<string> {
 		const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
 		const hashArray = new Uint8Array(hashBuffer);
-		return btoa(String.fromCharCode(...hashArray)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+		return Array.from(hashArray).map(b => b.toString(16).padStart(2, '0')).join('');
 	}
 
 	async syncDirectory(syncDir: SyncDir): Promise<void> {
@@ -368,8 +362,6 @@ export default class MyPlugin extends Plugin {
 				const relativePath = this.getRelativePath(file, folder);
 				const remoteHash = serverHashes[relativePath];
 
-				console.log(`${relativePath}: local=${localHash}, remote=${remoteHash || '—'}`);
-
 				if (serverEmpty || remoteHash !== localHash) {
 					updates.push({
 						path: relativePath,
@@ -378,9 +370,10 @@ export default class MyPlugin extends Plugin {
 				}
 			}
 
-			if (updates.length > 0) {
-				await this.pushUpdatesGraphql(syncDir.apiUrl, syncDir.apiKey, updates);
-			} else {
+			// Always send PushNotes mutation to get asset information
+			await this.pushUpdatesGraphql(syncDir.apiUrl, syncDir.apiKey, updates, folder);
+			
+			if (updates.length === 0) {
 				new Notice('✅ All files are up to date');
 			}
 
