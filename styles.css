@@ -1,8 +1,30 @@
-/*
+.sync-dir-item {
+	padding: 10px;
+	margin: 10px 0;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 4px;
+}
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+.sync-dir-item h3 {
+	margin: 0 0 5px 0;
+	color: var(--text-normal);
+}
 
-If your plugin does not need CSS, delete this file.
+.sync-dir-item p {
+	margin: 0 0 10px 0;
+	color: var(--text-muted);
+	font-size: 0.9em;
+}
 
-*/
+.sync-dir-item button {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border: none;
+	padding: 8px 16px;
+	border-radius: 4px;
+	cursor: pointer;
+}
+
+.sync-dir-item button:hover {
+	background: var(--interactive-accent-hover);
+}
