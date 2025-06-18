@@ -190,6 +190,65 @@ export default class MyPlugin extends Plugin {
 		}
 	}
 
+	private async hideNotesGraphql(apiUrl: string, apiKey: string, paths: string[]): Promise<boolean> {
+		const query = `
+			mutation HideNotes($input: HideNotesInput!) {
+				hideNotes(input: $input) {
+					... on HideNotesPayload {
+						success
+					}
+					... on ErrorPayload {
+						message
+					}
+				}
+			}
+		`;
+
+		const variables = {
+			input: {
+				paths: paths
+			}
+		};
+
+		try {
+			const response = await fetch(`${apiUrl}/graphql`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					'X-API-Key': apiKey,
+				},
+				body: JSON.stringify({ query, variables })
+			});
+
+			if (!response.ok) {
+				throw new Error(`HTTP error! status: ${response.status}`);
+			}
+
+			const result = await response.json();
+			
+			if (result.errors) {
+				console.error('GraphQL errors hiding notes:', result.errors);
+				new Notice(`Error hiding notes: ${result.errors[0]?.message || 'Unknown error'}`);
+				return false;
+			} else {
+				const hideResult = result.data?.hideNotes;
+				if (hideResult?.message) {
+					new Notice(`Error hiding notes: ${hideResult.message}`);
+					return false;
+				} else if (hideResult?.success) {
+					new Notice(`✅ Successfully hid ${paths.length} notes`);
+					return true;
+				}
+			}
+		} catch (error) {
+			console.error('Error hiding notes:', error);
+			new Notice(`Error hiding notes: ${error.message}`);
+			return false;
+		}
+		
+		return false;
+	}
+
 	private async pushUpdatesGraphql(apiUrl: string, apiKey: string, updates: Array<{path: string, content: string}>, syncBaseFolder?: TFolder): Promise<void> {
 		const query = `
 			mutation PushNotes($input: PushNotesInput!) {
@@ -355,11 +414,13 @@ export default class MyPlugin extends Plugin {
 			}
 
 			const files = this.getAllMarkdownFiles(folder);
+			const localPaths = new Set<string>();
 			
 			for (const file of files) {
 				const content = await this.app.vault.read(file);
 				const localHash = await this.sha256Hash(content);
 				const relativePath = this.getRelativePath(file, folder);
+				localPaths.add(relativePath);
 				const remoteHash = serverHashes[relativePath];
 
 				if (serverEmpty || remoteHash !== localHash) {
@@ -370,11 +431,25 @@ export default class MyPlugin extends Plugin {
 				}
 			}
 
+			// Find server notes that don't exist locally (should be hidden)
+			const serverOnlyPaths: string[] = [];
+			for (const serverPath of Object.keys(serverHashes)) {
+				if (!localPaths.has(serverPath)) {
+					serverOnlyPaths.push(serverPath);
+				}
+			}
+
 			// Always send PushNotes mutation to get asset information
 			await this.pushUpdatesGraphql(syncDir.apiUrl, syncDir.apiKey, updates, folder);
 			
 			if (updates.length === 0) {
 				new Notice('✅ All files are up to date');
+			}
+
+			// Hide notes that exist on server but not locally
+			if (serverOnlyPaths.length > 0) {
+				new Notice(`🙈 Hiding ${serverOnlyPaths.length} notes that don't exist locally...`);
+				await this.hideNotesGraphql(syncDir.apiUrl, syncDir.apiKey, serverOnlyPaths);
 			}
 
 		} catch (error) {
