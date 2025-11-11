@@ -1,94 +1,93 @@
-# Obsidian Sample Plugin
+# Trip2g Plugin for Obsidian
 
-This is a sample plugin for Obsidian (https://obsidian.md).
+A plugin for [Obsidian](https://obsidian.md) that syncs your notes with [trip2g.com](https://trip2g.com) and publishes them as a website.
 
-This project uses TypeScript to provide type checking and documentation.
-The repo depends on the latest plugin API (obsidian.d.ts) in TypeScript Definition format, which contains TSDoc comments describing what it does.
+## About
 
-This sample plugin demonstrates some of the basic functionality the plugin API can do.
-- Adds a ribbon icon, which shows a Notice when clicked.
-- Adds a command "Open Sample Modal" which opens a Modal.
-- Adds a plugin setting tab to the settings page.
-- Registers a global click event and output 'click' to the console.
-- Registers a global interval which logs 'setInterval' to the console.
+Trip2g Plugin allows you to seamlessly sync your Obsidian vault with trip2g.com, a service designed for publishing your notes as a website. Share your knowledge, documentation, or personal wiki with the world directly from your Obsidian workspace.
 
-## First time developing plugins?
+## Features
 
-Quick starting guide for new plugin devs:
+- 📤 Sync notes from Obsidian to trip2g.com
+- 🌐 Publish your notes as a website
+- 🔄 Automatic synchronization
+- 🔐 Secure API key authentication
 
-- Check if [someone already developed a plugin for what you want](https://obsidian.md/plugins)! There might be an existing plugin similar enough that you can partner up with.
-- Make a copy of this repo as a template with the "Use this template" button (login to GitHub if you don't see it).
-- Clone your repo to a local development folder. For convenience, you can place this folder in your `.obsidian/plugins/your-plugin-name` folder.
-- Install NodeJS, then run `npm i` in the command line under your repo folder.
-- Run `npm run dev` to compile your plugin from `main.ts` to `main.js`.
-- Make changes to `main.ts` (or create new `.ts` files). Those changes should be automatically compiled into `main.js`.
-- Reload Obsidian to load the new version of your plugin.
-- Enable plugin in settings window.
-- For updates to the Obsidian API run `npm update` in the command line under your repo folder.
+## Installation
 
-## Releasing new releases
+This plugin is not yet available in the official Obsidian Community Plugins directory. You can install it using [BRAT](https://tfthacker.com/BRAT) (Beta Reviewers Auto-update Tester).
 
-- Update your `manifest.json` with your new version number, such as `1.0.1`, and the minimum Obsidian version required for your latest release.
-- Update your `versions.json` file with `"new-plugin-version": "minimum-obsidian-version"` so older versions of Obsidian can download an older version of your plugin that's compatible.
-- Create new GitHub release using your new version number as the "Tag version". Use the exact version number, don't include a prefix `v`. See here for an example: https://github.com/obsidianmd/obsidian-sample-plugin/releases
-- Upload the files `manifest.json`, `main.js`, `styles.css` as binary attachments. Note: The manifest.json file must be in two places, first the root path of your repository and also in the release.
-- Publish the release.
+### Install via BRAT
 
-> You can simplify the version bump process by running `npm version patch`, `npm version minor` or `npm version major` after updating `minAppVersion` manually in `manifest.json`.
-> The command will bump version in `manifest.json` and `package.json`, and add the entry for the new version to `versions.json`
+1. Install the BRAT plugin from Obsidian Community Plugins
+2. Open BRAT settings in Obsidian
+3. Click "Add Beta plugin"
+4. Enter this repository URL: `https://github.com/trip2g/obsidian-sync`
+5. Click "Add Plugin"
+6. Enable "Trip2g Plugin" in Obsidian Settings → Community Plugins
 
-## Adding your plugin to the community plugin list
+## Configuration
 
-- Check the [plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines).
-- Publish an initial version.
-- Make sure you have a `README.md` file in the root of your repo.
-- Make a pull request at https://github.com/obsidianmd/obsidian-releases to add your plugin.
+After installation, you need to configure the plugin with your API key:
 
-## How to use
+1. Open Obsidian Settings
+2. Navigate to "Trip2g Plugin" in the plugin settings
+3. Enter your API key from [trip2g.com](https://trip2g.com)
+4. Save settings
 
-- Clone this repo.
-- Make sure your NodeJS is at least v16 (`node --version`).
-- `npm i` or `yarn` to install dependencies.
-- `npm run dev` to start compilation in watch mode.
+### Getting your API key
 
-## Manually installing the plugin
+1. Visit [trip2g.com](https://trip2g.com)
+2. Log in to your account
+3. Navigate to your account settings or API section
+4. Copy your API key
+5. Paste it into the plugin settings in Obsidian
 
-- Copy over `main.js`, `styles.css`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/your-plugin-id/`.
+## Usage
 
-## Improve code quality with eslint (optional)
-- [ESLint](https://eslint.org/) is a tool that analyzes your code to quickly find problems. You can run ESLint against your plugin to find common bugs and ways to improve your code. 
-- To use eslint with this project, make sure to install eslint from terminal:
-  - `npm install -g eslint`
-- To use eslint to analyze this project use this command:
-  - `eslint main.ts`
-  - eslint will then create a report with suggestions for code improvement by file and line number.
-- If your source code is in a folder, such as `src`, you can use eslint with this command to analyze all files in that folder:
-  - `eslint .\src\`
+Once configured, the plugin will sync your notes with trip2g.com. You can:
 
-## Funding URL
+- Use the ribbon icon to manually trigger synchronization
+- Access sync commands from the command palette (Ctrl/Cmd + P)
+- Monitor sync status through notifications
 
-You can include funding URLs where people who use your plugin can financially support it.
+## Support
 
-The simple way is to set the `fundingUrl` field to your link in your `manifest.json` file:
+If you encounter any issues or have questions:
 
-```json
-{
-    "fundingUrl": "https://buymeacoffee.com"
-}
+- Visit [trip2g.com](https://trip2g.com) for service-related questions
+- Report plugin issues on the [GitHub repository](https://github.com/trip2g/obsidian-sync/issues)
+
+## Development
+
+### Building from source
+
+```bash
+# Install dependencies
+npm install
+
+# Development mode (watch for changes)
+npm run dev
+
+# Build for production
+npm run build
 ```
 
-If you have multiple URLs, you can also do:
+### Manual installation for development
 
-```json
-{
-    "fundingUrl": {
-        "Buy Me a Coffee": "https://buymeacoffee.com",
-        "GitHub Sponsor": "https://github.com/sponsors",
-        "Patreon": "https://www.patreon.com/"
-    }
-}
-```
+1. Clone this repository to your vault's plugins folder:
+   ```bash
+   cd /path/to/vault/.obsidian/plugins
+   git clone https://github.com/trip2g/obsidian-sync trip2g
+   ```
+2. Install dependencies: `npm install`
+3. Build the plugin: `npm run dev`
+4. Reload Obsidian
+5. Enable the plugin in Settings → Community Plugins
 
-## API Documentation
+## Author
 
-See https://github.com/obsidianmd/obsidian-api
+Created by Alexey Yurchenko
+
+- Website: [trip2g.com](https://trip2g.com)
+- Email: alexes.dev@gmail.com
