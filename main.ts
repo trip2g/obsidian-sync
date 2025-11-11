@@ -22,6 +22,17 @@ type SyncDir = {
 	error?: string;
 };
 
+type NoteAsset = {
+	path: string;
+	sha256Hash: string;
+};
+
+type NoteWithAssets = {
+	id: string;
+	path: string;
+	assets?: NoteAsset[];
+};
+
 interface MyPluginSettings {
 	syncDirs: SyncDir[];
 }
@@ -117,7 +128,7 @@ export default class MyPlugin extends Plugin {
 
 	async testConnection(syncDir: SyncDir): Promise<string | null> {
 		try {
-			const hashes = await this.fetchServerHashes(syncDir.apiUrl, syncDir.apiKey);
+			await this.fetchServerHashes(syncDir.apiUrl, syncDir.apiKey);
 			return null; // No error
 		} catch (error) {
 			return error.message || "Unknown error";
@@ -377,7 +388,12 @@ export default class MyPlugin extends Plugin {
 		}
 	}
 
-	private async processNoteAssets(apiUrl: string, apiKey: string, note: any, syncBaseFolder?: TFolder): Promise<void> {
+	private async processNoteAssets(
+		apiUrl: string,
+		apiKey: string,
+		note: NoteWithAssets,
+		syncBaseFolder?: TFolder
+	): Promise<void> {
 		if (!note.assets || note.assets.length === 0) {
 			return;
 		}
