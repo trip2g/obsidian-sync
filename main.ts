@@ -1,5 +1,17 @@
-import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, ItemView, WorkspaceLeaf, MarkdownView } from 'obsidian';
-import { FolderSuggest } from './FolderSuggest'
+import {
+	App,
+	Modal,
+	Notice,
+	Plugin,
+	PluginSettingTab,
+	Setting,
+	TFile,
+	TFolder,
+	ItemView,
+	WorkspaceLeaf,
+	MarkdownView,
+} from "obsidian";
+import { FolderSuggest } from "./FolderSuggest";
 
 // Remember to rename these classes and interfaces!
 
@@ -8,7 +20,7 @@ type SyncDir = {
 	apiKey: string;
 	apiUrl: string;
 	error?: string;
-}
+};
 
 interface MyPluginSettings {
 	syncDirs: SyncDir[];
@@ -16,27 +28,23 @@ interface MyPluginSettings {
 
 const DEFAULT_SETTINGS: MyPluginSettings = {
 	syncDirs: [],
-}
+};
 
-const AI_SUGGESTIONS_VIEW_TYPE = 'trip2g-ai-suggestions-view';
+const AI_SUGGESTIONS_VIEW_TYPE = "trip2g-ai-suggestions-view";
 
 export default class MyPlugin extends Plugin {
 	settings: MyPluginSettings;
-
 
 	async onload() {
 		await this.loadSettings();
 
 		// Register the AI suggestions view
-		this.registerView(
-			AI_SUGGESTIONS_VIEW_TYPE,
-			(leaf) => new AISuggestionsView(leaf, this)
-		);
+		this.registerView(AI_SUGGESTIONS_VIEW_TYPE, (leaf) => new AISuggestionsView(leaf, this));
 
-			// This creates an icon in the left ribbon.
-		this.addRibbonIcon('sync', 'Trip2g Sync', (evt: MouseEvent) => {
+		// This creates an icon in the left ribbon.
+		this.addRibbonIcon("sync", "Trip2g Sync", (evt: MouseEvent) => {
 			if (this.settings.syncDirs.length === 0) {
-				new Notice('No sync directories configured. Please add one in settings first.');
+				new Notice("No sync directories configured. Please add one in settings first.");
 			} else if (this.settings.syncDirs.length === 1) {
 				this.syncDirectory(this.settings.syncDirs[0]);
 			} else {
@@ -45,7 +53,7 @@ export default class MyPlugin extends Plugin {
 		});
 
 		// Add AI suggestions icon
-		this.addRibbonIcon('bot', 'Trip2g AI Suggestions', async (evt: MouseEvent) => {
+		this.addRibbonIcon("bot", "Trip2g AI Suggestions", async (evt: MouseEvent) => {
 			this.activateAISuggestionsView();
 		});
 
@@ -71,7 +79,10 @@ export default class MyPlugin extends Plugin {
 			const rightLeaf = workspace.getRightLeaf(false);
 			if (rightLeaf) {
 				leaf = rightLeaf;
-				await leaf.setViewState({ type: AI_SUGGESTIONS_VIEW_TYPE, active: true });
+				await leaf.setViewState({
+					type: AI_SUGGESTIONS_VIEW_TYPE,
+					active: true,
+				});
 			}
 		}
 
@@ -94,13 +105,14 @@ export default class MyPlugin extends Plugin {
 		await this.saveData(this.settings);
 	}
 
-
 	private async sha256Hash(content: string): Promise<string> {
 		const encoder = new TextEncoder();
 		const data = encoder.encode(content);
-		const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+		const hashBuffer = await crypto.subtle.digest("SHA-256", data);
 		const hashArray = new Uint8Array(hashBuffer);
-		return btoa(String.fromCharCode(...hashArray)).replace(/\+/g, '-').replace(/\//g, '_');
+		return btoa(String.fromCharCode(...hashArray))
+			.replace(/\+/g, "-")
+			.replace(/\//g, "_");
 	}
 
 	async testConnection(syncDir: SyncDir): Promise<string | null> {
@@ -108,7 +120,7 @@ export default class MyPlugin extends Plugin {
 			const hashes = await this.fetchServerHashes(syncDir.apiUrl, syncDir.apiKey);
 			return null; // No error
 		} catch (error) {
-			return error.message || 'Unknown error';
+			return error.message || "Unknown error";
 		}
 	}
 
@@ -124,12 +136,12 @@ export default class MyPlugin extends Plugin {
 
 		try {
 			const response = await fetch(`${apiUrl}/graphql`, {
-				method: 'POST',
+				method: "POST",
 				headers: {
-					'Content-Type': 'application/json',
-					'X-API-Key': apiKey,
+					"Content-Type": "application/json",
+					"X-API-Key": apiKey,
 				},
-				body: JSON.stringify({ query })
+				body: JSON.stringify({ query }),
 			});
 
 			if (!response.ok) {
@@ -139,14 +151,14 @@ export default class MyPlugin extends Plugin {
 			const data = await response.json();
 
 			if (data.errors) {
-				console.error('GraphQL errors:', data.errors);
-				new Notice(`GraphQL error: ${data.errors[0]?.message || 'Unknown error'}`);
+				console.error("GraphQL errors:", data.errors);
+				new Notice(`GraphQL error: ${data.errors[0]?.message || "Unknown error"}`);
 				return {};
 			}
 
 			const result = data.data?.notePaths || [];
 			const hashes: Record<string, string> = {};
-			
+
 			for (const item of result) {
 				if (item.path && item.hash) {
 					hashes[item.path] = item.hash;
@@ -155,13 +167,20 @@ export default class MyPlugin extends Plugin {
 
 			return hashes;
 		} catch (error) {
-			console.error('Error fetching server hashes:', error);
+			console.error("Error fetching server hashes:", error);
 			new Notice(`Error fetching server hashes: ${error.message}`);
 			return {};
 		}
 	}
 
-	private async uploadAsset(apiUrl: string, apiKey: string, noteId: string, assetPath: string, relativePath: string, sha256Hash: string): Promise<void> {
+	private async uploadAsset(
+		apiUrl: string,
+		apiKey: string,
+		noteId: string,
+		assetPath: string,
+		relativePath: string,
+		sha256Hash: string
+	): Promise<void> {
 		try {
 			const file = this.app.vault.getAbstractFileByPath(assetPath);
 			if (!file || !(file instanceof TFile)) {
@@ -170,7 +189,7 @@ export default class MyPlugin extends Plugin {
 
 			const arrayBuffer = await this.app.vault.readBinary(file);
 			const blob = new Blob([arrayBuffer]);
-			
+
 			const operations = JSON.stringify({
 				variables: {
 					input: {
@@ -178,8 +197,8 @@ export default class MyPlugin extends Plugin {
 						noteId: noteId,
 						sha256Hash: sha256Hash,
 						path: relativePath,
-						absolutePath: assetPath
-					}
+						absolutePath: assetPath,
+					},
 				},
 				query: `mutation($input: UploadNoteAssetInput!) { 
 					uploadNoteAsset(input: $input) { 
@@ -192,22 +211,22 @@ export default class MyPlugin extends Plugin {
 							uploadSkipped 
 						} 
 					} 
-				}`
+				}`,
 			});
 
 			const map = JSON.stringify({ "0": ["variables.input.file"] });
 
 			const formData = new FormData();
-			formData.append('operations', operations);
-			formData.append('map', map);
-			formData.append('0', blob, file.name);
+			formData.append("operations", operations);
+			formData.append("map", map);
+			formData.append("0", blob, file.name);
 
 			const response = await fetch(`${apiUrl}/graphql`, {
-				method: 'POST',
+				method: "POST",
 				headers: {
-					'X-API-Key': apiKey,
+					"X-API-Key": apiKey,
 				},
-				body: formData
+				body: formData,
 			});
 
 			if (!response.ok) {
@@ -221,9 +240,9 @@ export default class MyPlugin extends Plugin {
 			}
 
 			const payload = result.data?.uploadNoteAsset;
-			if (payload?.__typename === 'ErrorPayload') {
+			if (payload?.__typename === "ErrorPayload") {
 				new Notice(`Asset upload failed: ${payload.message}`);
-			} else if (payload?.__typename === 'UploadNoteAssetPayload' && !payload.uploadSkipped) {
+			} else if (payload?.__typename === "UploadNoteAssetPayload" && !payload.uploadSkipped) {
 				new Notice(`✅ Asset uploaded: ${relativePath}`);
 			}
 		} catch (error) {
@@ -247,18 +266,18 @@ export default class MyPlugin extends Plugin {
 
 		const variables = {
 			input: {
-				paths: paths
-			}
+				paths: paths,
+			},
 		};
 
 		try {
 			const response = await fetch(`${apiUrl}/graphql`, {
-				method: 'POST',
+				method: "POST",
 				headers: {
-					'Content-Type': 'application/json',
-					'X-API-Key': apiKey,
+					"Content-Type": "application/json",
+					"X-API-Key": apiKey,
 				},
-				body: JSON.stringify({ query, variables })
+				body: JSON.stringify({ query, variables }),
 			});
 
 			if (!response.ok) {
@@ -266,10 +285,10 @@ export default class MyPlugin extends Plugin {
 			}
 
 			const result = await response.json();
-			
+
 			if (result.errors) {
-				console.error('GraphQL errors hiding notes:', result.errors);
-				new Notice(`Error hiding notes: ${result.errors[0]?.message || 'Unknown error'}`);
+				console.error("GraphQL errors hiding notes:", result.errors);
+				new Notice(`Error hiding notes: ${result.errors[0]?.message || "Unknown error"}`);
 				return false;
 			} else {
 				const hideResult = result.data?.hideNotes;
@@ -282,15 +301,20 @@ export default class MyPlugin extends Plugin {
 				}
 			}
 		} catch (error) {
-			console.error('Error hiding notes:', error);
+			console.error("Error hiding notes:", error);
 			new Notice(`Error hiding notes: ${error.message}`);
 			return false;
 		}
-		
+
 		return false;
 	}
 
-	private async pushUpdatesGraphql(apiUrl: string, apiKey: string, updates: Array<{path: string, content: string}>, syncBaseFolder?: TFolder): Promise<void> {
+	private async pushUpdatesGraphql(
+		apiUrl: string,
+		apiKey: string,
+		updates: Array<{ path: string; content: string }>,
+		syncBaseFolder?: TFolder
+	): Promise<void> {
 		const query = `
 			mutation PushNotes($input: PushNotesInput!) {
 				pushNotes(input: $input) {
@@ -313,18 +337,18 @@ export default class MyPlugin extends Plugin {
 
 		const variables = {
 			input: {
-				updates: updates
-			}
+				updates: updates,
+			},
 		};
 
 		try {
 			const response = await fetch(`${apiUrl}/graphql`, {
-				method: 'POST',
+				method: "POST",
 				headers: {
-					'Content-Type': 'application/json',
-					'X-API-Key': apiKey,
+					"Content-Type": "application/json",
+					"X-API-Key": apiKey,
 				},
-				body: JSON.stringify({ query, variables })
+				body: JSON.stringify({ query, variables }),
 			});
 
 			if (!response.ok) {
@@ -332,15 +356,15 @@ export default class MyPlugin extends Plugin {
 			}
 
 			const result = await response.json();
-			
+
 			if (result.errors) {
-				console.error('GraphQL errors:', result.errors);
-				new Notice(`GraphQL error: ${result.errors[0]?.message || 'Unknown error'}`);
+				console.error("GraphQL errors:", result.errors);
+				new Notice(`GraphQL error: ${result.errors[0]?.message || "Unknown error"}`);
 			} else {
 				const pushResult = result.data?.pushNotes;
 				if (pushResult?.notes) {
 					new Notice(`✅ Successfully synced ${updates.length} files`);
-					
+
 					// Process assets for each note
 					for (const note of pushResult.notes) {
 						await this.processNoteAssets(apiUrl, apiKey, note, syncBaseFolder);
@@ -348,7 +372,7 @@ export default class MyPlugin extends Plugin {
 				}
 			}
 		} catch (error) {
-			console.error('Error pushing updates:', error);
+			console.error("Error pushing updates:", error);
 			new Notice(`Error pushing updates: ${error.message}`);
 		}
 	}
@@ -362,17 +386,17 @@ export default class MyPlugin extends Plugin {
 			try {
 				const relativePath = asset.path;
 				const serverHash = asset.sha256Hash;
-				
+
 				const absolutePath = this.resolveAssetPath(relativePath, note.path, syncBaseFolder);
 				const file = this.app.vault.getAbstractFileByPath(absolutePath);
-				
+
 				if (!file || !(file instanceof TFile)) {
 					continue;
 				}
 
 				const arrayBuffer = await this.app.vault.readBinary(file);
 				const localHash = await this.sha256HashBuffer(arrayBuffer);
-				
+
 				if (!serverHash || serverHash !== localHash) {
 					new Notice(`Uploading asset: ${relativePath}`);
 					await this.uploadAsset(apiUrl, apiKey, note.id, absolutePath, relativePath, localHash);
@@ -384,69 +408,71 @@ export default class MyPlugin extends Plugin {
 	}
 
 	private resolveAssetPath(relativePath: string, notePath: string, syncBaseFolder?: TFolder): string {
-		if (relativePath.startsWith('/')) {
+		if (relativePath.startsWith("/")) {
 			return relativePath.slice(1);
 		}
-		
-		if (relativePath.startsWith('./')) {
-			const noteDir = notePath.split('/').slice(0, -1).join('/');
+
+		if (relativePath.startsWith("./")) {
+			const noteDir = notePath.split("/").slice(0, -1).join("/");
 			return noteDir ? `${noteDir}/${relativePath.slice(2)}` : relativePath.slice(2);
 		}
-		
-		if (relativePath.startsWith('../')) {
-			const notePathParts = notePath.split('/').slice(0, -1);
-			const relativePathParts = relativePath.split('/');
-			
+
+		if (relativePath.startsWith("../")) {
+			const notePathParts = notePath.split("/").slice(0, -1);
+			const relativePathParts = relativePath.split("/");
+
 			let i = 0;
-			while (i < relativePathParts.length && relativePathParts[i] === '..') {
+			while (i < relativePathParts.length && relativePathParts[i] === "..") {
 				notePathParts.pop();
 				i++;
 			}
-			
-			return [...notePathParts, ...relativePathParts.slice(i)].join('/');
+
+			return [...notePathParts, ...relativePathParts.slice(i)].join("/");
 		}
-		
+
 		const candidatePaths = [];
-		
-		const noteDir = notePath.split('/').slice(0, -1).join('/');
+
+		const noteDir = notePath.split("/").slice(0, -1).join("/");
 		if (noteDir) {
 			candidatePaths.push(`${noteDir}/${relativePath}`);
 		}
-		
+
 		if (syncBaseFolder && syncBaseFolder.path) {
 			candidatePaths.push(`${syncBaseFolder.path}/${relativePath}`);
 		}
-		
+
 		candidatePaths.push(relativePath);
-		
+
 		for (const candidatePath of candidatePaths) {
 			const file = this.app.vault.getAbstractFileByPath(candidatePath);
 			if (file) {
 				return candidatePath;
 			}
 		}
-		
+
 		return candidatePaths[0] || relativePath;
 	}
 
 	private async sha256HashBuffer(buffer: ArrayBuffer): Promise<string> {
-		const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+		const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
 		const hashArray = new Uint8Array(hashBuffer);
-		return Array.from(hashArray).map(b => b.toString(16).padStart(2, '0')).join('');
+		return Array.from(hashArray)
+			.map((b) => b.toString(16).padStart(2, "0"))
+			.join("");
 	}
 
 	async syncDirectory(syncDir: SyncDir): Promise<void> {
 		if (!syncDir.path || !syncDir.apiUrl || !syncDir.apiKey) {
-			new Notice('Sync directory configuration is incomplete');
+			new Notice("Sync directory configuration is incomplete");
 			return;
 		}
 
-		new Notice('Starting sync...');
+		new Notice("Starting sync...");
 
 		try {
 			const serverHashes = await this.fetchServerHashes(syncDir.apiUrl, syncDir.apiKey);
 			const serverEmpty = Object.keys(serverHashes).length === 0;
-			const updates: Array<{path: string, content: string}> = [];
+			const updates: Array<{ path: string; content: string }> = [];
 
 			const folder = this.app.vault.getAbstractFileByPath(syncDir.path);
 			if (!folder || !(folder instanceof TFolder)) {
@@ -456,7 +482,7 @@ export default class MyPlugin extends Plugin {
 
 			const files = this.getAllMarkdownFiles(folder);
 			const localPaths = new Set<string>();
-			
+
 			for (const file of files) {
 				const content = await this.app.vault.read(file);
 				const localHash = await this.sha256Hash(content);
@@ -467,7 +493,7 @@ export default class MyPlugin extends Plugin {
 				if (serverEmpty || remoteHash !== localHash) {
 					updates.push({
 						path: relativePath,
-						content: content
+						content: content,
 					});
 				}
 			}
@@ -482,9 +508,9 @@ export default class MyPlugin extends Plugin {
 
 			// Always send PushNotes mutation to get asset information
 			await this.pushUpdatesGraphql(syncDir.apiUrl, syncDir.apiKey, updates, folder);
-			
+
 			if (updates.length === 0) {
-				new Notice('✅ All files are up to date');
+				new Notice("✅ All files are up to date");
 			}
 
 			// Hide notes that exist on server but not locally
@@ -492,35 +518,34 @@ export default class MyPlugin extends Plugin {
 				new Notice(`🙈 Hiding ${serverOnlyPaths.length} notes that don't exist locally...`);
 				await this.hideNotesGraphql(syncDir.apiUrl, syncDir.apiKey, serverOnlyPaths);
 			}
-
 		} catch (error) {
-			console.error('Sync error:', error);
+			console.error("Sync error:", error);
 			new Notice(`Sync error: ${error.message}`);
 		}
 	}
 
 	private getAllMarkdownFiles(folder: TFolder): TFile[] {
 		const files: TFile[] = [];
-		
+
 		for (const child of folder.children) {
-			if (child instanceof TFile && child.extension === 'md') {
+			if (child instanceof TFile && child.extension === "md") {
 				files.push(child);
 			} else if (child instanceof TFolder) {
 				files.push(...this.getAllMarkdownFiles(child));
 			}
 		}
-		
+
 		return files;
 	}
 
 	private getRelativePath(file: TFile, baseFolder: TFolder): string {
 		const basePath = baseFolder.path;
 		const filePath = file.path;
-		
+
 		if (filePath.startsWith(basePath)) {
 			return filePath.slice(basePath.length + (basePath.length > 0 ? 1 : 0));
 		}
-		
+
 		return filePath;
 	}
 }
@@ -536,12 +561,16 @@ class SyncDirectoryModal extends Modal {
 	onOpen() {
 		const { contentEl } = this;
 		contentEl.empty();
-		contentEl.createEl('h2', { text: 'Select sync directory' });
+		contentEl.createEl("h2", { text: "Select sync directory" });
 
 		if (this.plugin.settings.syncDirs.length === 0) {
-			contentEl.createEl('p', { text: 'No sync directories configured. Please add one in settings first.' });
-			const settingsBtn = contentEl.createEl('button', { text: 'Open Settings' });
-			settingsBtn.addEventListener('click', () => {
+			contentEl.createEl("p", {
+				text: "No sync directories configured. Please add one in settings first.",
+			});
+			const settingsBtn = contentEl.createEl("button", {
+				text: "Open Settings",
+			});
+			settingsBtn.addEventListener("click", () => {
 				this.close();
 				// @ts-ignore
 				this.app.setting.open();
@@ -552,12 +581,12 @@ class SyncDirectoryModal extends Modal {
 		}
 
 		this.plugin.settings.syncDirs.forEach((dir, index) => {
-			const dirEl = contentEl.createEl('div', { cls: 'sync-dir-item' });
-			dirEl.createEl('h3', { text: dir.path || `Directory ${index + 1}` });
-			dirEl.createEl('p', { text: `API URL: ${dir.apiUrl}` });
-			
-			const syncBtn = dirEl.createEl('button', { text: 'Sync this directory' });
-			syncBtn.addEventListener('click', async () => {
+			const dirEl = contentEl.createEl("div", { cls: "sync-dir-item" });
+			dirEl.createEl("h3", { text: dir.path || `Directory ${index + 1}` });
+			dirEl.createEl("p", { text: `API URL: ${dir.apiUrl}` });
+
+			const syncBtn = dirEl.createEl("button", { text: "Sync this directory" });
+			syncBtn.addEventListener("click", async () => {
 				this.close();
 				await this.plugin.syncDirectory(dir);
 			});
@@ -585,14 +614,14 @@ class AISuggestionsView extends ItemView {
 	constructor(leaf: WorkspaceLeaf, plugin: MyPlugin) {
 		super(leaf);
 		this.plugin = plugin;
-		
+
 		// Create the event handler with debouncing
 		this.activeFileChangeHandler = () => {
 			// Clear any existing timeout
 			if (this.refreshTimeout) {
 				clearTimeout(this.refreshTimeout);
 			}
-			
+
 			// Set a new timeout to refresh after 300ms of no changes
 			this.refreshTimeout = setTimeout(async () => {
 				await this.refreshSuggestions();
@@ -605,50 +634,48 @@ class AISuggestionsView extends ItemView {
 	}
 
 	getDisplayText() {
-		return 'AI Suggestions';
+		return "AI Suggestions";
 	}
 
 	getIcon() {
-		return 'bot';
+		return "bot";
 	}
 
 	async onOpen() {
 		// Register the event listener for active file changes
-		this.registerEvent(
-			this.app.workspace.on('active-leaf-change', this.activeFileChangeHandler)
-		);
-		
+		this.registerEvent(this.app.workspace.on("active-leaf-change", this.activeFileChangeHandler));
+
 		await this.refreshSuggestions();
 	}
 
 	async refreshSuggestions() {
 		const { contentEl } = this;
 		const activeFile = this.app.workspace.getActiveFile();
-		
-		contentEl.empty();
-		contentEl.createEl('h4', { text: 'AI Suggestions' });
 
-		if (!activeFile || activeFile.extension !== 'md') {
-			contentEl.createEl('p', { 
-				text: 'Please open a markdown file to see AI suggestions.',
-				cls: 'ai-suggestions-empty'
+		contentEl.empty();
+		contentEl.createEl("h4", { text: "AI Suggestions" });
+
+		if (!activeFile || activeFile.extension !== "md") {
+			contentEl.createEl("p", {
+				text: "Please open a markdown file to see AI suggestions.",
+				cls: "ai-suggestions-empty",
 			});
 			return;
 		}
 
-		contentEl.createEl('p', { text: `Analyzing ${activeFile.name}...` });
+		contentEl.createEl("p", { text: `Analyzing ${activeFile.name}...` });
 
 		try {
 			// Read file content
 			const content = await this.app.vault.read(activeFile);
-			
+
 			// Send to AI endpoint
-			const response = await fetch('http://localhost:8081/debug/demoai', {
-				method: 'POST',
+			const response = await fetch("http://localhost:8081/debug/demoai", {
+				method: "POST",
 				headers: {
-					'Content-Type': 'text/plain',
+					"Content-Type": "text/plain",
 				},
-				body: content
+				body: content,
 			});
 
 			if (!response.ok) {
@@ -660,104 +687,109 @@ class AISuggestionsView extends ItemView {
 
 			// Clear loading message and display results
 			contentEl.empty();
-			contentEl.createEl('h4', { text: 'AI Suggestions' });
-			
+			contentEl.createEl("h4", { text: "AI Suggestions" });
+
 			// Add refresh button
-			const headerEl = contentEl.createEl('div', { cls: 'ai-suggestions-header' });
-			headerEl.style.display = 'flex';
-			headerEl.style.justifyContent = 'space-between';
-			headerEl.style.alignItems = 'center';
-			headerEl.style.marginBottom = '10px';
-			
-			headerEl.createEl('p', { text: `File: ${activeFile.name}` });
-			const refreshBtn = headerEl.createEl('button', { text: '↻' });
-			refreshBtn.style.fontSize = '18px';
-			refreshBtn.style.padding = '2px 8px';
-			refreshBtn.addEventListener('click', async () => {
+			const headerEl = contentEl.createEl("div", {
+				cls: "ai-suggestions-header",
+			});
+			headerEl.style.display = "flex";
+			headerEl.style.justifyContent = "space-between";
+			headerEl.style.alignItems = "center";
+			headerEl.style.marginBottom = "10px";
+
+			headerEl.createEl("p", { text: `File: ${activeFile.name}` });
+			const refreshBtn = headerEl.createEl("button", { text: "↻" });
+			refreshBtn.style.fontSize = "18px";
+			refreshBtn.style.padding = "2px 8px";
+			refreshBtn.addEventListener("click", async () => {
 				await this.refreshSuggestions();
 			});
 
 			if (this.issues.length === 0) {
-				contentEl.createEl('p', { text: 'No issues found!' });
+				contentEl.createEl("p", { text: "No issues found!" });
 				return;
 			}
 
 			// Display issues
-			const issuesContainer = contentEl.createEl('div', { cls: 'ai-issues-container' });
-			issuesContainer.style.overflowY = 'auto';
-			
+			const issuesContainer = contentEl.createEl("div", {
+				cls: "ai-issues-container",
+			});
+			issuesContainer.style.overflowY = "auto";
+
 			this.issues.forEach((issue, index) => {
-				const issueEl = issuesContainer.createEl('div', { cls: 'ai-issue-item' });
-				issueEl.style.marginBottom = '10px';
-				issueEl.style.padding = '8px';
-				issueEl.style.border = '1px solid var(--background-modifier-border)';
-				issueEl.style.borderRadius = '4px';
-				issueEl.style.fontSize = '0.9em';
-				
+				const issueEl = issuesContainer.createEl("div", {
+					cls: "ai-issue-item",
+				});
+				issueEl.style.marginBottom = "10px";
+				issueEl.style.padding = "8px";
+				issueEl.style.border = "1px solid var(--background-modifier-border)";
+				issueEl.style.borderRadius = "4px";
+				issueEl.style.fontSize = "0.9em";
+
 				// Issue marker
-				const markerEl = issueEl.createEl('div', { cls: 'ai-issue-marker' });
-				markerEl.createEl('strong', { text: 'Found: ' });
-				markerEl.createEl('code', { text: issue.marker });
-				markerEl.style.marginBottom = '4px';
-				
+				const markerEl = issueEl.createEl("div", { cls: "ai-issue-marker" });
+				markerEl.createEl("strong", { text: "Found: " });
+				markerEl.createEl("code", { text: issue.marker });
+				markerEl.style.marginBottom = "4px";
+
 				// Fix suggestion
-				const fixEl = issueEl.createEl('div', { cls: 'ai-issue-fix' });
-				fixEl.createEl('strong', { text: 'Fix: ' });
-				fixEl.createEl('code', { text: issue.fix });
-				fixEl.style.marginBottom = '4px';
-				
+				const fixEl = issueEl.createEl("div", { cls: "ai-issue-fix" });
+				fixEl.createEl("strong", { text: "Fix: " });
+				fixEl.createEl("code", { text: issue.fix });
+				fixEl.style.marginBottom = "4px";
+
 				// Comment
-				const commentEl = issueEl.createEl('div', { cls: 'ai-issue-comment' });
-				commentEl.createEl('em', { text: issue.comment });
-				commentEl.style.marginBottom = '8px';
-				commentEl.style.color = 'var(--text-muted)';
-				commentEl.style.fontSize = '0.9em';
-				
+				const commentEl = issueEl.createEl("div", { cls: "ai-issue-comment" });
+				commentEl.createEl("em", { text: issue.comment });
+				commentEl.style.marginBottom = "8px";
+				commentEl.style.color = "var(--text-muted)";
+				commentEl.style.fontSize = "0.9em";
+
 				// Buttons container
-				const buttonsEl = issueEl.createEl('div', { cls: 'ai-issue-buttons' });
-				buttonsEl.style.display = 'flex';
-				buttonsEl.style.gap = '5px';
-				
+				const buttonsEl = issueEl.createEl("div", { cls: "ai-issue-buttons" });
+				buttonsEl.style.display = "flex";
+				buttonsEl.style.gap = "5px";
+
 				// Show button
-				const showBtn = buttonsEl.createEl('button', { text: 'Show' });
-				showBtn.style.fontSize = '0.9em';
-				showBtn.addEventListener('click', async () => {
+				const showBtn = buttonsEl.createEl("button", { text: "Show" });
+				showBtn.style.fontSize = "0.9em";
+				showBtn.addEventListener("click", async () => {
 					await this.showMarkerInEditor(activeFile, issue.marker);
 				});
-				
+
 				// Fix button
-				const fixBtn = buttonsEl.createEl('button', { text: 'Apply Fix' });
-				fixBtn.style.fontSize = '0.9em';
-				fixBtn.addEventListener('click', async () => {
+				const fixBtn = buttonsEl.createEl("button", { text: "Apply Fix" });
+				fixBtn.style.fontSize = "0.9em";
+				fixBtn.addEventListener("click", async () => {
 					await this.applyFix(activeFile, issue);
 					fixBtn.disabled = true;
-					fixBtn.textContent = 'Fixed!';
+					fixBtn.textContent = "Fixed!";
 					new Notice(`Replaced "${issue.marker}" with "${issue.fix}"`);
 				});
 			});
-			
+
 			// Add "Fix All" button if multiple issues
 			if (this.issues.length > 1) {
-				const fixAllBtn = contentEl.createEl('button', { 
-					text: 'Fix All Issues',
-					cls: 'mod-cta'
+				const fixAllBtn = contentEl.createEl("button", {
+					text: "Fix All Issues",
+					cls: "mod-cta",
 				});
-				fixAllBtn.style.marginTop = '10px';
-				fixAllBtn.style.width = '100%';
-				fixAllBtn.addEventListener('click', async () => {
+				fixAllBtn.style.marginTop = "10px";
+				fixAllBtn.style.width = "100%";
+				fixAllBtn.addEventListener("click", async () => {
 					await this.applyAllFixes(activeFile);
 					fixAllBtn.disabled = true;
-					fixAllBtn.textContent = 'All Fixed!';
+					fixAllBtn.textContent = "All Fixed!";
 					new Notice(`Fixed ${this.issues.length} issues`);
 					await this.refreshSuggestions();
 				});
 			}
-
 		} catch (error) {
 			contentEl.empty();
-			contentEl.createEl('h4', { text: 'AI Suggestions' });
-			contentEl.createEl('p', { text: `Error: ${error.message}` });
-			console.error('AI suggestions error:', error);
+			contentEl.createEl("h4", { text: "AI Suggestions" });
+			contentEl.createEl("p", { text: `Error: ${error.message}` });
+			console.error("AI suggestions error:", error);
 		}
 	}
 
@@ -768,43 +800,41 @@ class AISuggestionsView extends ItemView {
 
 		// Make sure we're viewing the correct file
 		const viewState = activeLeaf.getViewState();
-		if (viewState.type !== 'markdown' || viewState.state?.file !== file.path) {
+		if (viewState.type !== "markdown" || viewState.state?.file !== file.path) {
 			// Open the file if it's not already open
 			await activeLeaf.openFile(file);
 		}
 
 		// Get the editor
-		const editor = activeLeaf.view instanceof MarkdownView 
-			? activeLeaf.view.editor 
-			: null;
-			
+		const editor = activeLeaf.view instanceof MarkdownView ? activeLeaf.view.editor : null;
+
 		if (!editor) {
-			new Notice('Could not access the editor');
+			new Notice("Could not access the editor");
 			return;
 		}
 
 		// Get the content to find the marker position
 		const content = editor.getValue();
 		const markerIndex = content.indexOf(marker);
-		
+
 		if (markerIndex === -1) {
 			new Notice(`Could not find "${marker}" in the file`);
 			return;
 		}
 
 		// Calculate line and character position
-		const lines = content.substring(0, markerIndex).split('\n');
+		const lines = content.substring(0, markerIndex).split("\n");
 		const line = lines.length - 1;
 		const ch = lines[lines.length - 1].length;
-		
+
 		// Create position objects
 		const from = { line, ch };
 		const to = { line, ch: ch + marker.length };
-		
+
 		// Set selection and scroll to it
 		editor.setSelection(from, to);
 		editor.scrollIntoView({ from, to }, true);
-		
+
 		// Focus the editor
 		editor.focus();
 	}
@@ -848,14 +878,12 @@ class SampleSettingTab extends PluginSettingTab {
 		new Setting(this.containerEl).setName("Settings").setHeading();
 
 		const desc = document.createDocumentFragment();
-		desc.append(
-			"You can sync multiple directories to multiple remote apps."
-		);
+		desc.append("You can sync multiple directories to multiple remote apps.");
 
 		new Setting(this.containerEl).setDesc(desc);
 
 		const buttonsContainer = new Setting(this.containerEl);
-		buttonsContainer.addButton(button => {
+		buttonsContainer.addButton((button) => {
 			button
 				.setButtonText("Add sync directory")
 				.setCta()
@@ -865,32 +893,29 @@ class SampleSettingTab extends PluginSettingTab {
 						apiKey: "",
 						apiUrl: "",
 						error: undefined,
-					})
+					});
 					this.plugin.saveSettings();
 					// Force refresh
 					this.display();
-				})
-			});
+				});
+		});
 
 		if (this.plugin.settings.syncDirs.length > 0) {
-			buttonsContainer.addButton(button => {
-				button
-					.setButtonText("Test all connections")
-					.onClick(async () => {
-						for (let i = 0; i < this.plugin.settings.syncDirs.length; i++) {
-							const dir = this.plugin.settings.syncDirs[i];
-							const error = await this.plugin.testConnection(dir);
-							this.plugin.settings.syncDirs[i].error = error;
-						}
-						this.plugin.saveSettings();
-						this.display();
-					})
+			buttonsContainer.addButton((button) => {
+				button.setButtonText("Test all connections").onClick(async () => {
+					for (let i = 0; i < this.plugin.settings.syncDirs.length; i++) {
+						const dir = this.plugin.settings.syncDirs[i];
+						const error = await this.plugin.testConnection(dir);
+						this.plugin.settings.syncDirs[i].error = error;
+					}
+					this.plugin.saveSettings();
+					this.display();
+				});
 			});
 		}
 
-
 		this.plugin.settings.syncDirs.forEach((dir, dirIndex) => {
-			const s = new Setting(this.containerEl)
+			const s = new Setting(this.containerEl);
 			s.addSearch((cb) => {
 				new FolderSuggest(this.app, cb.inputEl);
 
@@ -900,11 +925,12 @@ class SampleSettingTab extends PluginSettingTab {
 						this.plugin.settings.syncDirs[dirIndex].path = newPath;
 						this.plugin.settings.syncDirs[dirIndex].error = undefined;
 						this.plugin.saveSettings();
-					})
-			})
+					});
+			});
 
 			s.addText((text) => {
-				text.setPlaceholder("API URL")
+				text
+					.setPlaceholder("API URL")
 					.setValue(dir.apiUrl)
 					.onChange((newApiUrl) => {
 						this.plugin.settings.syncDirs[dirIndex].apiUrl = newApiUrl;
@@ -914,14 +940,15 @@ class SampleSettingTab extends PluginSettingTab {
 			});
 
 			s.addText((text) => {
-				text.setPlaceholder("API Key")
+				text
+					.setPlaceholder("API Key")
 					.setValue(dir.apiKey)
 					.onChange((newApiKey) => {
 						this.plugin.settings.syncDirs[dirIndex].apiKey = newApiKey;
 						this.plugin.settings.syncDirs[dirIndex].error = undefined;
 						this.plugin.saveSettings();
 					});
-			})
+			});
 
 			s.addExtraButton((button) => {
 				button
@@ -949,21 +976,21 @@ class SampleSettingTab extends PluginSettingTab {
 
 			// Show error message if exists
 			if (dir.error) {
-				const errorEl = this.containerEl.createEl('div', {
-					cls: 'setting-item-description',
-					text: `❌ Error: ${dir.error}`
+				const errorEl = this.containerEl.createEl("div", {
+					cls: "setting-item-description",
+					text: `❌ Error: ${dir.error}`,
 				});
-				errorEl.style.color = 'var(--text-error)';
-				errorEl.style.marginTop = '5px';
+				errorEl.style.color = "var(--text-error)";
+				errorEl.style.marginTop = "5px";
 			} else if (dir.error === null) {
-				const successEl = this.containerEl.createEl('div', {
-					cls: 'setting-item-description',
-					text: '✅ Connection successful'
+				const successEl = this.containerEl.createEl("div", {
+					cls: "setting-item-description",
+					text: "✅ Connection successful",
 				});
-				successEl.style.color = 'var(--text-success)';
-				successEl.style.marginTop = '5px';
+				successEl.style.color = "var(--text-success)";
+				successEl.style.marginTop = "5px";
 			}
-		})
+		});
 
 		// new Setting(containerEl)
 		// 	.setName('Setting #11')
@@ -977,4 +1004,3 @@ class SampleSettingTab extends PluginSettingTab {
 		// 		}));
 	}
 }
-
