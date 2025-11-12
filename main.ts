@@ -905,7 +905,7 @@ class SampleSettingTab extends PluginSettingTab {
 				.setCta()
 				.onClick(() => {
 					this.plugin.settings.syncDirs.push({
-						path: "",
+						path: "/",
 						apiKey: "",
 						apiUrl: "",
 						error: undefined,
@@ -947,7 +947,7 @@ class SampleSettingTab extends PluginSettingTab {
 			s.addSearch((cb) => {
 				new FolderSuggest(this.app, cb.inputEl);
 
-				cb.setPlaceholder("Example: folder1/folder2")
+				cb.setPlaceholder("Path to folder (/ for vault root)")
 					.setValue(dir.path)
 					.onChange((newPath) => {
 						this.plugin.settings.syncDirs[dirIndex].path = newPath;
