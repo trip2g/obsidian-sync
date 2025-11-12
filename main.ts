@@ -552,7 +552,7 @@ export default class MyPlugin extends Plugin {
 		const files: TFile[] = [];
 
 		for (const child of folder.children) {
-			if (child instanceof TFile && child.extension === "md") {
+			if (child instanceof TFile && (child.extension === "md" || child.extension === "html")) {
 				if (!this.shouldExcludeFile(child.path)) {
 					files.push(child);
 				}
