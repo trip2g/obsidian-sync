@@ -919,13 +919,25 @@ class SampleSettingTab extends PluginSettingTab {
 		if (this.plugin.settings.syncDirs.length > 0) {
 			buttonsContainer.addButton((button) => {
 				button.setButtonText("Test all connections").onClick(async () => {
+					let successCount = 0;
+					let failCount = 0;
 					for (let i = 0; i < this.plugin.settings.syncDirs.length; i++) {
 						const dir = this.plugin.settings.syncDirs[i];
 						const error = await this.plugin.testConnection(dir);
 						this.plugin.settings.syncDirs[i].error = error;
+						if (error === null) {
+							successCount++;
+						} else {
+							failCount++;
+						}
 					}
 					this.plugin.saveSettings();
 					this.display();
+					if (failCount === 0) {
+						new Notice(`✅ All connections successful (${successCount})`);
+					} else {
+						new Notice(`⚠️ ${successCount} successful, ${failCount} failed`);
+					}
 				});
 			});
 		}
@@ -975,6 +987,11 @@ class SampleSettingTab extends PluginSettingTab {
 						this.plugin.settings.syncDirs[dirIndex].error = error;
 						this.plugin.saveSettings();
 						this.display();
+						if (error === null) {
+							new Notice("✅ Connection successful");
+						} else {
+							new Notice(`❌ Connection failed: ${error}`);
+						}
 					});
 			});
 
