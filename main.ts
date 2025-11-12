@@ -19,7 +19,7 @@ type SyncDir = {
 	path: string;
 	apiKey: string;
 	apiUrl: string;
-	error?: string;
+	error?: string | null;
 };
 
 type NoteAsset = {
@@ -1015,13 +1015,6 @@ class SampleSettingTab extends PluginSettingTab {
 				});
 				errorEl.style.color = "var(--text-error)";
 				errorEl.style.marginTop = "5px";
-			} else if (dir.error === null) {
-				const successEl = this.containerEl.createEl("div", {
-					cls: "setting-item-description",
-					text: "✅ Connection successful",
-				});
-				successEl.style.color = "var(--text-success)";
-				successEl.style.marginTop = "5px";
 			}
 		});
 
