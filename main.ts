@@ -7,9 +7,6 @@ import {
 	Setting,
 	TFile,
 	TFolder,
-	ItemView,
-	WorkspaceLeaf,
-	MarkdownView,
 } from "obsidian";
 import { FolderSuggest } from "./FolderSuggest";
 
@@ -41,16 +38,11 @@ const DEFAULT_SETTINGS: MyPluginSettings = {
 	syncDirs: [],
 };
 
-const AI_SUGGESTIONS_VIEW_TYPE = "trip2g-ai-suggestions-view";
-
 export default class MyPlugin extends Plugin {
 	settings: MyPluginSettings;
 
 	async onload() {
 		await this.loadSettings();
-
-		// Register the AI suggestions view
-		this.registerView(AI_SUGGESTIONS_VIEW_TYPE, (leaf) => new AISuggestionsView(leaf, this));
 
 		// This creates an icon in the left ribbon.
 		this.addRibbonIcon("sync", "Trip2g Sync", (evt: MouseEvent) => {
@@ -63,49 +55,8 @@ export default class MyPlugin extends Plugin {
 			}
 		});
 
-		// Add AI suggestions icon
-		this.addRibbonIcon("bot", "Trip2g AI Suggestions", async (evt: MouseEvent) => {
-			this.activateAISuggestionsView();
-		});
-
 		// This adds a settings tab so the user can configure various aspects of the plugin
 		this.addSettingTab(new SampleSettingTab(this.app, this));
-	}
-
-	onunload() {
-		this.app.workspace.detachLeavesOfType(AI_SUGGESTIONS_VIEW_TYPE);
-	}
-
-	async activateAISuggestionsView() {
-		const { workspace } = this.app;
-
-		let leaf: WorkspaceLeaf | null = null;
-		const leaves = workspace.getLeavesOfType(AI_SUGGESTIONS_VIEW_TYPE);
-
-		if (leaves.length > 0) {
-			// A leaf with our view already exists, use it
-			leaf = leaves[0];
-		} else {
-			// Our view could not be found in the workspace, create a new leaf in the right sidebar
-			const rightLeaf = workspace.getRightLeaf(false);
-			if (rightLeaf) {
-				leaf = rightLeaf;
-				await leaf.setViewState({
-					type: AI_SUGGESTIONS_VIEW_TYPE,
-					active: true,
-				});
-			}
-		}
-
-		// Reveal the leaf in case it is in a collapsed sidebar
-		if (leaf) {
-			workspace.revealLeaf(leaf);
-			// Trigger refresh of the view
-			const view = leaf.view;
-			if (view instanceof AISuggestionsView) {
-				await view.refreshSuggestions();
-			}
-		}
 	}
 
 	async loadSettings() {
@@ -622,269 +573,6 @@ class SyncDirectoryModal extends Modal {
 	onClose() {
 		const { contentEl } = this;
 		contentEl.empty();
-	}
-}
-
-interface AIIssue {
-	marker: string;
-	fix: string;
-	comment: string;
-}
-
-class AISuggestionsView extends ItemView {
-	plugin: MyPlugin;
-	issues: AIIssue[] = [];
-	activeFileChangeHandler: () => void;
-	refreshTimeout: NodeJS.Timeout | null = null;
-
-	constructor(leaf: WorkspaceLeaf, plugin: MyPlugin) {
-		super(leaf);
-		this.plugin = plugin;
-
-		// Create the event handler with debouncing
-		this.activeFileChangeHandler = () => {
-			// Clear any existing timeout
-			if (this.refreshTimeout) {
-				clearTimeout(this.refreshTimeout);
-			}
-
-			// Set a new timeout to refresh after 300ms of no changes
-			this.refreshTimeout = setTimeout(async () => {
-				await this.refreshSuggestions();
-			}, 300);
-		};
-	}
-
-	getViewType() {
-		return AI_SUGGESTIONS_VIEW_TYPE;
-	}
-
-	getDisplayText() {
-		return "AI Suggestions";
-	}
-
-	getIcon() {
-		return "bot";
-	}
-
-	async onOpen() {
-		// Register the event listener for active file changes
-		this.registerEvent(this.app.workspace.on("active-leaf-change", this.activeFileChangeHandler));
-
-		await this.refreshSuggestions();
-	}
-
-	async refreshSuggestions() {
-		const { contentEl } = this;
-		const activeFile = this.app.workspace.getActiveFile();
-
-		contentEl.empty();
-		contentEl.createEl("h4", { text: "AI Suggestions" });
-
-		if (!activeFile || activeFile.extension !== "md") {
-			contentEl.createEl("p", {
-				text: "Please open a markdown file to see AI suggestions.",
-				cls: "ai-suggestions-empty",
-			});
-			return;
-		}
-
-		contentEl.createEl("p", { text: `Analyzing ${activeFile.name}...` });
-
-		try {
-			// Read file content
-			const content = await this.app.vault.read(activeFile);
-
-			// Send to AI endpoint
-			const response = await fetch("http://localhost:8081/debug/demoai", {
-				method: "POST",
-				headers: {
-					"Content-Type": "text/plain",
-				},
-				body: content,
-			});
-
-			if (!response.ok) {
-				throw new Error(`HTTP error! status: ${response.status}`);
-			}
-
-			const data = await response.json();
-			this.issues = data.issues || [];
-
-			// Clear loading message and display results
-			contentEl.empty();
-			contentEl.createEl("h4", { text: "AI Suggestions" });
-
-			// Add refresh button
-			const headerEl = contentEl.createEl("div", {
-				cls: "ai-suggestions-header",
-			});
-			headerEl.style.display = "flex";
-			headerEl.style.justifyContent = "space-between";
-			headerEl.style.alignItems = "center";
-			headerEl.style.marginBottom = "10px";
-
-			headerEl.createEl("p", { text: `File: ${activeFile.name}` });
-			const refreshBtn = headerEl.createEl("button", { text: "↻" });
-			refreshBtn.style.fontSize = "18px";
-			refreshBtn.style.padding = "2px 8px";
-			refreshBtn.addEventListener("click", async () => {
-				await this.refreshSuggestions();
-			});
-
-			if (this.issues.length === 0) {
-				contentEl.createEl("p", { text: "No issues found!" });
-				return;
-			}
-
-			// Display issues
-			const issuesContainer = contentEl.createEl("div", {
-				cls: "ai-issues-container",
-			});
-			issuesContainer.style.overflowY = "auto";
-
-			this.issues.forEach((issue, index) => {
-				const issueEl = issuesContainer.createEl("div", {
-					cls: "ai-issue-item",
-				});
-				issueEl.style.marginBottom = "10px";
-				issueEl.style.padding = "8px";
-				issueEl.style.border = "1px solid var(--background-modifier-border)";
-				issueEl.style.borderRadius = "4px";
-				issueEl.style.fontSize = "0.9em";
-
-				// Issue marker
-				const markerEl = issueEl.createEl("div", { cls: "ai-issue-marker" });
-				markerEl.createEl("strong", { text: "Found: " });
-				markerEl.createEl("code", { text: issue.marker });
-				markerEl.style.marginBottom = "4px";
-
-				// Fix suggestion
-				const fixEl = issueEl.createEl("div", { cls: "ai-issue-fix" });
-				fixEl.createEl("strong", { text: "Fix: " });
-				fixEl.createEl("code", { text: issue.fix });
-				fixEl.style.marginBottom = "4px";
-
-				// Comment
-				const commentEl = issueEl.createEl("div", { cls: "ai-issue-comment" });
-				commentEl.createEl("em", { text: issue.comment });
-				commentEl.style.marginBottom = "8px";
-				commentEl.style.color = "var(--text-muted)";
-				commentEl.style.fontSize = "0.9em";
-
-				// Buttons container
-				const buttonsEl = issueEl.createEl("div", { cls: "ai-issue-buttons" });
-				buttonsEl.style.display = "flex";
-				buttonsEl.style.gap = "5px";
-
-				// Show button
-				const showBtn = buttonsEl.createEl("button", { text: "Show" });
-				showBtn.style.fontSize = "0.9em";
-				showBtn.addEventListener("click", async () => {
-					await this.showMarkerInEditor(activeFile, issue.marker);
-				});
-
-				// Fix button
-				const fixBtn = buttonsEl.createEl("button", { text: "Apply Fix" });
-				fixBtn.style.fontSize = "0.9em";
-				fixBtn.addEventListener("click", async () => {
-					await this.applyFix(activeFile, issue);
-					fixBtn.disabled = true;
-					fixBtn.textContent = "Fixed!";
-					new Notice(`Replaced "${issue.marker}" with "${issue.fix}"`);
-				});
-			});
-
-			// Add "Fix All" button if multiple issues
-			if (this.issues.length > 1) {
-				const fixAllBtn = contentEl.createEl("button", {
-					text: "Fix All Issues",
-					cls: "mod-cta",
-				});
-				fixAllBtn.style.marginTop = "10px";
-				fixAllBtn.style.width = "100%";
-				fixAllBtn.addEventListener("click", async () => {
-					await this.applyAllFixes(activeFile);
-					fixAllBtn.disabled = true;
-					fixAllBtn.textContent = "All Fixed!";
-					new Notice(`Fixed ${this.issues.length} issues`);
-					await this.refreshSuggestions();
-				});
-			}
-		} catch (error) {
-			contentEl.empty();
-			contentEl.createEl("h4", { text: "AI Suggestions" });
-			contentEl.createEl("p", { text: `Error: ${error.message}` });
-			console.error("AI suggestions error:", error);
-		}
-	}
-
-	async showMarkerInEditor(file: TFile, marker: string) {
-		// Get the active editor
-		const activeLeaf = this.app.workspace.getMostRecentLeaf();
-		if (!activeLeaf) return;
-
-		// Make sure we're viewing the correct file
-		const viewState = activeLeaf.getViewState();
-		if (viewState.type !== "markdown" || viewState.state?.file !== file.path) {
-			// Open the file if it's not already open
-			await activeLeaf.openFile(file);
-		}
-
-		// Get the editor
-		const editor = activeLeaf.view instanceof MarkdownView ? activeLeaf.view.editor : null;
-
-		if (!editor) {
-			new Notice("Could not access the editor");
-			return;
-		}
-
-		// Get the content to find the marker position
-		const content = editor.getValue();
-		const markerIndex = content.indexOf(marker);
-
-		if (markerIndex === -1) {
-			new Notice(`Could not find "${marker}" in the file`);
-			return;
-		}
-
-		// Calculate line and character position
-		const lines = content.substring(0, markerIndex).split("\n");
-		const line = lines.length - 1;
-		const ch = lines[lines.length - 1].length;
-
-		// Create position objects
-		const from = { line, ch };
-		const to = { line, ch: ch + marker.length };
-
-		// Set selection and scroll to it
-		editor.setSelection(from, to);
-		editor.scrollIntoView({ from, to }, true);
-
-		// Focus the editor
-		editor.focus();
-	}
-
-	async applyFix(file: TFile, issue: AIIssue) {
-		const content = await this.app.vault.read(file);
-		const newContent = content.replace(issue.marker, issue.fix);
-		await this.app.vault.modify(file, newContent);
-	}
-
-	async applyAllFixes(file: TFile) {
-		let content = await this.app.vault.read(file);
-		for (const issue of this.issues) {
-			content = content.replace(issue.marker, issue.fix);
-		}
-		await this.app.vault.modify(file, content);
-	}
-
-	async onClose() {
-		// Clear any pending refresh
-		if (this.refreshTimeout) {
-			clearTimeout(this.refreshTimeout);
-		}
-		// Event listeners are automatically cleaned up by ItemView
 	}
 }
 
