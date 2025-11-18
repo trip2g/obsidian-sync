@@ -349,75 +349,53 @@ export default class MyPlugin extends Plugin {
 			return;
 		}
 
+		// Get the note file for source path context
+		let notePathInVault = note.path;
+		if (syncBaseFolder && syncBaseFolder.path && syncBaseFolder.path !== "/") {
+			notePathInVault = `${syncBaseFolder.path}/${note.path}`;
+		}
+
+		const noteFile = this.app.vault.getAbstractFileByPath(notePathInVault);
+
+		if (!noteFile || !(noteFile instanceof TFile)) {
+			console.warn(`Note file not found for asset resolution: ${notePathInVault}`);
+			return;
+		}
+
 		for (const asset of note.assets) {
 			try {
 				const relativePath = asset.path;
 				const serverHash = asset.sha256Hash;
 
-				const absolutePath = this.resolveAssetPath(relativePath, note.path, syncBaseFolder);
-				const file = this.app.vault.getAbstractFileByPath(absolutePath);
+				// Use Obsidian's built-in link resolution
+				const resolvedFile = this.app.metadataCache.getFirstLinkpathDest(
+					relativePath,
+					noteFile.path
+				);
 
-				if (!file || !(file instanceof TFile)) {
+				if (!resolvedFile || !(resolvedFile instanceof TFile)) {
+					console.warn(`Asset not found: ${relativePath} (from ${noteFile.path})`);
 					continue;
 				}
 
-				const arrayBuffer = await this.app.vault.readBinary(file);
+				const arrayBuffer = await this.app.vault.readBinary(resolvedFile);
 				const localHash = await this.sha256HashBuffer(arrayBuffer);
 
 				if (!serverHash || serverHash !== localHash) {
 					new Notice(`Uploading asset: ${relativePath}`);
-					await this.uploadAsset(apiUrl, apiKey, note.id, absolutePath, relativePath, localHash);
+					await this.uploadAsset(
+						apiUrl,
+						apiKey,
+						note.id,
+						resolvedFile.path,
+						relativePath,
+						localHash
+					);
 				}
 			} catch (error) {
 				console.error(`Error processing asset ${asset.path}:`, error);
 			}
 		}
-	}
-
-	private resolveAssetPath(relativePath: string, notePath: string, syncBaseFolder?: TFolder): string {
-		if (relativePath.startsWith("/")) {
-			return relativePath.slice(1);
-		}
-
-		if (relativePath.startsWith("./")) {
-			const noteDir = notePath.split("/").slice(0, -1).join("/");
-			return noteDir ? `${noteDir}/${relativePath.slice(2)}` : relativePath.slice(2);
-		}
-
-		if (relativePath.startsWith("../")) {
-			const notePathParts = notePath.split("/").slice(0, -1);
-			const relativePathParts = relativePath.split("/");
-
-			let i = 0;
-			while (i < relativePathParts.length && relativePathParts[i] === "..") {
-				notePathParts.pop();
-				i++;
-			}
-
-			return [...notePathParts, ...relativePathParts.slice(i)].join("/");
-		}
-
-		const candidatePaths = [];
-
-		const noteDir = notePath.split("/").slice(0, -1).join("/");
-		if (noteDir) {
-			candidatePaths.push(`${noteDir}/${relativePath}`);
-		}
-
-		if (syncBaseFolder && syncBaseFolder.path) {
-			candidatePaths.push(`${syncBaseFolder.path}/${relativePath}`);
-		}
-
-		candidatePaths.push(relativePath);
-
-		for (const candidatePath of candidatePaths) {
-			const file = this.app.vault.getAbstractFileByPath(candidatePath);
-			if (file) {
-				return candidatePath;
-			}
-		}
-
-		return candidatePaths[0] || relativePath;
 	}
 
 	private async sha256HashBuffer(buffer: ArrayBuffer): Promise<string> {
