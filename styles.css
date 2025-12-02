@@ -1,3 +1,11 @@
+/* Custom emoji from ce.trip2g.com */
+img[src*="ce.trip2g.com"] {
+	width: 20px !important;
+	height: 20px !important;
+	vertical-align: middle;
+	display: inline;
+}
+
 .sync-dir-item {
 	padding: 10px;
 	margin: 10px 0;

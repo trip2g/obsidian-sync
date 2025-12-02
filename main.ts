@@ -9,7 +9,6 @@ import {
 	TFolder,
 } from "obsidian";
 import { FolderSuggest } from "./FolderSuggest";
-import { TelegramEmojiManager } from "./telegramEmoji";
 
 // Remember to rename these classes and interfaces!
 
@@ -41,13 +40,9 @@ const DEFAULT_SETTINGS: MyPluginSettings = {
 
 export default class MyPlugin extends Plugin {
 	settings: MyPluginSettings;
-	emojiManagers: TelegramEmojiManager[] = [];
 
 	async onload() {
 		await this.loadSettings();
-
-		// Initialize emoji managers for all configured sync directories
-		this.initEmojiManagers();
 
 		// This creates an icon in the left ribbon.
 		this.addRibbonIcon("sync", "Trip2g Sync", (evt: MouseEvent) => {
@@ -64,43 +59,12 @@ export default class MyPlugin extends Plugin {
 		this.addSettingTab(new SampleSettingTab(this.app, this));
 	}
 
-	onunload() {
-		// Cleanup all emoji managers
-		for (const manager of this.emojiManagers) {
-			manager.cleanup();
-		}
-		this.emojiManagers = [];
-	}
-
-	private initEmojiManagers() {
-		// Cleanup existing managers
-		for (const manager of this.emojiManagers) {
-			manager.cleanup();
-		}
-		this.emojiManagers = [];
-
-		// Create new managers for each configured sync directory
-		for (const syncDir of this.settings.syncDirs) {
-			if (syncDir.apiUrl && syncDir.apiKey) {
-				const manager = new TelegramEmojiManager(
-					this.app,
-					syncDir.apiUrl,
-					syncDir.apiKey
-				);
-				manager.register(this);
-				this.emojiManagers.push(manager);
-			}
-		}
-	}
-
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
-		// Reinitialize emoji managers when settings change
-		this.initEmojiManagers();
 	}
 
 	private async sha256Hash(content: string): Promise<string> {
