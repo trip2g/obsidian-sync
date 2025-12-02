@@ -1,0 +1,258 @@
+import { Notice } from "obsidian";
+import type { ServerNotePath, ServerNoteContent, NoteWithAssets } from "./types";
+
+export class SyncApi {
+	constructor(
+		private apiUrl: string,
+		private apiKey: string
+	) {}
+
+	private async graphqlRequest<T>(query: string, variables?: Record<string, unknown>): Promise<T | null> {
+		try {
+			const response = await fetch(`${this.apiUrl}/graphql`, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					"X-API-Key": this.apiKey,
+				},
+				body: JSON.stringify({ query, variables }),
+			});
+
+			if (!response.ok) {
+				throw new Error(`HTTP error! status: ${response.status}`);
+			}
+
+			const data = await response.json();
+
+			if (data.errors) {
+				console.error("GraphQL errors:", data.errors);
+				new Notice(`GraphQL error: ${data.errors[0]?.message || "Unknown error"}`);
+				return null;
+			}
+
+			return data.data as T;
+		} catch (error) {
+			console.error("GraphQL request failed:", error);
+			new Notice(`API error: ${(error as Error).message}`);
+			return null;
+		}
+	}
+
+	async fetchServerHashes(): Promise<Map<string, string>> {
+		const query = `
+			query {
+				notePaths {
+					path: value
+					hash: latestContentHash
+				}
+			}
+		`;
+
+		const data = await this.graphqlRequest<{ notePaths: ServerNotePath[] }>(query);
+		const hashes = new Map<string, string>();
+
+		if (data?.notePaths) {
+			for (const item of data.notePaths) {
+				if (item.path && item.hash) {
+					hashes.set(item.path, item.hash);
+				}
+			}
+		}
+
+		return hashes;
+	}
+
+	async fetchNoteContent(path: string): Promise<string | null> {
+		const query = `
+			query($filter: NotePathsFilter) {
+				notePaths(filter: $filter) {
+					path: value
+					latestNoteView {
+						content
+					}
+				}
+			}
+		`;
+
+		const variables = {
+			filter: { like: path },
+		};
+
+		const data = await this.graphqlRequest<{
+			notePaths: Array<{ path: string; latestNoteView: { content: string } | null }>;
+		}>(query, variables);
+
+		if (data?.notePaths?.[0]?.latestNoteView?.content !== undefined) {
+			return data.notePaths[0].latestNoteView.content;
+		}
+
+		return null;
+	}
+
+	async fetchMultipleNoteContents(paths: string[]): Promise<Map<string, string>> {
+		const contents = new Map<string, string>();
+
+		// Fetch in parallel with batching to avoid overwhelming the server
+		const batchSize = 5;
+		for (let i = 0; i < paths.length; i += batchSize) {
+			const batch = paths.slice(i, i + batchSize);
+			const results = await Promise.all(batch.map((path) => this.fetchNoteContent(path)));
+
+			batch.forEach((path, index) => {
+				const content = results[index];
+				if (content !== null) {
+					contents.set(path, content);
+				}
+			});
+		}
+
+		return contents;
+	}
+
+	async pushNotes(updates: Array<{ path: string; content: string }>): Promise<NoteWithAssets[]> {
+		const query = `
+			mutation PushNotes($input: PushNotesInput!) {
+				pushNotes(input: $input) {
+					... on ErrorPayload {
+						message
+					}
+					... on PushNotesPayload {
+						notes {
+							id
+							path
+							assets {
+								path
+								sha256Hash
+							}
+						}
+					}
+				}
+			}
+		`;
+
+		const variables = {
+			input: { updates },
+		};
+
+		const data = await this.graphqlRequest<{
+			pushNotes: { notes?: NoteWithAssets[]; message?: string };
+		}>(query, variables);
+
+		if (data?.pushNotes?.message) {
+			new Notice(`Push error: ${data.pushNotes.message}`);
+			return [];
+		}
+
+		return data?.pushNotes?.notes || [];
+	}
+
+	async hideNotes(paths: string[]): Promise<boolean> {
+		const query = `
+			mutation HideNotes($input: HideNotesInput!) {
+				hideNotes(input: $input) {
+					... on HideNotesPayload {
+						success
+					}
+					... on ErrorPayload {
+						message
+					}
+				}
+			}
+		`;
+
+		const variables = {
+			input: { paths },
+		};
+
+		const data = await this.graphqlRequest<{
+			hideNotes: { success?: boolean; message?: string };
+		}>(query, variables);
+
+		if (data?.hideNotes?.message) {
+			new Notice(`Hide error: ${data.hideNotes.message}`);
+			return false;
+		}
+
+		return data?.hideNotes?.success || false;
+	}
+
+	async uploadAsset(
+		noteId: string,
+		assetBlob: Blob,
+		fileName: string,
+		relativePath: string,
+		absolutePath: string,
+		sha256Hash: string
+	): Promise<boolean> {
+		const operations = JSON.stringify({
+			variables: {
+				input: {
+					file: null,
+					noteId: noteId,
+					sha256Hash: sha256Hash,
+					path: relativePath,
+					absolutePath: absolutePath,
+				},
+			},
+			query: `mutation($input: UploadNoteAssetInput!) {
+				uploadNoteAsset(input: $input) {
+					... on ErrorPayload {
+						__typename
+						message
+					}
+					... on UploadNoteAssetPayload {
+						__typename
+						uploadSkipped
+					}
+				}
+			}`,
+		});
+
+		const map = JSON.stringify({ "0": ["variables.input.file"] });
+
+		const formData = new FormData();
+		formData.append("operations", operations);
+		formData.append("map", map);
+		formData.append("0", assetBlob, fileName);
+
+		try {
+			const response = await fetch(`${this.apiUrl}/graphql`, {
+				method: "POST",
+				headers: {
+					"X-API-Key": this.apiKey,
+				},
+				body: formData,
+			});
+
+			if (!response.ok) {
+				throw new Error(`HTTP error! status: ${response.status}`);
+			}
+
+			const result = await response.json();
+			if (result.errors) {
+				console.error(`Asset upload error for ${relativePath}:`, result.errors);
+				return false;
+			}
+
+			const payload = result.data?.uploadNoteAsset;
+			if (payload?.__typename === "ErrorPayload") {
+				new Notice(`Asset upload failed: ${payload.message}`);
+				return false;
+			}
+
+			return true;
+		} catch (error) {
+			console.error(`Failed to upload asset ${relativePath}:`, error);
+			return false;
+		}
+	}
+
+	async testConnection(): Promise<string | null> {
+		try {
+			await this.fetchServerHashes();
+			return null;
+		} catch (error) {
+			return (error as Error).message || "Unknown error";
+		}
+	}
+}
