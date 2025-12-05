@@ -1,5 +1,5 @@
 import { Notice } from "obsidian";
-import type { ServerNotePath, ServerNoteContent, NoteWithAssets } from "./types";
+import type { ServerNotePath, ServerNoteContent, NoteWithAssets, NoteContentWithAssets, RemoteAsset } from "./types";
 
 export class SyncApi {
 	constructor(
@@ -63,12 +63,22 @@ export class SyncApi {
 	}
 
 	async fetchNoteContent(path: string): Promise<string | null> {
+		const result = await this.fetchNoteContentWithAssets(path);
+		return result?.content ?? null;
+	}
+
+	async fetchNoteContentWithAssets(path: string): Promise<NoteContentWithAssets | null> {
 		const query = `
 			query($filter: NotePathsFilter) {
 				notePaths(filter: $filter) {
 					path: value
 					latestNoteView {
 						content
+						assetReplaces {
+							id
+							url
+							hash
+						}
 					}
 				}
 			}
@@ -79,34 +89,58 @@ export class SyncApi {
 		};
 
 		const data = await this.graphqlRequest<{
-			notePaths: Array<{ path: string; latestNoteView: { content: string } | null }>;
+			notePaths: Array<{
+				path: string;
+				latestNoteView: {
+					content: string;
+					assetReplaces: RemoteAsset[];
+				} | null;
+			}>;
 		}>(query, variables);
 
-		if (data?.notePaths?.[0]?.latestNoteView?.content !== undefined) {
-			return data.notePaths[0].latestNoteView.content;
+		const noteView = data?.notePaths?.[0]?.latestNoteView;
+		if (noteView?.content !== undefined) {
+			return {
+				content: noteView.content,
+				assets: noteView.assetReplaces || [],
+			};
 		}
 
 		return null;
 	}
 
-	async fetchMultipleNoteContents(paths: string[]): Promise<Map<string, string>> {
-		const contents = new Map<string, string>();
+	async fetchMultipleNoteContents(paths: string[]): Promise<Map<string, NoteContentWithAssets>> {
+		const contents = new Map<string, NoteContentWithAssets>();
 
 		// Fetch in parallel with batching to avoid overwhelming the server
 		const batchSize = 5;
 		for (let i = 0; i < paths.length; i += batchSize) {
 			const batch = paths.slice(i, i + batchSize);
-			const results = await Promise.all(batch.map((path) => this.fetchNoteContent(path)));
+			const results = await Promise.all(batch.map((path) => this.fetchNoteContentWithAssets(path)));
 
 			batch.forEach((path, index) => {
-				const content = results[index];
-				if (content !== null) {
-					contents.set(path, content);
+				const result = results[index];
+				if (result !== null) {
+					contents.set(path, result);
 				}
 			});
 		}
 
 		return contents;
+	}
+
+	async downloadAsset(url: string): Promise<ArrayBuffer | null> {
+		try {
+			const response = await fetch(url);
+			if (!response.ok) {
+				console.error(`Failed to download asset: ${response.status}`);
+				return null;
+			}
+			return await response.arrayBuffer();
+		} catch (error) {
+			console.error(`Error downloading asset from ${url}:`, error);
+			return null;
+		}
 	}
 
 	async pushNotes(updates: Array<{ path: string; content: string }>): Promise<NoteWithAssets[]> {

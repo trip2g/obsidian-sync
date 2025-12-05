@@ -48,6 +48,18 @@ export interface ServerNoteContent {
 	content: string;
 }
 
+// Asset from server (for download during pull)
+export interface RemoteAsset {
+	id: string; // path reference in note (e.g., "image.png")
+	url: string; // full URL to download
+	hash: string; // SHA256 hash
+}
+
+export interface NoteContentWithAssets {
+	content: string;
+	assets: RemoteAsset[];
+}
+
 // Sync classification
 export type SyncAction = "unchanged" | "pull" | "push" | "conflict" | "local_only" | "remote_only" | "local_deleted";
 

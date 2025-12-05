@@ -13,6 +13,7 @@ import type {
 	ConflictResolution,
 	ConflictInfo,
 	NoteWithAssets,
+	RemoteAsset,
 } from "./types";
 import { DEFAULT_SETTINGS, DEFAULT_SYNC_STATE } from "./types";
 
@@ -366,7 +367,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 		const paths = pulls.map((p) => p.path);
 		const contents = await api.fetchMultipleNoteContents(paths);
 
-		for (const [path, content] of contents) {
+		for (const [path, noteData] of contents) {
 			const fullPath = folder.path === "/" ? path : `${folder.path}/${path}`;
 
 			// Create directories if needed
@@ -378,15 +379,96 @@ export default class Trip2gSyncPlugin extends Plugin {
 			// Write or update file
 			const existingFile = this.app.vault.getAbstractFileByPath(fullPath);
 			if (existingFile instanceof TFile) {
-				await this.app.vault.modify(existingFile, content);
+				await this.app.vault.modify(existingFile, noteData.content);
 			} else {
-				await this.app.vault.create(fullPath, content);
+				await this.app.vault.create(fullPath, noteData.content);
 			}
 
 			// Update sync state
-			const hash = await sha256Hash(content);
+			const hash = await sha256Hash(noteData.content);
 			updateSyncState(syncState, path, hash);
+
+			// Download missing assets
+			if (noteData.assets && noteData.assets.length > 0) {
+				await this.downloadMissingAssets(api, folder, fullPath, noteData.assets);
+			}
 		}
+	}
+
+	private async downloadMissingAssets(
+		api: SyncApi,
+		folder: TFolder,
+		notePath: string,
+		assets: RemoteAsset[]
+	) {
+		const noteFile = this.app.vault.getAbstractFileByPath(notePath);
+		if (!(noteFile instanceof TFile)) {
+			return;
+		}
+
+		for (const asset of assets) {
+			try {
+				// Resolve asset path relative to note
+				const resolvedFile = this.app.metadataCache.getFirstLinkpathDest(asset.id, noteFile.path);
+
+				if (resolvedFile instanceof TFile) {
+					// Asset exists - check hash
+					const localBuffer = await this.app.vault.readBinary(resolvedFile);
+					const localHash = await sha256HashBuffer(localBuffer);
+
+					if (localHash === asset.hash) {
+						// Hash matches - skip download
+						continue;
+					}
+				}
+
+				// Asset missing or hash differs - download
+				const data = await api.downloadAsset(asset.url);
+				if (!data) {
+					continue;
+				}
+
+				// Determine target path for the asset
+				const assetPath = this.resolveAssetPath(folder, noteFile, asset.id);
+				if (!assetPath) {
+					continue;
+				}
+
+				// Create directories if needed
+				const assetDir = assetPath.substring(0, assetPath.lastIndexOf("/"));
+				if (assetDir && !this.app.vault.getAbstractFileByPath(assetDir)) {
+					await this.app.vault.createFolder(assetDir);
+				}
+
+				// Write asset file
+				const existingAsset = this.app.vault.getAbstractFileByPath(assetPath);
+				if (existingAsset instanceof TFile) {
+					await this.app.vault.modifyBinary(existingAsset, data);
+				} else {
+					await this.app.vault.createBinary(assetPath, data);
+				}
+			} catch (error) {
+				console.error(`Error downloading asset ${asset.id}:`, error);
+			}
+		}
+	}
+
+	private resolveAssetPath(folder: TFolder, noteFile: TFile, assetId: string): string | null {
+		// Try to resolve existing asset first
+		const resolved = this.app.metadataCache.getFirstLinkpathDest(assetId, noteFile.path);
+		if (resolved) {
+			return resolved.path;
+		}
+
+		// Asset doesn't exist - determine where to create it
+		// If assetId contains path separator, use it relative to folder
+		if (assetId.includes("/")) {
+			return folder.path === "/" ? assetId : `${folder.path}/${assetId}`;
+		}
+
+		// Otherwise, create in same directory as note
+		const noteDir = noteFile.path.substring(0, noteFile.path.lastIndexOf("/"));
+		return noteDir ? `${noteDir}/${assetId}` : assetId;
 	}
 
 	private async handleConflicts(
