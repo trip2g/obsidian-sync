@@ -61,7 +61,7 @@ export interface NoteContentWithAssets {
 }
 
 // Sync classification
-export type SyncAction = "unchanged" | "pull" | "push" | "conflict" | "local_only" | "remote_only" | "local_deleted";
+export type SyncAction = "unchanged" | "pull" | "push" | "conflict" | "local_only" | "remote_only" | "local_deleted" | "server_deleted";
 
 export interface FileClassification {
 	path: string;

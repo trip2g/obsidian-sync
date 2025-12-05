@@ -49,6 +49,11 @@ export function classifyFile(
 
 	// File only exists locally
 	if (localHash !== null && remoteHash === null) {
+		// Had lastSyncedHash = file was synced before, server deleted it
+		if (lastSyncedHash !== null && lastSyncedHash !== "") {
+			return "server_deleted";
+		}
+		// No lastSyncedHash = new local file, need to push
 		return "local_only";
 	}
 

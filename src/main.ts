@@ -301,6 +301,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 		const conflicts: FileClassification[] = [];
 		const localOnly: FileClassification[] = [];
 		const localDeleted: FileClassification[] = [];
+		const serverDeleted: FileClassification[] = [];
 		let unchanged = 0;
 
 		for (const c of classifications) {
@@ -326,6 +327,9 @@ export default class Trip2gSyncPlugin extends Plugin {
 					break;
 				case "local_deleted":
 					localDeleted.push(c);
+					break;
+				case "server_deleted":
+					serverDeleted.push(c);
 					break;
 			}
 		}
@@ -353,9 +357,115 @@ export default class Trip2gSyncPlugin extends Plugin {
 			await this.handleLocalDeleted(api, localDeleted, syncState);
 		}
 
+		// Handle server deleted files - just update syncState to current local hash (ignore)
+		if (serverDeleted.length > 0) {
+			for (const c of serverDeleted) {
+				if (c.localHash) {
+					updateSyncState(syncState, c.path, c.localHash);
+				}
+			}
+		}
+
+		// Check assets for all synced notes (unchanged + just pulled)
+		const syncedPaths = classifications
+			.filter((c) => c.action === "unchanged" || c.action === "pull")
+			.map((c) => c.path);
+		if (syncedPaths.length > 0) {
+			await this.checkAndDownloadAssets(api, folder, syncedPaths);
+		}
+
 		if (unchanged > 0 && pulls.length === 0 && pushes.length === 0 && conflicts.length === 0) {
 			new Notice(t().allFilesUpToDate);
 		}
+	}
+
+	private async checkAndDownloadAssets(api: SyncApi, folder: TFolder, paths: string[]) {
+		let downloadedCount = 0;
+
+		// Fetch in batches to avoid overwhelming the server
+		const batchSize = 10;
+		for (let i = 0; i < paths.length; i += batchSize) {
+			const batch = paths.slice(i, i + batchSize);
+
+			for (const path of batch) {
+				const noteData = await api.fetchNoteContentWithAssets(path);
+				if (!noteData || !noteData.assets || noteData.assets.length === 0) {
+					continue;
+				}
+
+				const fullPath = folder.path === "/" ? path : `${folder.path}/${path}`;
+				const count = await this.downloadMissingAssetsWithCount(api, folder, fullPath, noteData.assets);
+				downloadedCount += count;
+			}
+		}
+
+		if (downloadedCount > 0) {
+			new Notice(`Downloaded ${downloadedCount} assets`);
+		}
+	}
+
+	private async downloadMissingAssetsWithCount(
+		api: SyncApi,
+		folder: TFolder,
+		notePath: string,
+		assets: RemoteAsset[]
+	): Promise<number> {
+		const noteFile = this.app.vault.getAbstractFileByPath(notePath);
+		if (!(noteFile instanceof TFile)) {
+			return 0;
+		}
+
+		let count = 0;
+		for (const asset of assets) {
+			try {
+				// Normalize for lookup (remove ./ prefix)
+				const normalizedId = asset.id.replace(/^\.\//, "");
+
+				// Resolve asset path relative to note
+				const resolvedFile = this.app.metadataCache.getFirstLinkpathDest(normalizedId, noteFile.path);
+
+				if (resolvedFile instanceof TFile) {
+					// Asset exists - check hash
+					const localBuffer = await this.app.vault.readBinary(resolvedFile);
+					const localHash = await sha256HashBuffer(localBuffer);
+
+					if (localHash === asset.hash) {
+						continue;
+					}
+				}
+
+				// Asset missing or hash differs - download
+				const data = await api.downloadAsset(asset.url);
+				if (!data) {
+					continue;
+				}
+
+				// Determine target path for the asset (pass original id to preserve ./ prefix)
+				const assetPath = this.resolveAssetPath(folder, noteFile, asset.id);
+				if (!assetPath) {
+					continue;
+				}
+
+				// Create directories if needed
+				const assetDir = assetPath.substring(0, assetPath.lastIndexOf("/"));
+				if (assetDir && !this.app.vault.getAbstractFileByPath(assetDir)) {
+					await this.app.vault.createFolder(assetDir);
+				}
+
+				// Write asset file
+				const existingAsset = this.app.vault.getAbstractFileByPath(assetPath);
+				if (existingAsset instanceof TFile) {
+					await this.app.vault.modifyBinary(existingAsset, data);
+				} else {
+					await this.app.vault.createBinary(assetPath, data);
+				}
+				count++;
+			} catch (error) {
+				console.error(`[Sync] Error downloading asset ${asset.id}:`, error);
+			}
+		}
+
+		return count;
 	}
 
 	private async executePulls(
@@ -408,8 +518,11 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 		for (const asset of assets) {
 			try {
+				// Normalize for lookup (remove ./ prefix)
+				const normalizedId = asset.id.replace(/^\.\//, "");
+
 				// Resolve asset path relative to note
-				const resolvedFile = this.app.metadataCache.getFirstLinkpathDest(asset.id, noteFile.path);
+				const resolvedFile = this.app.metadataCache.getFirstLinkpathDest(normalizedId, noteFile.path);
 
 				if (resolvedFile instanceof TFile) {
 					// Asset exists - check hash
@@ -428,7 +541,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 					continue;
 				}
 
-				// Determine target path for the asset
+				// Determine target path for the asset (pass original id to preserve ./ prefix)
 				const assetPath = this.resolveAssetPath(folder, noteFile, asset.id);
 				if (!assetPath) {
 					continue;
@@ -448,27 +561,32 @@ export default class Trip2gSyncPlugin extends Plugin {
 					await this.app.vault.createBinary(assetPath, data);
 				}
 			} catch (error) {
-				console.error(`Error downloading asset ${asset.id}:`, error);
+				console.error(`[Sync] Error downloading asset ${asset.id}:`, error);
 			}
 		}
 	}
 
 	private resolveAssetPath(folder: TFolder, noteFile: TFile, assetId: string): string | null {
+		// Check if path is relative to note (starts with ./)
+		const isRelativeToNote = assetId.startsWith("./");
+		const normalizedId = assetId.replace(/^\.\//, "");
+
 		// Try to resolve existing asset first
-		const resolved = this.app.metadataCache.getFirstLinkpathDest(assetId, noteFile.path);
+		const resolved = this.app.metadataCache.getFirstLinkpathDest(normalizedId, noteFile.path);
 		if (resolved) {
 			return resolved.path;
 		}
 
 		// Asset doesn't exist - determine where to create it
-		// If assetId contains path separator, use it relative to folder
-		if (assetId.includes("/")) {
-			return folder.path === "/" ? assetId : `${folder.path}/${assetId}`;
+		const noteDir = noteFile.path.substring(0, noteFile.path.lastIndexOf("/"));
+
+		// If path started with ./ or doesn't contain /, it's relative to note directory
+		if (isRelativeToNote || !normalizedId.includes("/")) {
+			return noteDir ? `${noteDir}/${normalizedId}` : normalizedId;
 		}
 
-		// Otherwise, create in same directory as note
-		const noteDir = noteFile.path.substring(0, noteFile.path.lastIndexOf("/"));
-		return noteDir ? `${noteDir}/${assetId}` : assetId;
+		// Otherwise, use it relative to sync folder
+		return folder.path === "/" ? normalizedId : `${folder.path}/${normalizedId}`;
 	}
 
 	private async handleConflicts(
