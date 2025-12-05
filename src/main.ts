@@ -192,7 +192,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 		const pushes: FileClassification[] = [];
 		const conflicts: FileClassification[] = [];
 		const localOnly: FileClassification[] = [];
-		const remoteOnly: FileClassification[] = [];
+		const localDeleted: FileClassification[] = [];
 		let unchanged = 0;
 
 		for (const c of classifications) {
@@ -213,7 +213,11 @@ export default class Trip2gSyncPlugin extends Plugin {
 					localOnly.push(c);
 					break;
 				case "remote_only":
-					remoteOnly.push(c);
+					// Fallback: treat as pull (new file from server)
+					pulls.push(c);
+					break;
+				case "local_deleted":
+					localDeleted.push(c);
 					break;
 			}
 		}
@@ -236,9 +240,9 @@ export default class Trip2gSyncPlugin extends Plugin {
 			new Notice(t().pushedFiles(toPush.length));
 		}
 
-		// Handle remote_only files - ask user or hide
-		if (remoteOnly.length > 0) {
-			await this.handleRemoteOnly(api, remoteOnly, syncState);
+		// Handle locally deleted files - hide on server
+		if (localDeleted.length > 0) {
+			await this.handleLocalDeleted(api, localDeleted, syncState);
 		}
 
 		if (unchanged > 0 && pulls.length === 0 && pushes.length === 0 && conflicts.length === 0) {
@@ -461,9 +465,9 @@ export default class Trip2gSyncPlugin extends Plugin {
 		}
 	}
 
-	private async handleRemoteOnly(api: SyncApi, remoteOnly: FileClassification[], syncState: SyncState) {
-		// Files exist on server but not locally - hide them
-		const paths = remoteOnly.map((r) => r.path);
+	private async handleLocalDeleted(api: SyncApi, localDeleted: FileClassification[], syncState: SyncState) {
+		// Files were deleted locally - hide them on server
+		const paths = localDeleted.map((r) => r.path);
 
 		if (paths.length > 0) {
 			const success = await api.hideNotes(paths);

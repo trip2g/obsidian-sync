@@ -49,7 +49,7 @@ export interface ServerNoteContent {
 }
 
 // Sync classification
-export type SyncAction = "unchanged" | "pull" | "push" | "conflict" | "local_only" | "remote_only";
+export type SyncAction = "unchanged" | "pull" | "push" | "conflict" | "local_only" | "remote_only" | "local_deleted";
 
 export interface FileClassification {
 	path: string;
