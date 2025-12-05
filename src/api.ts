@@ -7,7 +7,7 @@ export class SyncApi {
 		private apiKey: string
 	) {}
 
-	private async graphqlRequest<T>(query: string, variables?: Record<string, unknown>): Promise<T | null> {
+	private async graphqlRequest<T>(query: string, variables?: Record<string, unknown>, silent = false): Promise<T | null> {
 		try {
 			const response = await fetch(`${this.apiUrl}/graphql`, {
 				method: "POST",
@@ -26,19 +26,23 @@ export class SyncApi {
 
 			if (data.errors) {
 				console.error("GraphQL errors:", data.errors);
-				new Notice(`GraphQL error: ${data.errors[0]?.message || "Unknown error"}`);
+				if (!silent) {
+					new Notice(`GraphQL error: ${data.errors[0]?.message || "Unknown error"}`);
+				}
 				return null;
 			}
 
 			return data.data as T;
 		} catch (error) {
 			console.error("GraphQL request failed:", error);
-			new Notice(`API error: ${(error as Error).message}`);
+			if (!silent) {
+				new Notice(`API error: ${(error as Error).message}`);
+			}
 			return null;
 		}
 	}
 
-	async fetchServerHashes(): Promise<Map<string, string>> {
+	async fetchServerHashes(silent = false): Promise<Map<string, string>> {
 		const query = `
 			query {
 				notePaths {
@@ -48,7 +52,7 @@ export class SyncApi {
 			}
 		`;
 
-		const data = await this.graphqlRequest<{ notePaths: ServerNotePath[] }>(query);
+		const data = await this.graphqlRequest<{ notePaths: ServerNotePath[] }>(query, undefined, silent);
 		const hashes = new Map<string, string>();
 
 		if (data?.notePaths) {

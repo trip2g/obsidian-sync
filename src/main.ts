@@ -151,8 +151,8 @@ export default class Trip2gSyncPlugin extends Plugin {
 					localFiles.set(relativePath, hash);
 				}
 
-				// Get server hashes
-				const serverHashes = await api.fetchServerHashes();
+				// Get server hashes (silent - don't show errors for background checks)
+				const serverHashes = await api.fetchServerHashes(true);
 
 				// Classify files
 				const classifications = classifyAllFiles(localFiles, serverHashes, syncState);
