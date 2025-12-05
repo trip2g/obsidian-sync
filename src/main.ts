@@ -21,6 +21,9 @@ const SYNC_STATE_KEY = "sync-state";
 export default class Trip2gSyncPlugin extends Plugin {
 	settings: PluginSettings;
 	syncStates: Map<string, SyncState> = new Map(); // apiUrl -> SyncState
+	ribbonIcon: HTMLElement | null = null;
+	checkInterval: number | null = null;
+	private boundCheckOnFocus: () => void;
 
 	async onload() {
 		// Initialize locale
@@ -32,7 +35,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 		// Register conflict view
 		this.registerView(CONFLICT_VIEW_TYPE, (leaf) => new ConflictView(leaf));
 
-		this.addRibbonIcon("sync", "Trip2g Sync", () => {
+		this.ribbonIcon = this.addRibbonIcon("sync", "Trip2g Sync", () => {
 			if (this.settings.syncDirs.length === 0) {
 				new Notice(t().noSyncDirsConfigured);
 			} else if (this.settings.syncDirs.length === 1) {
@@ -42,12 +45,33 @@ export default class Trip2gSyncPlugin extends Plugin {
 			}
 		});
 
+		// Add badge styling class
+		this.ribbonIcon.addClass("sync-ribbon-icon");
+
 		this.addSettingTab(new SyncSettingTab(this.app, this));
+
+		// Set up periodic check for pending changes (every 60 seconds)
+		this.checkInterval = window.setInterval(() => {
+			this.checkForPendingChanges();
+		}, 60000);
+
+		// Check on window focus
+		this.boundCheckOnFocus = () => this.checkForPendingChanges();
+		window.addEventListener("focus", this.boundCheckOnFocus);
+
+		// Initial check after a short delay
+		window.setTimeout(() => this.checkForPendingChanges(), 3000);
 	}
 
 	onunload() {
 		// Clean up view
 		this.app.workspace.detachLeavesOfType(CONFLICT_VIEW_TYPE);
+
+		// Clean up timer and listeners
+		if (this.checkInterval !== null) {
+			window.clearInterval(this.checkInterval);
+		}
+		window.removeEventListener("focus", this.boundCheckOnFocus);
 	}
 
 	async loadSettings() {
@@ -87,6 +111,89 @@ export default class Trip2gSyncPlugin extends Plugin {
 			this.syncStates.set(apiUrl, state);
 		}
 		return state;
+	}
+
+	/**
+	 * Check for pending changes and update badge
+	 */
+	async checkForPendingChanges(): Promise<void> {
+		if (!this.ribbonIcon || this.settings.syncDirs.length === 0) {
+			return;
+		}
+
+		let totalPull = 0;
+		let totalPush = 0;
+		let hasConflict = false;
+
+		for (const syncDir of this.settings.syncDirs) {
+			if (!syncDir.path || !syncDir.apiUrl || !syncDir.apiKey) {
+				continue;
+			}
+
+			try {
+				const api = new SyncApi(syncDir.apiUrl, syncDir.apiKey);
+				const syncState = this.getSyncState(syncDir.apiUrl);
+
+				// Get folder and local files
+				const folder = this.app.vault.getAbstractFileByPath(syncDir.path);
+				if (!folder || !(folder instanceof TFolder)) {
+					continue;
+				}
+
+				const files = this.getAllMarkdownFiles(folder);
+				const localFiles = new Map<string, string>();
+
+				for (const file of files) {
+					const content = await this.app.vault.read(file);
+					const hash = await sha256Hash(content);
+					const relativePath = this.getRelativePath(file, folder);
+					localFiles.set(relativePath, hash);
+				}
+
+				// Get server hashes
+				const serverHashes = await api.fetchServerHashes();
+
+				// Classify files
+				const classifications = classifyAllFiles(localFiles, serverHashes, syncState);
+
+				for (const c of classifications) {
+					switch (c.action) {
+						case "pull":
+						case "remote_only":
+							totalPull++;
+							break;
+						case "push":
+						case "local_only":
+							totalPush++;
+							break;
+						case "conflict":
+							hasConflict = true;
+							break;
+					}
+				}
+			} catch {
+				// Silently ignore errors during background check
+			}
+		}
+
+		// Update badge
+		this.ribbonIcon.removeClass("has-pending", "has-pull", "has-push", "has-conflict");
+
+		if (hasConflict) {
+			this.ribbonIcon.addClass("has-pending", "has-conflict");
+			this.ribbonIcon.setAttribute("aria-label", t().pendingChanges(totalPull, totalPush));
+		} else if (totalPull > 0 && totalPush > 0) {
+			this.ribbonIcon.addClass("has-pending");
+			this.ribbonIcon.setAttribute("aria-label", t().pendingChanges(totalPull, totalPush));
+		} else if (totalPull > 0) {
+			this.ribbonIcon.addClass("has-pending", "has-pull");
+			this.ribbonIcon.setAttribute("aria-label", t().pendingPull(totalPull));
+		} else if (totalPush > 0) {
+			this.ribbonIcon.addClass("has-pending", "has-push");
+			this.ribbonIcon.setAttribute("aria-label", t().pendingPush(totalPush));
+		} else {
+			this.ribbonIcon.setAttribute("aria-label", "Trip2g Sync");
+		}
 	}
 
 	async testConnection(syncDir: SyncDir): Promise<string | null> {

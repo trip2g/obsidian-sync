@@ -356,3 +356,32 @@ img[src*="ce.trip2g.com"] {
 	color: var(--text-muted);
 	font-size: 16px;
 }
+
+/* Sync badge indicator */
+.sync-ribbon-icon {
+	position: relative;
+}
+
+.sync-ribbon-icon.has-pending::after {
+	content: "";
+	position: absolute;
+	top: 6px;
+	right: 6px;
+	width: 8px;
+	height: 8px;
+	background: var(--color-orange);
+	border-radius: 50%;
+	border: 1px solid var(--background-primary);
+}
+
+.sync-ribbon-icon.has-pull::after {
+	background: var(--color-blue);
+}
+
+.sync-ribbon-icon.has-push::after {
+	background: var(--color-green);
+}
+
+.sync-ribbon-icon.has-conflict::after {
+	background: var(--color-red);
+}

@@ -56,6 +56,11 @@ export interface Translations {
 	syncThisDirectory: string;
 	noSyncDirsConfigured: string;
 	openSettings: string;
+
+	// Badge tooltips
+	pendingChanges: (pull: number, push: number) => string;
+	pendingPull: (count: number) => string;
+	pendingPush: (count: number) => string;
 }
 
 const en: Translations = {
@@ -115,6 +120,11 @@ const en: Translations = {
 	syncThisDirectory: "Sync this directory",
 	noSyncDirsConfigured: "No sync directories configured. Please add one in settings first.",
 	openSettings: "Open Settings",
+
+	// Badge tooltips
+	pendingChanges: (pull, push) => `Trip2g Sync (↓${pull} ↑${push})`,
+	pendingPull: (count) => `Trip2g Sync (↓${count} from server)`,
+	pendingPush: (count) => `Trip2g Sync (↑${count} to push)`,
 };
 
 const ru: Translations = {
@@ -174,6 +184,11 @@ const ru: Translations = {
 	syncThisDirectory: "Синхронизировать эту папку",
 	noSyncDirsConfigured: "Папки синхронизации не настроены. Добавьте их в настройках.",
 	openSettings: "Открыть настройки",
+
+	// Badge tooltips
+	pendingChanges: (pull, push) => `Trip2g Sync (↓${pull} ↑${push})`,
+	pendingPull: (count) => `Trip2g Sync (↓${count} с сервера)`,
+	pendingPush: (count) => `Trip2g Sync (↑${count} к отправке)`,
 };
 
 const translations: Record<Locale, Translations> = { en, ru };
