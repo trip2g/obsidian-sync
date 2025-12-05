@@ -17,6 +17,8 @@ export interface Translations {
 	pathPlaceholder: string;
 	apiUrlPlaceholder: string;
 	apiKeyPlaceholder: string;
+	publishFieldPlaceholder: string;
+	publishFieldDesc: string;
 	testConnection: string;
 	resetSyncState: string;
 	resetSyncStateConfirm: string;
@@ -83,6 +85,8 @@ const en: Translations = {
 	pathPlaceholder: "Path to folder (/ for vault root)",
 	apiUrlPlaceholder: "API URL",
 	apiKeyPlaceholder: "API Key",
+	publishFieldPlaceholder: "Publish field (e.g., publish)",
+	publishFieldDesc: "Only push files with this frontmatter field set to true",
 	testConnection: "Test connection",
 	resetSyncState: "Reset sync state",
 	resetSyncStateConfirm: "Reset sync state? Next sync will re-download all files from server.",
@@ -150,6 +154,8 @@ const ru: Translations = {
 	pathPlaceholder: "Путь к папке (/ для корня)",
 	apiUrlPlaceholder: "API URL",
 	apiKeyPlaceholder: "API Key",
+	publishFieldPlaceholder: "Поле публикации (напр., publish)",
+	publishFieldDesc: "Отправлять только файлы с этим полем в frontmatter",
 	testConnection: "Проверить соединение",
 	resetSyncState: "Сбросить состояние синхронизации",
 	resetSyncStateConfirm: "Сбросить состояние? При следующей синхронизации все файлы будут загружены с сервера.",

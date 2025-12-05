@@ -202,6 +202,20 @@ export default class Trip2gSyncPlugin extends Plugin {
 		return api.testConnection();
 	}
 
+	/**
+	 * Check if a file has a frontmatter field with a truthy value
+	 */
+	private hasPublishField(file: TFile, publishField: string): boolean {
+		if (!publishField) return true; // No filter = all files are publishable
+
+		const cache = this.app.metadataCache.getFileCache(file);
+		const frontmatter = cache?.frontmatter;
+		if (!frontmatter) return false;
+
+		const value = frontmatter[publishField];
+		return Boolean(value);
+	}
+
 	async syncDirectory(syncDir: SyncDir): Promise<void> {
 		if (!syncDir.path || !syncDir.apiUrl || !syncDir.apiKey) {
 			new Notice(t().syncError);
@@ -304,29 +318,54 @@ export default class Trip2gSyncPlugin extends Plugin {
 		const serverDeleted: FileClassification[] = [];
 		let unchanged = 0;
 
+		const publishField = syncDir.publishField || "";
+
 		for (const c of classifications) {
+			const fullPath = folder.path === "/" ? c.path : `${folder.path}/${c.path}`;
+			const localFile = this.app.vault.getAbstractFileByPath(fullPath);
+			const hasPublish = localFile instanceof TFile ? this.hasPublishField(localFile, publishField) : true;
+
 			switch (c.action) {
 				case "unchanged":
 					unchanged++;
 					break;
 				case "pull":
-					pulls.push(c);
+					// Don't pull if local file exists and doesn't have publish field (protected)
+					if (publishField && localFile instanceof TFile && !hasPublish) {
+						// Skip - protected local file
+					} else {
+						pulls.push(c);
+					}
 					break;
 				case "push":
-					pushes.push(c);
+					// Only push if file has publish field (or no filter set)
+					if (hasPublish) {
+						pushes.push(c);
+					}
 					break;
 				case "conflict":
-					conflicts.push(c);
+					// Don't show conflict if local file is protected (no publish field)
+					if (publishField && localFile instanceof TFile && !hasPublish) {
+						// Skip - protected local file, server changes are ignored
+					} else {
+						conflicts.push(c);
+					}
 					break;
 				case "local_only":
-					localOnly.push(c);
+					// Only push if file has publish field (or no filter set)
+					if (hasPublish) {
+						localOnly.push(c);
+					}
 					break;
 				case "remote_only":
 					// Fallback: treat as pull (new file from server)
 					pulls.push(c);
 					break;
 				case "local_deleted":
-					localDeleted.push(c);
+					// Only hide on server if file was publishable
+					if (hasPublish) {
+						localDeleted.push(c);
+					}
 					break;
 				case "server_deleted":
 					serverDeleted.push(c);
@@ -981,6 +1020,16 @@ class SyncSettingTab extends PluginSettingTab {
 						this.plugin.settings.syncDirs[dirIndex].error = undefined;
 						this.plugin.saveSettings();
 					});
+			});
+
+			s.addText((text) => {
+				text.setPlaceholder(i18n.publishFieldPlaceholder)
+					.setValue(dir.publishField || "")
+					.onChange((newField) => {
+						this.plugin.settings.syncDirs[dirIndex].publishField = newField || undefined;
+						this.plugin.saveSettings();
+					});
+				text.inputEl.title = i18n.publishFieldDesc;
 			});
 
 			s.addExtraButton((button) => {

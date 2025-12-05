@@ -4,6 +4,8 @@ export interface SyncDir {
 	apiKey: string;
 	apiUrl: string;
 	error?: string | null;
+	/** Frontmatter field to filter files for push (e.g., "publish"). If empty, all files are synced. */
+	publishField?: string;
 }
 
 export interface PluginSettings {
