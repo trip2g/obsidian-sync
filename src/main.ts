@@ -1003,6 +1003,19 @@ class SyncSettingTab extends PluginSettingTab {
 
 			s.addExtraButton((button) => {
 				button
+					.setIcon("reset")
+					.setTooltip(i18n.resetSyncState)
+					.onClick(async () => {
+						if (confirm(i18n.resetSyncStateConfirm)) {
+							this.plugin.syncStates.delete(dir.apiUrl);
+							await this.plugin.saveSyncStates();
+							new Notice(i18n.syncStateReset);
+						}
+					});
+			});
+
+			s.addExtraButton((button) => {
+				button
 					.setIcon("cross")
 					.setTooltip(i18n.removeDirectory)
 					.onClick(() => {

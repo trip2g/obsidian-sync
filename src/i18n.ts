@@ -18,6 +18,9 @@ export interface Translations {
 	apiUrlPlaceholder: string;
 	apiKeyPlaceholder: string;
 	testConnection: string;
+	resetSyncState: string;
+	resetSyncStateConfirm: string;
+	syncStateReset: string;
 	removeDirectory: string;
 	error: string;
 	successfulConnections: (success: number, fail: number) => string;
@@ -81,6 +84,9 @@ const en: Translations = {
 	apiUrlPlaceholder: "API URL",
 	apiKeyPlaceholder: "API Key",
 	testConnection: "Test connection",
+	resetSyncState: "Reset sync state",
+	resetSyncStateConfirm: "Reset sync state? Next sync will re-download all files from server.",
+	syncStateReset: "Sync state reset",
 	removeDirectory: "Remove sync directory",
 	error: "Error",
 	successfulConnections: (success, fail) =>
@@ -145,6 +151,9 @@ const ru: Translations = {
 	apiUrlPlaceholder: "API URL",
 	apiKeyPlaceholder: "API Key",
 	testConnection: "Проверить соединение",
+	resetSyncState: "Сбросить состояние синхронизации",
+	resetSyncStateConfirm: "Сбросить состояние? При следующей синхронизации все файлы будут загружены с сервера.",
+	syncStateReset: "Состояние синхронизации сброшено",
 	removeDirectory: "Удалить папку",
 	error: "Ошибка",
 	successfulConnections: (success, fail) =>
