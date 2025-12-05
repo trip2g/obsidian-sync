@@ -377,6 +377,9 @@ export default class Trip2gSyncPlugin extends Plugin {
 		if (unchanged > 0 && pulls.length === 0 && pushes.length === 0 && conflicts.length === 0) {
 			new Notice(t().allFilesUpToDate);
 		}
+
+		// Update badge after sync
+		this.checkForPendingChanges();
 	}
 
 	private async checkAndDownloadAssets(api: SyncApi, folder: TFolder, paths: string[]) {
