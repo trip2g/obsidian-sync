@@ -26,6 +26,8 @@ export interface Translations {
 	removeDirectory: string;
 	error: string;
 	successfulConnections: (success: number, fail: number) => string;
+	skipPushConfirmationLabel: string;
+	skipPushConfirmationDesc: string;
 
 	// Sync actions
 	pulledFiles: (count: number) => string;
@@ -66,6 +68,23 @@ export interface Translations {
 	pendingChanges: (pull: number, push: number) => string;
 	pendingPull: (count: number) => string;
 	pendingPush: (count: number) => string;
+
+	// Server deleted modal
+	serverDeletedTitle: string;
+	serverDeletedDescription: (count: number) => string;
+	serverDeletedFileList: string;
+	deleteLocally: string;
+	keepLocally: string;
+	deletedLocally: (count: number) => string;
+	keptLocally: (count: number) => string;
+
+	// Push confirmation modal
+	pushConfirmTitle: string;
+	pushConfirmDescription: (count: number) => string;
+	pushConfirmFileList: string;
+	pushConfirmProceed: string;
+	pushConfirmCancel: string;
+	pushConfirmDontAskAgain: string;
 }
 
 const en: Translations = {
@@ -95,6 +114,8 @@ const en: Translations = {
 	error: "Error",
 	successfulConnections: (success, fail) =>
 		fail === 0 ? `All connections successful (${success})` : `${success} successful, ${fail} failed`,
+	skipPushConfirmationLabel: "Skip push confirmation",
+	skipPushConfirmationDesc: "Don't show confirmation dialog before uploading files to server",
 
 	// Sync actions
 	pulledFiles: (count) => `Pulled ${count} files from server`,
@@ -135,6 +156,25 @@ const en: Translations = {
 	pendingChanges: (pull, push) => `Trip2g Sync (↓${pull} ↑${push})`,
 	pendingPull: (count) => `Trip2g Sync (↓${count} from server)`,
 	pendingPush: (count) => `Trip2g Sync (↑${count} to push)`,
+
+	// Server deleted modal
+	serverDeletedTitle: "Files deleted on server",
+	serverDeletedDescription: (count) =>
+		`${count} file(s) were deleted/hidden on the server but still exist locally. What would you like to do?`,
+	serverDeletedFileList: "Affected files:",
+	deleteLocally: "Delete locally",
+	keepLocally: "Keep locally",
+	deletedLocally: (count) => `Deleted ${count} local files`,
+	keptLocally: (count) => `Kept ${count} local files`,
+
+	// Push confirmation modal
+	pushConfirmTitle: "Confirm upload to server",
+	pushConfirmDescription: (count) =>
+		`${count} file(s) will be uploaded to the server. Continue?`,
+	pushConfirmFileList: "Files to upload:",
+	pushConfirmProceed: "Upload",
+	pushConfirmCancel: "Cancel",
+	pushConfirmDontAskAgain: "Don't ask again",
 };
 
 const ru: Translations = {
@@ -164,6 +204,8 @@ const ru: Translations = {
 	error: "Ошибка",
 	successfulConnections: (success, fail) =>
 		fail === 0 ? `Все соединения успешны (${success})` : `${success} успешно, ${fail} с ошибкой`,
+	skipPushConfirmationLabel: "Не спрашивать подтверждение",
+	skipPushConfirmationDesc: "Не показывать диалог подтверждения перед загрузкой файлов на сервер",
 
 	// Sync actions
 	pulledFiles: (count) => `Получено ${count} файлов с сервера`,
@@ -204,6 +246,25 @@ const ru: Translations = {
 	pendingChanges: (pull, push) => `Trip2g Sync (↓${pull} ↑${push})`,
 	pendingPull: (count) => `Trip2g Sync (↓${count} с сервера)`,
 	pendingPush: (count) => `Trip2g Sync (↑${count} к отправке)`,
+
+	// Server deleted modal
+	serverDeletedTitle: "Файлы удалены на сервере",
+	serverDeletedDescription: (count) =>
+		`${count} файл(ов) были удалены/скрыты на сервере, но всё ещё существуют локально. Что сделать?`,
+	serverDeletedFileList: "Затронутые файлы:",
+	deleteLocally: "Удалить локально",
+	keepLocally: "Оставить локально",
+	deletedLocally: (count) => `Удалено ${count} локальных файлов`,
+	keptLocally: (count) => `Оставлено ${count} локальных файлов`,
+
+	// Push confirmation modal
+	pushConfirmTitle: "Подтвердите загрузку на сервер",
+	pushConfirmDescription: (count) =>
+		`${count} файл(ов) будут загружены на сервер. Продолжить?`,
+	pushConfirmFileList: "Файлы для загрузки:",
+	pushConfirmProceed: "Загрузить",
+	pushConfirmCancel: "Отмена",
+	pushConfirmDontAskAgain: "Больше не спрашивать",
 };
 
 const translations: Record<Locale, Translations> = { en, ru };

@@ -10,10 +10,13 @@ export interface SyncDir {
 
 export interface PluginSettings {
 	syncDirs: SyncDir[];
+	/** Skip push confirmation dialog */
+	skipPushConfirmation?: boolean;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
 	syncDirs: [],
+	skipPushConfirmation: false,
 };
 
 // Sync state - stored locally to track last synced hashes

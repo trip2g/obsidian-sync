@@ -2,7 +2,7 @@ import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, 
 import { FolderSuggest } from "./FolderSuggest";
 import { SyncApi } from "./api";
 import { sha256Hash, sha256HashBuffer, classifyAllFiles, updateSyncState, removeFromSyncState } from "./sync";
-import { MigrationModal } from "./ui/ConflictModal";
+import { MigrationModal, ServerDeletedModal, PushConfirmModal } from "./ui/ConflictModal";
 import { ConflictView, CONFLICT_VIEW_TYPE } from "./ui/ConflictView";
 import { t, setLocale, detectLocale } from "./i18n";
 import type {
@@ -387,8 +387,11 @@ export default class Trip2gSyncPlugin extends Plugin {
 		// Push local changes (including local_only files)
 		const toPush = [...pushes, ...localOnly];
 		if (toPush.length > 0) {
-			await this.executePushes(api, syncDir, folder, toPush, syncState);
-			new Notice(t().pushedFiles(toPush.length));
+			const shouldPush = await this.confirmPush(toPush);
+			if (shouldPush) {
+				await this.executePushes(api, syncDir, folder, toPush, syncState);
+				new Notice(t().pushedFiles(toPush.length));
+			}
 		}
 
 		// Handle locally deleted files - hide on server
@@ -396,13 +399,9 @@ export default class Trip2gSyncPlugin extends Plugin {
 			await this.handleLocalDeleted(api, localDeleted, syncState);
 		}
 
-		// Handle server deleted files - just update syncState to current local hash (ignore)
+		// Handle server deleted files - ask user what to do
 		if (serverDeleted.length > 0) {
-			for (const c of serverDeleted) {
-				if (c.localHash) {
-					updateSyncState(syncState, c.path, c.localHash);
-				}
-			}
+			await this.handleServerDeleted(folder, serverDeleted, syncState);
 		}
 
 		// Check assets for all synced notes (unchanged + just pulled)
@@ -829,6 +828,61 @@ export default class Trip2gSyncPlugin extends Plugin {
 		}
 	}
 
+	private async handleServerDeleted(
+		folder: TFolder,
+		serverDeleted: FileClassification[],
+		syncState: SyncState
+	): Promise<void> {
+		const paths = serverDeleted.map((c) => c.path);
+
+		return new Promise((resolve) => {
+			new ServerDeletedModal(this.app, paths, async (deleteLocally) => {
+				if (deleteLocally) {
+					// Delete local files
+					let deletedCount = 0;
+					for (const c of serverDeleted) {
+						const fullPath = folder.path === "/" ? c.path : `${folder.path}/${c.path}`;
+						const file = this.app.vault.getAbstractFileByPath(fullPath);
+						if (file instanceof TFile) {
+							await this.app.vault.delete(file);
+							removeFromSyncState(syncState, c.path);
+							deletedCount++;
+						}
+					}
+					new Notice(t().deletedLocally(deletedCount));
+				} else {
+					// Keep locally - update syncState to current local hash
+					for (const c of serverDeleted) {
+						if (c.localHash) {
+							updateSyncState(syncState, c.path, c.localHash);
+						}
+					}
+					new Notice(t().keptLocally(serverDeleted.length));
+				}
+				resolve();
+			}).open();
+		});
+	}
+
+	private async confirmPush(toPush: FileClassification[]): Promise<boolean> {
+		// Skip confirmation if setting is enabled
+		if (this.settings.skipPushConfirmation) {
+			return true;
+		}
+
+		const paths = toPush.map((c) => c.path);
+
+		return new Promise((resolve) => {
+			new PushConfirmModal(this.app, paths, async (proceed, dontAskAgain) => {
+				if (dontAskAgain) {
+					this.settings.skipPushConfirmation = true;
+					await this.saveSettings();
+				}
+				resolve(proceed);
+			}).open();
+		});
+	}
+
 	private async processNoteAssets(api: SyncApi, note: NoteWithAssets, folder: TFolder) {
 		if (!note.assets || note.assets.length === 0) {
 			return;
@@ -1083,5 +1137,16 @@ class SyncSettingTab extends PluginSettingTab {
 				errorEl.style.marginTop = "5px";
 			}
 		});
+
+		// Global settings
+		new Setting(containerEl)
+			.setName(i18n.skipPushConfirmationLabel)
+			.setDesc(i18n.skipPushConfirmationDesc)
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.skipPushConfirmation ?? false).onChange(async (value) => {
+					this.plugin.settings.skipPushConfirmation = value;
+					await this.plugin.saveSettings();
+				})
+			);
 	}
 }

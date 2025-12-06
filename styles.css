@@ -385,3 +385,41 @@ img[src*="ce.trip2g.com"] {
 .sync-ribbon-icon.has-conflict::after {
 	background: var(--color-red);
 }
+
+/* Server Deleted Modal & Push Confirm Modal */
+.sync-server-deleted-modal,
+.sync-push-confirm-modal {
+	max-width: 500px;
+}
+
+.sync-file-list {
+	margin: 15px 0;
+	background: var(--background-secondary);
+	border-radius: 4px;
+	padding: 10px;
+	max-height: 300px;
+	overflow-y: auto;
+}
+
+.sync-file-list-header {
+	margin: 0 0 8px 0;
+	font-weight: 500;
+	color: var(--text-muted);
+}
+
+.sync-file-list-items {
+	margin: 0;
+	padding-left: 20px;
+	font-family: var(--font-monospace);
+	font-size: 12px;
+}
+
+.sync-file-list-items li {
+	margin: 4px 0;
+	word-break: break-all;
+}
+
+.sync-file-list-more {
+	color: var(--text-muted);
+	font-style: italic;
+}
