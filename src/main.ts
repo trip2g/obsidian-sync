@@ -203,17 +203,18 @@ export default class Trip2gSyncPlugin extends Plugin {
 	}
 
 	/**
-	 * Check if a file has a frontmatter field with a truthy value
+	 * Check if a file has any of the frontmatter fields with a truthy value.
+	 * Supports comma-separated list of field names (e.g., "publish, public").
 	 */
-	private hasPublishField(file: TFile, publishField: string): boolean {
-		if (!publishField) return true; // No filter = all files are publishable
+	private hasPublishField(file: TFile, publishFields: string): boolean {
+		if (!publishFields) return true; // No filter = all files are publishable
 
 		const cache = this.app.metadataCache.getFileCache(file);
 		const frontmatter = cache?.frontmatter;
 		if (!frontmatter) return false;
 
-		const value = frontmatter[publishField];
-		return Boolean(value);
+		const fields = publishFields.split(",").map((f) => f.trim()).filter((f) => f);
+		return fields.some((field) => Boolean(frontmatter[field]));
 	}
 
 	async syncDirectory(syncDir: SyncDir): Promise<void> {
@@ -998,7 +999,13 @@ class SyncSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl).setName(i18n.settingsHeading).setHeading();
 
-		new Setting(containerEl).setDesc(i18n.settingsDescription);
+		// Description with onboarding link
+		const descEl = containerEl.createEl("p", { cls: "setting-item-description" });
+		descEl.appendText(i18n.settingsDescription + " ");
+		descEl.createEl("a", {
+			text: i18n.onboardingLink,
+			href: "https://trip2g.com/docs/onboarding",
+		});
 
 		const buttonsContainer = new Setting(containerEl);
 		buttonsContainer.addButton((button) => {
@@ -1043,50 +1050,12 @@ class SyncSettingTab extends PluginSettingTab {
 		}
 
 		this.plugin.settings.syncDirs.forEach((dir, dirIndex) => {
-			const s = new Setting(containerEl);
+			// Section header with action buttons
+			const headerSetting = new Setting(containerEl);
+			headerSetting.setName(`Connection ${dirIndex + 1}`);
+			headerSetting.setHeading();
 
-			s.addSearch((cb) => {
-				new FolderSuggest(this.app, cb.inputEl);
-				cb.setPlaceholder(i18n.pathPlaceholder)
-					.setValue(dir.path)
-					.onChange((newPath) => {
-						this.plugin.settings.syncDirs[dirIndex].path = newPath;
-						this.plugin.settings.syncDirs[dirIndex].error = undefined;
-						this.plugin.saveSettings();
-					});
-			});
-
-			s.addText((text) => {
-				text.setPlaceholder(i18n.apiUrlPlaceholder)
-					.setValue(dir.apiUrl)
-					.onChange((newApiUrl) => {
-						this.plugin.settings.syncDirs[dirIndex].apiUrl = newApiUrl;
-						this.plugin.settings.syncDirs[dirIndex].error = undefined;
-						this.plugin.saveSettings();
-					});
-			});
-
-			s.addText((text) => {
-				text.setPlaceholder(i18n.apiKeyPlaceholder)
-					.setValue(dir.apiKey)
-					.onChange((newApiKey) => {
-						this.plugin.settings.syncDirs[dirIndex].apiKey = newApiKey;
-						this.plugin.settings.syncDirs[dirIndex].error = undefined;
-						this.plugin.saveSettings();
-					});
-			});
-
-			s.addText((text) => {
-				text.setPlaceholder(i18n.publishFieldPlaceholder)
-					.setValue(dir.publishField || "")
-					.onChange((newField) => {
-						this.plugin.settings.syncDirs[dirIndex].publishField = newField || undefined;
-						this.plugin.saveSettings();
-					});
-				text.inputEl.title = i18n.publishFieldDesc;
-			});
-
-			s.addExtraButton((button) => {
+			headerSetting.addExtraButton((button) => {
 				button
 					.setIcon("wifi")
 					.setTooltip(i18n.testConnection)
@@ -1104,7 +1073,7 @@ class SyncSettingTab extends PluginSettingTab {
 					});
 			});
 
-			s.addExtraButton((button) => {
+			headerSetting.addExtraButton((button) => {
 				button
 					.setIcon("reset")
 					.setTooltip(i18n.resetSyncState)
@@ -1117,7 +1086,7 @@ class SyncSettingTab extends PluginSettingTab {
 					});
 			});
 
-			s.addExtraButton((button) => {
+			headerSetting.addExtraButton((button) => {
 				button
 					.setIcon("cross")
 					.setTooltip(i18n.removeDirectory)
@@ -1134,8 +1103,65 @@ class SyncSettingTab extends PluginSettingTab {
 					text: `${i18n.error}: ${dir.error}`,
 				});
 				errorEl.style.color = "var(--text-error)";
-				errorEl.style.marginTop = "5px";
+				errorEl.style.marginBottom = "10px";
 			}
+
+			// API URL
+			new Setting(containerEl)
+				.setName(i18n.apiUrlLabel)
+				.setDesc(i18n.apiUrlDesc)
+				.addText((text) => {
+					text.setPlaceholder(i18n.apiUrlPlaceholder)
+						.setValue(dir.apiUrl)
+						.onChange((newApiUrl) => {
+							this.plugin.settings.syncDirs[dirIndex].apiUrl = newApiUrl;
+							this.plugin.settings.syncDirs[dirIndex].error = undefined;
+							this.plugin.saveSettings();
+						});
+				});
+
+			// API Key
+			new Setting(containerEl)
+				.setName(i18n.apiKeyLabel)
+				.setDesc(i18n.apiKeyDesc)
+				.addText((text) => {
+					text.setPlaceholder(i18n.apiKeyPlaceholder)
+						.setValue(dir.apiKey)
+						.onChange((newApiKey) => {
+							this.plugin.settings.syncDirs[dirIndex].apiKey = newApiKey;
+							this.plugin.settings.syncDirs[dirIndex].error = undefined;
+							this.plugin.saveSettings();
+						});
+					text.inputEl.type = "password";
+				});
+
+			// Sync folder
+			new Setting(containerEl)
+				.setName(i18n.pathLabel)
+				.setDesc(i18n.pathDesc)
+				.addSearch((cb) => {
+					new FolderSuggest(this.app, cb.inputEl);
+					cb.setPlaceholder(i18n.pathPlaceholder)
+						.setValue(dir.path)
+						.onChange((newPath) => {
+							this.plugin.settings.syncDirs[dirIndex].path = newPath;
+							this.plugin.settings.syncDirs[dirIndex].error = undefined;
+							this.plugin.saveSettings();
+						});
+				});
+
+			// Publish fields
+			new Setting(containerEl)
+				.setName(i18n.publishFieldLabel)
+				.setDesc(i18n.publishFieldDesc)
+				.addText((text) => {
+					text.setPlaceholder(i18n.publishFieldPlaceholder)
+						.setValue(dir.publishField || "")
+						.onChange((newField) => {
+							this.plugin.settings.syncDirs[dirIndex].publishField = newField || undefined;
+							this.plugin.saveSettings();
+						});
+				});
 		});
 
 		// Global settings

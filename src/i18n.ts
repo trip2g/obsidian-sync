@@ -14,9 +14,16 @@ export interface Translations {
 	settingsDescription: string;
 	addSyncDirectory: string;
 	testAllConnections: string;
+	pathLabel: string;
 	pathPlaceholder: string;
+	pathDesc: string;
+	apiUrlLabel: string;
 	apiUrlPlaceholder: string;
+	apiUrlDesc: string;
+	apiKeyLabel: string;
 	apiKeyPlaceholder: string;
+	apiKeyDesc: string;
+	publishFieldLabel: string;
 	publishFieldPlaceholder: string;
 	publishFieldDesc: string;
 	testConnection: string;
@@ -28,6 +35,7 @@ export interface Translations {
 	successfulConnections: (success: number, fail: number) => string;
 	skipPushConfirmationLabel: string;
 	skipPushConfirmationDesc: string;
+	onboardingLink: string;
 
 	// Sync actions
 	pulledFiles: (count: number) => string;
@@ -98,14 +106,21 @@ const en: Translations = {
 
 	// Settings
 	settingsHeading: "Sync directories",
-	settingsDescription: "Configure directories to sync with remote servers.",
+	settingsDescription: "Configure directories to sync with remote servers. See onboarding guide for details.",
 	addSyncDirectory: "Add sync directory",
 	testAllConnections: "Test all connections",
-	pathPlaceholder: "Path to folder (/ for vault root)",
-	apiUrlPlaceholder: "API URL",
+	pathLabel: "Sync folder",
+	pathPlaceholder: "Path to folder",
+	pathDesc: "Folder to sync. Use / for vault root (all files will be synced).",
+	apiUrlLabel: "API URL",
+	apiUrlPlaceholder: "https://yoursite.trip2g.com",
+	apiUrlDesc: "Your Trip2g site URL. Example: https://yoursite.trip2g.com",
+	apiKeyLabel: "API Key",
 	apiKeyPlaceholder: "API Key",
-	publishFieldPlaceholder: "Publish field (e.g., publish)",
-	publishFieldDesc: "Only push files with this frontmatter field set to true",
+	apiKeyDesc: "API key from your Trip2g admin panel.",
+	publishFieldLabel: "Publish fields",
+	publishFieldPlaceholder: "publish, public",
+	publishFieldDesc: "Only sync files with these frontmatter fields set to true. Comma-separated list. Leave empty to sync all files.",
 	testConnection: "Test connection",
 	resetSyncState: "Reset sync state",
 	resetSyncStateConfirm: "Reset sync state? Next sync will re-download all files from server.",
@@ -116,6 +131,7 @@ const en: Translations = {
 		fail === 0 ? `All connections successful (${success})` : `${success} successful, ${fail} failed`,
 	skipPushConfirmationLabel: "Skip push confirmation",
 	skipPushConfirmationDesc: "Don't show confirmation dialog before uploading files to server",
+	onboardingLink: "Onboarding guide",
 
 	// Sync actions
 	pulledFiles: (count) => `Pulled ${count} files from server`,
@@ -188,14 +204,21 @@ const ru: Translations = {
 
 	// Settings
 	settingsHeading: "Папки синхронизации",
-	settingsDescription: "Настройте папки для синхронизации с удалёнными серверами.",
+	settingsDescription: "Настройте папки для синхронизации с удалёнными серверами. См. руководство по настройке.",
 	addSyncDirectory: "Добавить папку",
 	testAllConnections: "Проверить все соединения",
-	pathPlaceholder: "Путь к папке (/ для корня)",
-	apiUrlPlaceholder: "API URL",
+	pathLabel: "Папка синхронизации",
+	pathPlaceholder: "Путь к папке",
+	pathDesc: "Папка для синхронизации. Используйте / для корня хранилища (все файлы будут синхронизированы).",
+	apiUrlLabel: "API URL",
+	apiUrlPlaceholder: "https://yoursite.trip2g.com",
+	apiUrlDesc: "URL вашего сайта Trip2g. Пример: https://yoursite.trip2g.com",
+	apiKeyLabel: "API Key",
 	apiKeyPlaceholder: "API Key",
-	publishFieldPlaceholder: "Поле публикации (напр., publish)",
-	publishFieldDesc: "Отправлять только файлы с этим полем в frontmatter",
+	apiKeyDesc: "API ключ из админ-панели Trip2g.",
+	publishFieldLabel: "Поля публикации",
+	publishFieldPlaceholder: "publish, public",
+	publishFieldDesc: "Синхронизировать только файлы с этими полями в frontmatter (значение true). Через запятую. Оставьте пустым для синхронизации всех файлов.",
 	testConnection: "Проверить соединение",
 	resetSyncState: "Сбросить состояние синхронизации",
 	resetSyncStateConfirm: "Сбросить состояние? При следующей синхронизации все файлы будут загружены с сервера.",
@@ -206,6 +229,7 @@ const ru: Translations = {
 		fail === 0 ? `Все соединения успешны (${success})` : `${success} успешно, ${fail} с ошибкой`,
 	skipPushConfirmationLabel: "Не спрашивать подтверждение",
 	skipPushConfirmationDesc: "Не показывать диалог подтверждения перед загрузкой файлов на сервер",
+	onboardingLink: "Руководство по настройке",
 
 	// Sync actions
 	pulledFiles: (count) => `Получено ${count} файлов с сервера`,
