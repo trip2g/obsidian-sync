@@ -453,11 +453,18 @@ export default class Trip2gSyncPlugin extends Plugin {
 		let count = 0;
 		for (const asset of assets) {
 			try {
-				// Normalize for lookup (remove ./ prefix)
-				const normalizedId = asset.id.replace(/^\.\//, "");
+				let resolvedFile: TFile | null = null;
 
-				// Resolve asset path relative to note
-				const resolvedFile = this.app.metadataCache.getFirstLinkpathDest(normalizedId, noteFile.path);
+				if (asset.id.startsWith("./")) {
+					// Explicit relative path - resolve relative to note's folder
+					const noteDir = noteFile.path.substring(0, noteFile.path.lastIndexOf("/"));
+					const assetPath = noteDir ? `${noteDir}/${asset.id.slice(2)}` : asset.id.slice(2);
+					const file = this.app.vault.getAbstractFileByPath(assetPath);
+					resolvedFile = file instanceof TFile ? file : null;
+				} else {
+					// Use Obsidian's link resolution
+					resolvedFile = this.app.metadataCache.getFirstLinkpathDest(asset.id, noteFile.path);
+				}
 
 				if (resolvedFile instanceof TFile) {
 					// Asset exists - check hash
