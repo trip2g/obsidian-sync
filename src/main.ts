@@ -1091,9 +1091,11 @@ class SyncSettingTab extends PluginSettingTab {
 					.setIcon("cross")
 					.setTooltip(i18n.removeDirectory)
 					.onClick(() => {
-						this.plugin.settings.syncDirs.splice(dirIndex, 1);
-						this.plugin.saveSettings();
-						this.display();
+						if (confirm(i18n.removeDirectoryConfirm)) {
+							this.plugin.settings.syncDirs.splice(dirIndex, 1);
+							this.plugin.saveSettings();
+							this.display();
+						}
 					});
 			});
 

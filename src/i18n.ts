@@ -31,6 +31,7 @@ export interface Translations {
 	resetSyncStateConfirm: string;
 	syncStateReset: string;
 	removeDirectory: string;
+	removeDirectoryConfirm: string;
 	error: string;
 	successfulConnections: (success: number, fail: number) => string;
 	skipPushConfirmationLabel: string;
@@ -126,6 +127,7 @@ const en: Translations = {
 	resetSyncStateConfirm: "Reset sync state? Next sync will re-download all files from server.",
 	syncStateReset: "Sync state reset",
 	removeDirectory: "Remove sync directory",
+	removeDirectoryConfirm: "Remove this sync connection?",
 	error: "Error",
 	successfulConnections: (success, fail) =>
 		fail === 0 ? `All connections successful (${success})` : `${success} successful, ${fail} failed`,
@@ -224,6 +226,7 @@ const ru: Translations = {
 	resetSyncStateConfirm: "Сбросить состояние? При следующей синхронизации все файлы будут загружены с сервера.",
 	syncStateReset: "Состояние синхронизации сброшено",
 	removeDirectory: "Удалить папку",
+	removeDirectoryConfirm: "Удалить это подключение?",
 	error: "Ошибка",
 	successfulConnections: (success, fail) =>
 		fail === 0 ? `Все соединения успешны (${success})` : `${success} успешно, ${fail} с ошибкой`,
