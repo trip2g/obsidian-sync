@@ -362,6 +362,20 @@ img[src*="ce.trip2g.com"] {
 	position: relative;
 }
 
+/* Spinning animation during sync */
+.sync-ribbon-icon.is-syncing svg {
+	animation: sync-spin 1s linear infinite;
+}
+
+@keyframes sync-spin {
+	from {
+		transform: rotate(0deg);
+	}
+	to {
+		transform: rotate(360deg);
+	}
+}
+
 .sync-ribbon-icon.has-pending::after {
 	content: "";
 	position: absolute;

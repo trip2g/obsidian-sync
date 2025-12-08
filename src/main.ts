@@ -38,6 +38,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 	ribbonIcon: HTMLElement | null = null;
 	checkInterval: number | null = null;
 	private boundCheckOnFocus: () => void;
+	private isSyncing: boolean = false;
 
 	async onload() {
 		// Initialize locale
@@ -50,6 +51,9 @@ export default class Trip2gSyncPlugin extends Plugin {
 		this.registerView(CONFLICT_VIEW_TYPE, (leaf) => new ConflictView(leaf));
 
 		this.ribbonIcon = this.addRibbonIcon("sync", "Trip2g Sync", () => {
+			if (this.isSyncing) {
+				return; // Already syncing
+			}
 			if (this.settings.syncDirs.length === 0) {
 				new Notice(t().noSyncDirsConfigured);
 			} else if (this.settings.syncDirs.length === 1) {
@@ -246,10 +250,47 @@ export default class Trip2gSyncPlugin extends Plugin {
 		return fields.some((field) => Boolean(frontmatter[field]));
 	}
 
+	private setSyncing(syncing: boolean): void {
+		this.isSyncing = syncing;
+		if (this.ribbonIcon) {
+			if (syncing) {
+				this.ribbonIcon.addClass("is-syncing");
+			} else {
+				this.ribbonIcon.removeClass("is-syncing");
+			}
+		}
+	}
+
+	private async saveAllOpenFiles(): Promise<void> {
+		// Force save all open markdown editors
+		const leaves = this.app.workspace.getLeavesOfType("markdown");
+		for (const leaf of leaves) {
+			const view = leaf.view;
+			if ("save" in view && typeof view.save === "function") {
+				await view.save();
+			}
+		}
+		// Small delay to ensure filesystem write completes
+		await new Promise((resolve) => setTimeout(resolve, 100));
+	}
+
 	async syncDirectory(syncDir: SyncDir): Promise<void> {
 		if (!syncDir.path || !syncDir.apiUrl || !syncDir.apiKey) {
 			new Notice(t().syncError);
 			return;
+		}
+
+		if (this.isSyncing) {
+			return;
+		}
+
+		this.setSyncing(true);
+
+		try {
+			// Save all open files before syncing
+			await this.saveAllOpenFiles();
+		} catch (error) {
+			console.error("[Trip2g Sync] Error saving files:", error);
 		}
 
 		new Notice(t().syncStarting);
@@ -303,6 +344,8 @@ export default class Trip2gSyncPlugin extends Plugin {
 		} catch (error) {
 			console.error("Sync error:", error);
 			new Notice(`${t().syncError}: ${(error as Error).message}`);
+		} finally {
+			this.setSyncing(false);
 		}
 	}
 
