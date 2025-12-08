@@ -446,6 +446,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 	): Promise<number> {
 		const noteFile = this.app.vault.getAbstractFileByPath(notePath);
 		if (!(noteFile instanceof TFile)) {
+			console.log(`[Trip2g Sync] Note file not found: ${notePath}`);
 			return 0;
 		}
 
@@ -464,19 +465,26 @@ export default class Trip2gSyncPlugin extends Plugin {
 					const localHash = await sha256HashBuffer(localBuffer);
 
 					if (localHash === asset.hash) {
+						console.log(`[Trip2g Sync] Asset ${asset.id} hash matches, skipping`);
 						continue;
 					}
+					console.log(`[Trip2g Sync] Asset ${asset.id} hash differs: local=${localHash.slice(0, 8)}... remote=${asset.hash.slice(0, 8)}...`);
+				} else {
+					console.log(`[Trip2g Sync] Asset ${asset.id} not found locally (resolvedFile=${resolvedFile})`);
 				}
 
 				// Asset missing or hash differs - download
+				console.log(`[Trip2g Sync] Downloading asset ${asset.id} from ${asset.url}`);
 				const data = await api.downloadAsset(asset.url);
 				if (!data) {
+					console.log(`[Trip2g Sync] Failed to download asset ${asset.id}`);
 					continue;
 				}
 
 				// Determine target path for the asset (pass original id to preserve ./ prefix)
 				const assetPath = this.resolveAssetPath(folder, noteFile, asset.id);
 				if (!assetPath) {
+					console.log(`[Trip2g Sync] Could not resolve asset path for ${asset.id}`);
 					continue;
 				}
 
@@ -490,12 +498,14 @@ export default class Trip2gSyncPlugin extends Plugin {
 				const existingAsset = this.app.vault.getAbstractFileByPath(assetPath);
 				if (existingAsset instanceof TFile) {
 					await this.app.vault.modifyBinary(existingAsset, data);
+					console.log(`[Trip2g Sync] Updated asset: ${assetPath}`);
 				} else {
 					await this.app.vault.createBinary(assetPath, data);
+					console.log(`[Trip2g Sync] Created asset: ${assetPath}`);
 				}
 				count++;
 			} catch (error) {
-				console.error(`[Sync] Error downloading asset ${asset.id}:`, error);
+				console.error(`[Trip2g Sync] Error downloading asset ${asset.id}:`, error);
 			}
 		}
 
