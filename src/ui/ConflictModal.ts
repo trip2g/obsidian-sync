@@ -26,20 +26,13 @@ export class ServerDeletedModal extends Modal {
 			text: i18n.serverDeletedDescription(this.filePaths.length),
 		});
 
-		// Show file list (limited to 20 items)
+		// Show file list
 		const fileListContainer = contentEl.createEl("div", { cls: "sync-file-list" });
 		fileListContainer.createEl("p", { text: i18n.serverDeletedFileList, cls: "sync-file-list-header" });
 		const fileList = fileListContainer.createEl("ul", { cls: "sync-file-list-items" });
 
-		const displayCount = Math.min(this.filePaths.length, 20);
-		for (let i = 0; i < displayCount; i++) {
-			fileList.createEl("li", { text: this.filePaths[i] });
-		}
-		if (this.filePaths.length > 20) {
-			fileList.createEl("li", {
-				text: `... and ${this.filePaths.length - 20} more`,
-				cls: "sync-file-list-more",
-			});
+		for (const filePath of this.filePaths) {
+			fileList.createEl("li", { text: filePath });
 		}
 
 		const buttonContainer = contentEl.createEl("div", { cls: "sync-conflict-buttons" });
@@ -95,20 +88,13 @@ export class PushConfirmModal extends Modal {
 			text: i18n.pushConfirmDescription(this.filePaths.length),
 		});
 
-		// Show file list (limited to 20 items)
+		// Show file list
 		const fileListContainer = contentEl.createEl("div", { cls: "sync-file-list" });
 		fileListContainer.createEl("p", { text: i18n.pushConfirmFileList, cls: "sync-file-list-header" });
 		const fileList = fileListContainer.createEl("ul", { cls: "sync-file-list-items" });
 
-		const displayCount = Math.min(this.filePaths.length, 20);
-		for (let i = 0; i < displayCount; i++) {
-			fileList.createEl("li", { text: this.filePaths[i] });
-		}
-		if (this.filePaths.length > 20) {
-			fileList.createEl("li", {
-				text: `... and ${this.filePaths.length - 20} more`,
-				cls: "sync-file-list-more",
-			});
+		for (const filePath of this.filePaths) {
+			fileList.createEl("li", { text: filePath });
 		}
 
 		// Don't ask again checkbox
