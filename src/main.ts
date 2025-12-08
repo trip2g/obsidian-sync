@@ -161,13 +161,16 @@ export default class Trip2gSyncPlugin extends Plugin {
 					switch (c.action) {
 						case "pull":
 						case "remote_only":
+							console.log(`[Trip2g Sync] Badge: ${c.path} -> ${c.action}`);
 							totalPull++;
 							break;
 						case "push":
 						case "local_only":
+							console.log(`[Trip2g Sync] Badge: ${c.path} -> ${c.action}`);
 							totalPush++;
 							break;
 						case "conflict":
+							console.log(`[Trip2g Sync] Badge: ${c.path} -> conflict`);
 							hasConflict = true;
 							break;
 					}
@@ -176,6 +179,8 @@ export default class Trip2gSyncPlugin extends Plugin {
 				// Silently ignore errors during background check
 			}
 		}
+
+		console.log(`[Trip2g Sync] Badge totals: pull=${totalPull}, push=${totalPush}, conflict=${hasConflict}`);
 
 		// Update badge
 		this.ribbonIcon.removeClass("has-pending", "has-pull", "has-push", "has-conflict");
@@ -374,6 +379,11 @@ export default class Trip2gSyncPlugin extends Plugin {
 			}
 		}
 
+		console.log(`[Trip2g Sync] Sync actions: pulls=${pulls.length}, pushes=${pushes.length}, conflicts=${conflicts.length}, localOnly=${localOnly.length}, unchanged=${unchanged}`);
+		if (pulls.length > 0) {
+			console.log(`[Trip2g Sync] Pulling: ${pulls.map(p => p.path).join(", ")}`);
+		}
+
 		// Execute pulls first (get updates from server)
 		if (pulls.length > 0) {
 			await this.executePulls(api, folder, pulls, syncState);
@@ -498,9 +508,12 @@ export default class Trip2gSyncPlugin extends Plugin {
 		syncState: SyncState
 	) {
 		const paths = pulls.map((p) => p.path);
+		console.log(`[Trip2g Sync] executePulls: fetching ${paths.length} files`);
 		const contents = await api.fetchMultipleNoteContents(paths);
+		console.log(`[Trip2g Sync] executePulls: received ${contents.size} files from server`);
 
 		for (const [path, noteData] of contents) {
+			console.log(`[Trip2g Sync] executePulls: processing ${path}, content length=${noteData.content?.length}`);
 			const fullPath = folder.path === "/" ? path : `${folder.path}/${path}`;
 
 			// Create directories if needed
