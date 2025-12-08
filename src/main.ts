@@ -1,10 +1,11 @@
 import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf } from "obsidian";
+import { GraphQLClient } from "graphql-request";
 import { FolderSuggest } from "./FolderSuggest";
-import { SyncApi } from "./api";
 import { sha256Hash, sha256HashBuffer, classifyAllFiles, updateSyncState, removeFromSyncState } from "./sync";
 import { MigrationModal, ServerDeletedModal, PushConfirmModal } from "./ui/ConflictModal";
 import { ConflictView, CONFLICT_VIEW_TYPE } from "./ui/ConflictView";
 import { t, setLocale, detectLocale } from "./i18n";
+import { getSdk, type Sdk, type FetchNoteContentsQuery, type PushNotesMutation } from "./graphql";
 import type {
 	PluginSettings,
 	SyncDir,
@@ -12,12 +13,24 @@ import type {
 	FileClassification,
 	ConflictResolution,
 	ConflictInfo,
-	NoteWithAssets,
-	RemoteAsset,
 } from "./types";
 import { DEFAULT_SETTINGS, DEFAULT_SYNC_STATE } from "./types";
 
+type RemoteAsset = FetchNoteContentsQuery["notePaths"][0]["assetReplaces"][0];
+type PushNotesPayload = Extract<PushNotesMutation["pushNotes"], { notes: unknown[] }>;
+type NoteWithAssets = PushNotesPayload["notes"][0];
+
 const SYNC_STATE_KEY = "sync-state";
+
+function createSdk(apiUrl: string, apiKey: string, pluginVersion: string): Sdk {
+	const client = new GraphQLClient(`${apiUrl}/graphql`, {
+		headers: {
+			"X-API-Key": apiKey,
+			"X-Plugin-Version": pluginVersion,
+		},
+	});
+	return getSdk(client);
+}
 
 export default class Trip2gSyncPlugin extends Plugin {
 	settings: PluginSettings;
@@ -132,7 +145,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 			}
 
 			try {
-				const api = new SyncApi(syncDir.apiUrl, syncDir.apiKey, this.manifest.version);
+				const sdk = createSdk(syncDir.apiUrl, syncDir.apiKey, this.manifest.version);
 				const syncState = this.getSyncState(syncDir.apiUrl);
 
 				// Get folder and local files
@@ -152,7 +165,13 @@ export default class Trip2gSyncPlugin extends Plugin {
 				}
 
 				// Get server hashes (silent - don't show errors for background checks)
-				const serverHashes = await api.fetchServerHashes(true);
+				const data = await sdk.FetchServerHashes();
+				const serverHashes = new Map<string, string>();
+				for (const item of data.notePaths) {
+					if (item.path && item.hash) {
+						serverHashes.set(item.path, item.hash);
+					}
+				}
 
 				// Classify files
 				const classifications = classifyAllFiles(localFiles, serverHashes, syncState);
@@ -203,8 +222,13 @@ export default class Trip2gSyncPlugin extends Plugin {
 	}
 
 	async testConnection(syncDir: SyncDir): Promise<string | null> {
-		const api = new SyncApi(syncDir.apiUrl, syncDir.apiKey, this.manifest.version);
-		return api.testConnection();
+		try {
+			const sdk = createSdk(syncDir.apiUrl, syncDir.apiKey, this.manifest.version);
+			await sdk.FetchServerHashes();
+			return null;
+		} catch (error) {
+			return (error as Error).message || "Unknown error";
+		}
 	}
 
 	/**
@@ -230,7 +254,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 		new Notice(t().syncStarting);
 
-		const api = new SyncApi(syncDir.apiUrl, syncDir.apiKey, this.manifest.version);
+		const sdk = createSdk(syncDir.apiUrl, syncDir.apiKey, this.manifest.version);
 		const syncState = this.getSyncState(syncDir.apiUrl);
 
 		try {
@@ -252,7 +276,13 @@ export default class Trip2gSyncPlugin extends Plugin {
 			}
 
 			// Step 2: Get server hashes
-			const serverHashes = await api.fetchServerHashes();
+			const data = await sdk.FetchServerHashes();
+			const serverHashes = new Map<string, string>();
+			for (const item of data.notePaths) {
+				if (item.path && item.hash) {
+					serverHashes.set(item.path, item.hash);
+				}
+			}
 
 			// Step 3: Classify all files
 			const classifications = classifyAllFiles(localFiles, serverHashes, syncState);
@@ -263,10 +293,10 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 			if (isFirstSync && conflicts.length > 0) {
 				// Show migration modal
-				await this.handleMigration(api, syncDir, folder, classifications, syncState);
+				await this.handleMigration(sdk, syncDir, folder, classifications, syncState);
 			} else {
 				// Normal sync flow
-				await this.processSyncActions(api, syncDir, folder, classifications, syncState);
+				await this.processSyncActions(sdk, syncDir, folder, classifications, syncState);
 			}
 
 			await this.saveSyncStates();
@@ -277,7 +307,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 	}
 
 	private async handleMigration(
-		api: SyncApi,
+		sdk: Sdk,
 		syncDir: SyncDir,
 		folder: TFolder,
 		classifications: FileClassification[],
@@ -298,11 +328,11 @@ export default class Trip2gSyncPlugin extends Plugin {
 					const pullActions = classifications.filter(
 						(c) => c.action === "conflict" || c.action === "remote_only"
 					);
-					await this.executePulls(api, folder, pullActions, syncState);
+					await this.executePulls(sdk, folder, pullActions, syncState);
 					new Notice(t().pulledFiles(pullActions.length));
 				} else {
 					// Review each conflict
-					await this.processSyncActions(api, syncDir, folder, classifications, syncState);
+					await this.processSyncActions(sdk, syncDir, folder, classifications, syncState);
 				}
 				resolve();
 			}).open();
@@ -310,7 +340,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 	}
 
 	private async processSyncActions(
-		api: SyncApi,
+		sdk: Sdk,
 		syncDir: SyncDir,
 		folder: TFolder,
 		classifications: FileClassification[],
@@ -386,13 +416,13 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 		// Execute pulls first (get updates from server)
 		if (pulls.length > 0) {
-			await this.executePulls(api, folder, pulls, syncState);
+			await this.executePulls(sdk, folder, pulls, syncState);
 			new Notice(t().pulledFiles(pulls.length));
 		}
 
 		// Handle conflicts
 		if (conflicts.length > 0) {
-			await this.handleConflicts(api, folder, conflicts, syncState);
+			await this.handleConflicts(sdk, syncDir, folder, conflicts, syncState);
 		}
 
 		// Push local changes (including local_only files)
@@ -400,14 +430,14 @@ export default class Trip2gSyncPlugin extends Plugin {
 		if (toPush.length > 0) {
 			const shouldPush = await this.confirmPush(toPush);
 			if (shouldPush) {
-				await this.executePushes(api, syncDir, folder, toPush, syncState);
+				await this.executePushes(sdk, syncDir, folder, toPush, syncState);
 				new Notice(t().pushedFiles(toPush.length));
 			}
 		}
 
 		// Handle locally deleted files - hide on server
 		if (localDeleted.length > 0) {
-			await this.handleLocalDeleted(api, localDeleted, syncState);
+			await this.handleLocalDeleted(sdk, localDeleted, syncState);
 		}
 
 		// Handle server deleted files - ask user what to do
@@ -420,7 +450,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 			.filter((c) => c.action === "unchanged" || c.action === "pull")
 			.map((c) => c.path);
 		if (syncedPaths.length > 0) {
-			await this.checkAndDownloadAssets(api, syncedPaths);
+			await this.checkAndDownloadAssets(sdk, syncedPaths);
 		}
 
 		if (unchanged > 0 && pulls.length === 0 && pushes.length === 0 && conflicts.length === 0) {
@@ -431,15 +461,21 @@ export default class Trip2gSyncPlugin extends Plugin {
 		this.checkForPendingChanges();
 	}
 
-	private async checkAndDownloadAssets(api: SyncApi, paths: string[]) {
+	private async checkAndDownloadAssets(sdk: Sdk, paths: string[]) {
 		let downloadedCount = 0;
 
 		// Fetch only asset info (no content) in batches of 100
-		const allAssets = await api.fetchMultipleNoteAssets(paths);
+		const batchSize = 100;
+		for (let i = 0; i < paths.length; i += batchSize) {
+			const batch = paths.slice(i, i + batchSize);
+			const data = await sdk.FetchNoteAssets({ filter: { paths: batch } });
 
-		for (const [, assets] of allAssets) {
-			const count = await this.downloadMissingAssetsWithCount(api, assets);
-			downloadedCount += count;
+			for (const note of data.notePaths) {
+				if (note.assetReplaces && note.assetReplaces.length > 0) {
+					const count = await this.downloadMissingAssetsWithCount(note.assetReplaces);
+					downloadedCount += count;
+				}
+			}
 		}
 
 		if (downloadedCount > 0) {
@@ -447,10 +483,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 		}
 	}
 
-	private async downloadMissingAssetsWithCount(
-		api: SyncApi,
-		assets: RemoteAsset[]
-	): Promise<number> {
+	private async downloadMissingAssetsWithCount(assets: RemoteAsset[]): Promise<number> {
 		let count = 0;
 		for (const asset of assets) {
 			try {
@@ -472,7 +505,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 				}
 
 				// Asset missing or hash differs - download
-				const data = await api.downloadAsset(asset.url);
+				const data = await this.downloadAsset(asset.url);
 				if (!data) {
 					console.log(`[Trip2g Sync] Failed to download asset ${assetPath}`);
 					continue;
@@ -502,49 +535,56 @@ export default class Trip2gSyncPlugin extends Plugin {
 	}
 
 	private async executePulls(
-		api: SyncApi,
+		sdk: Sdk,
 		folder: TFolder,
 		pulls: FileClassification[],
 		syncState: SyncState
 	) {
 		const paths = pulls.map((p) => p.path);
 		console.log(`[Trip2g Sync] executePulls: fetching ${paths.length} files`);
-		const contents = await api.fetchMultipleNoteContents(paths);
-		console.log(`[Trip2g Sync] executePulls: received ${contents.size} files from server`);
 
-		for (const [path, noteData] of contents) {
-			console.log(`[Trip2g Sync] executePulls: processing ${path}, content length=${noteData.content?.length}`);
-			const fullPath = folder.path === "/" ? path : `${folder.path}/${path}`;
+		// Fetch in batches of 100
+		const batchSize = 100;
+		let totalReceived = 0;
 
-			// Create directories if needed
-			const dirPath = fullPath.substring(0, fullPath.lastIndexOf("/"));
-			if (dirPath && !this.app.vault.getAbstractFileByPath(dirPath)) {
-				await this.app.vault.createFolder(dirPath);
-			}
+		for (let i = 0; i < paths.length; i += batchSize) {
+			const batch = paths.slice(i, i + batchSize);
+			const data = await sdk.FetchNoteContents({ filter: { paths: batch } });
+			totalReceived += data.notePaths.length;
 
-			// Write or update file
-			const existingFile = this.app.vault.getAbstractFileByPath(fullPath);
-			if (existingFile instanceof TFile) {
-				await this.app.vault.modify(existingFile, noteData.content);
-			} else {
-				await this.app.vault.create(fullPath, noteData.content);
-			}
+			for (const noteData of data.notePaths) {
+				console.log(`[Trip2g Sync] executePulls: processing ${noteData.path}, content length=${noteData.content?.length}`);
+				const fullPath = folder.path === "/" ? noteData.path : `${folder.path}/${noteData.path}`;
 
-			// Update sync state
-			const hash = await sha256Hash(noteData.content);
-			updateSyncState(syncState, path, hash);
+				// Create directories if needed
+				const dirPath = fullPath.substring(0, fullPath.lastIndexOf("/"));
+				if (dirPath && !this.app.vault.getAbstractFileByPath(dirPath)) {
+					await this.app.vault.createFolder(dirPath);
+				}
 
-			// Download missing assets
-			if (noteData.assets && noteData.assets.length > 0) {
-				await this.downloadMissingAssets(api, noteData.assets);
+				// Write or update file
+				const existingFile = this.app.vault.getAbstractFileByPath(fullPath);
+				if (existingFile instanceof TFile) {
+					await this.app.vault.modify(existingFile, noteData.content);
+				} else {
+					await this.app.vault.create(fullPath, noteData.content);
+				}
+
+				// Update sync state
+				const hash = await sha256Hash(noteData.content);
+				updateSyncState(syncState, noteData.path, hash);
+
+				// Download missing assets
+				if (noteData.assetReplaces && noteData.assetReplaces.length > 0) {
+					await this.downloadMissingAssets(noteData.assetReplaces);
+				}
 			}
 		}
+
+		console.log(`[Trip2g Sync] executePulls: received ${totalReceived} files from server`);
 	}
 
-	private async downloadMissingAssets(
-		api: SyncApi,
-		assets: RemoteAsset[]
-	) {
+	private async downloadMissingAssets(assets: RemoteAsset[]) {
 		for (const asset of assets) {
 			try {
 				// Use absolutePath from server - exact location in vault
@@ -562,7 +602,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 				}
 
 				// Asset missing or hash differs - download
-				const data = await api.downloadAsset(asset.url);
+				const data = await this.downloadAsset(asset.url);
 				if (!data) {
 					continue;
 				}
@@ -586,13 +626,22 @@ export default class Trip2gSyncPlugin extends Plugin {
 	}
 
 	private async handleConflicts(
-		api: SyncApi,
+		sdk: Sdk,
+		syncDir: SyncDir,
 		folder: TFolder,
 		conflicts: FileClassification[],
 		syncState: SyncState
 	) {
 		// Prepare all conflict infos
 		const conflictInfos: Array<{ classification: FileClassification; info: ConflictInfo }> = [];
+
+		// Fetch all conflict contents in one batch
+		const paths = conflicts.map((c) => c.path);
+		const data = await sdk.FetchNoteContents({ filter: { paths } });
+		const remoteContents = new Map<string, string>();
+		for (const note of data.notePaths) {
+			remoteContents.set(note.path, note.content);
+		}
 
 		for (const conflict of conflicts) {
 			const fullPath = folder.path === "/" ? conflict.path : `${folder.path}/${conflict.path}`;
@@ -603,9 +652,9 @@ export default class Trip2gSyncPlugin extends Plugin {
 			}
 
 			const localContent = await this.app.vault.read(file);
-			const remoteContent = await api.fetchNoteContent(conflict.path);
+			const remoteContent = remoteContents.get(conflict.path);
 
-			if (remoteContent === null) {
+			if (remoteContent === undefined) {
 				// Remote no longer exists, skip
 				continue;
 			}
@@ -633,7 +682,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 		for (let i = 0; i < conflictInfos.length; i++) {
 			const { classification, info } = conflictInfos[i];
 			const resolution = resolutions[i];
-			await this.resolveConflict(api, folder, classification, info, resolution, syncState);
+			await this.resolveConflict(sdk, syncDir, folder, classification, info, resolution, syncState);
 		}
 	}
 
@@ -679,7 +728,8 @@ export default class Trip2gSyncPlugin extends Plugin {
 	}
 
 	private async resolveConflict(
-		api: SyncApi,
+		sdk: Sdk,
+		syncDir: SyncDir,
 		folder: TFolder,
 		classification: FileClassification,
 		conflict: ConflictInfo,
@@ -693,12 +743,14 @@ export default class Trip2gSyncPlugin extends Plugin {
 			case "keep_local":
 				// Push local to server immediately
 				if (file instanceof TFile) {
-					const notes = await api.pushNotes([{ path: conflict.path, content: conflict.localContent }]);
+					const result = await sdk.PushNotes({ input: { updates: [{ path: conflict.path, content: conflict.localContent }] } });
 					updateSyncState(syncState, conflict.path, conflict.localHash);
 					new Notice(`${t().pushed}: ${conflict.path}`);
 					// Process assets if any
-					for (const note of notes) {
-						await this.processNoteAssets(api, note, folder);
+					if ("notes" in result.pushNotes) {
+						for (const note of result.pushNotes.notes) {
+							await this.processNoteAssets(syncDir, note, folder);
+						}
 					}
 				}
 				break;
@@ -732,7 +784,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 	}
 
 	private async executePushes(
-		api: SyncApi,
+		sdk: Sdk,
 		syncDir: SyncDir,
 		folder: TFolder,
 		pushes: FileClassification[],
@@ -754,7 +806,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 			return;
 		}
 
-		const notes = await api.pushNotes(updates);
+		const result = await sdk.PushNotes({ input: { updates } });
 
 		// Update sync state and process assets
 		for (const update of updates) {
@@ -763,18 +815,20 @@ export default class Trip2gSyncPlugin extends Plugin {
 		}
 
 		// Process assets
-		for (const note of notes) {
-			await this.processNoteAssets(api, note, folder);
+		if ("notes" in result.pushNotes) {
+			for (const note of result.pushNotes.notes) {
+				await this.processNoteAssets(syncDir, note, folder);
+			}
 		}
 	}
 
-	private async handleLocalDeleted(api: SyncApi, localDeleted: FileClassification[], syncState: SyncState) {
+	private async handleLocalDeleted(sdk: Sdk, localDeleted: FileClassification[], syncState: SyncState) {
 		// Files were deleted locally - hide them on server
 		const paths = localDeleted.map((r) => r.path);
 
 		if (paths.length > 0) {
-			const success = await api.hideNotes(paths);
-			if (success) {
+			const result = await sdk.HideNotes({ input: { paths } });
+			if ("success" in result.hideNotes && result.hideNotes.success) {
 				for (const path of paths) {
 					removeFromSyncState(syncState, path);
 				}
@@ -838,7 +892,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 		});
 	}
 
-	private async processNoteAssets(api: SyncApi, note: NoteWithAssets, folder: TFolder) {
+	private async processNoteAssets(syncDir: SyncDir, note: NoteWithAssets, folder: TFolder) {
 		if (!note.assets || note.assets.length === 0) {
 			return;
 		}
@@ -863,7 +917,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 				if (!asset.sha256Hash || asset.sha256Hash !== localHash) {
 					const blob = new Blob([arrayBuffer]);
-					await api.uploadAsset(note.id, blob, resolvedFile.name, asset.path, resolvedFile.path, localHash);
+					await this.uploadAsset(syncDir, String(note.id), blob, resolvedFile.name, asset.path, resolvedFile.path, localHash);
 				}
 			} catch (error) {
 				console.error(`Error processing asset ${asset.path}:`, error);
@@ -885,6 +939,93 @@ export default class Trip2gSyncPlugin extends Plugin {
 		}
 
 		return files;
+	}
+
+	private async downloadAsset(url: string): Promise<ArrayBuffer | null> {
+		try {
+			const response = await fetch(url);
+			if (!response.ok) {
+				console.error(`Failed to download asset: ${response.status}`);
+				return null;
+			}
+			return await response.arrayBuffer();
+		} catch (error) {
+			console.error(`Error downloading asset from ${url}:`, error);
+			return null;
+		}
+	}
+
+	private async uploadAsset(
+		syncDir: SyncDir,
+		noteId: string,
+		assetBlob: Blob,
+		fileName: string,
+		relativePath: string,
+		absolutePath: string,
+		sha256Hash: string
+	): Promise<boolean> {
+		const operations = JSON.stringify({
+			variables: {
+				input: {
+					file: null,
+					noteId: noteId,
+					sha256Hash: sha256Hash,
+					path: relativePath,
+					absolutePath: absolutePath,
+				},
+			},
+			query: `mutation($input: UploadNoteAssetInput!) {
+				uploadNoteAsset(input: $input) {
+					... on ErrorPayload {
+						__typename
+						message
+					}
+					... on UploadNoteAssetPayload {
+						__typename
+						uploadSkipped
+					}
+				}
+			}`,
+		});
+
+		const map = JSON.stringify({ "0": ["variables.input.file"] });
+
+		const formData = new FormData();
+		formData.append("operations", operations);
+		formData.append("map", map);
+		formData.append("0", assetBlob, fileName);
+
+		try {
+			const response = await fetch(`${syncDir.apiUrl}/graphql`, {
+				method: "POST",
+				headers: {
+					"X-API-Key": syncDir.apiKey,
+					"X-Plugin-Version": this.manifest.version,
+				},
+				body: formData,
+			});
+
+			if (!response.ok) {
+				throw new Error(`HTTP error! status: ${response.status}`);
+			}
+
+			const result = await response.json();
+			if (result.errors) {
+				console.error(`Asset upload error for ${relativePath}:`, result.errors);
+				return false;
+			}
+
+			const payload = result.data?.uploadNoteAsset;
+			if (payload?.__typename === "ErrorPayload") {
+				new Notice(`Asset upload failed: ${payload.message}`);
+				return false;
+			}
+
+			return true;
+		} catch (error) {
+			console.error(`Failed to upload asset ${relativePath}:`, error);
+			return false;
+		}
 	}
 
 	private shouldExcludeFile(filePath: string): boolean {

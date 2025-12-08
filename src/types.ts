@@ -31,41 +31,6 @@ export const DEFAULT_SYNC_STATE: SyncState = {
 	files: {},
 };
 
-// API response types
-export interface NoteAsset {
-	path: string;
-	sha256Hash: string;
-}
-
-export interface NoteWithAssets {
-	id: string;
-	path: string;
-	assets?: NoteAsset[];
-}
-
-export interface ServerNotePath {
-	path: string;
-	hash: string;
-}
-
-export interface ServerNoteContent {
-	path: string;
-	content: string;
-}
-
-// Asset from server (for download during pull)
-export interface RemoteAsset {
-	id: string; // path reference in note (e.g., "image.png")
-	url: string; // full URL to download
-	hash: string; // SHA256 hash
-	absolutePath: string; // absolute path in vault where asset was located
-}
-
-export interface NoteContentWithAssets {
-	content: string;
-	assets: RemoteAsset[];
-}
-
 // Sync classification
 export type SyncAction = "unchanged" | "pull" | "push" | "conflict" | "local_only" | "remote_only" | "local_deleted" | "server_deleted";
 

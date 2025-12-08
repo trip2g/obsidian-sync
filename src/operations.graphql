@@ -1,0 +1,73 @@
+query FetchServerHashes {
+	notePaths {
+		path: value
+		hash: latestContentHash
+	}
+}
+
+query FetchNoteContents($filter: NotePathsFilter) {
+	notePaths(filter: $filter) {
+		path: value
+		content
+		assetReplaces {
+			id
+			url
+			hash
+			absolutePath
+		}
+	}
+}
+
+query FetchNoteAssets($filter: NotePathsFilter) {
+	notePaths(filter: $filter) {
+		path: value
+		assetReplaces {
+			id
+			url
+			hash
+			absolutePath
+		}
+	}
+}
+
+mutation PushNotes($input: PushNotesInput!) {
+	pushNotes(input: $input) {
+		... on ErrorPayload {
+			message
+		}
+		... on PushNotesPayload {
+			notes {
+				id
+				path
+				assets {
+					path
+					sha256Hash
+				}
+			}
+		}
+	}
+}
+
+mutation HideNotes($input: HideNotesInput!) {
+	hideNotes(input: $input) {
+		... on HideNotesPayload {
+			success
+		}
+		... on ErrorPayload {
+			message
+		}
+	}
+}
+
+mutation UploadNoteAsset($input: UploadNoteAssetInput!) {
+	uploadNoteAsset(input: $input) {
+		... on ErrorPayload {
+			__typename
+			message
+		}
+		... on UploadNoteAssetPayload {
+			__typename
+			uploadSkipped
+		}
+	}
+}
