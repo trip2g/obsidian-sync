@@ -91,6 +91,7 @@ export class SyncApi {
 						id
 						url
 						hash
+						absolutePath
 					}
 				}
 			}
@@ -139,6 +140,7 @@ export class SyncApi {
 						id
 						url
 						hash
+						absolutePath
 					}
 				}
 			}

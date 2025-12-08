@@ -58,6 +58,7 @@ export interface RemoteAsset {
 	id: string; // path reference in note (e.g., "image.png")
 	url: string; // full URL to download
 	hash: string; // SHA256 hash
+	absolutePath: string; // absolute path in vault where asset was located
 }
 
 export interface NoteContentWithAssets {
