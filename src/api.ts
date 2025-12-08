@@ -4,7 +4,8 @@ import type { ServerNotePath, ServerNoteContent, NoteWithAssets, NoteContentWith
 export class SyncApi {
 	constructor(
 		private apiUrl: string,
-		private apiKey: string
+		private apiKey: string,
+		private pluginVersion: string
 	) {}
 
 	private async graphqlRequest<T>(query: string, variables?: Record<string, unknown>, silent = false): Promise<T | null> {
@@ -14,6 +15,7 @@ export class SyncApi {
 				headers: {
 					"Content-Type": "application/json",
 					"X-API-Key": this.apiKey,
+					"X-Plugin-Version": this.pluginVersion,
 				},
 				body: JSON.stringify({ query, variables }),
 			});
@@ -258,6 +260,7 @@ export class SyncApi {
 				method: "POST",
 				headers: {
 					"X-API-Key": this.apiKey,
+					"X-Plugin-Version": this.pluginVersion,
 				},
 				body: formData,
 			});

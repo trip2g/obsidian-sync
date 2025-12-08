@@ -132,7 +132,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 			}
 
 			try {
-				const api = new SyncApi(syncDir.apiUrl, syncDir.apiKey);
+				const api = new SyncApi(syncDir.apiUrl, syncDir.apiKey, this.manifest.version);
 				const syncState = this.getSyncState(syncDir.apiUrl);
 
 				// Get folder and local files
@@ -198,7 +198,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 	}
 
 	async testConnection(syncDir: SyncDir): Promise<string | null> {
-		const api = new SyncApi(syncDir.apiUrl, syncDir.apiKey);
+		const api = new SyncApi(syncDir.apiUrl, syncDir.apiKey, this.manifest.version);
 		return api.testConnection();
 	}
 
@@ -224,7 +224,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 		new Notice(t().syncStarting);
 
-		const api = new SyncApi(syncDir.apiUrl, syncDir.apiKey);
+		const api = new SyncApi(syncDir.apiUrl, syncDir.apiKey, this.manifest.version);
 		const syncState = this.getSyncState(syncDir.apiUrl);
 
 		try {
