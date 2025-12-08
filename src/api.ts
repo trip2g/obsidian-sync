@@ -127,6 +127,50 @@ export class SyncApi {
 		return contents;
 	}
 
+	async fetchMultipleNoteAssets(paths: string[]): Promise<Map<string, RemoteAsset[]>> {
+		const assets = new Map<string, RemoteAsset[]>();
+		if (paths.length === 0) return assets;
+
+		const query = `
+			query($filter: NotePathsFilter) {
+				notePaths(filter: $filter) {
+					path: value
+					assetReplaces {
+						id
+						url
+						hash
+					}
+				}
+			}
+		`;
+
+		// Fetch in batches of 100
+		const batchSize = 100;
+		for (let i = 0; i < paths.length; i += batchSize) {
+			const batch = paths.slice(i, i + batchSize);
+			const variables = {
+				filter: { paths: batch },
+			};
+
+			const data = await this.graphqlRequest<{
+				notePaths: Array<{
+					path: string;
+					assetReplaces: RemoteAsset[];
+				}>;
+			}>(query, variables);
+
+			if (data?.notePaths) {
+				for (const note of data.notePaths) {
+					if (note.assetReplaces && note.assetReplaces.length > 0) {
+						assets.set(note.path, note.assetReplaces);
+					}
+				}
+			}
+		}
+
+		return assets;
+	}
+
 	async downloadAsset(url: string): Promise<ArrayBuffer | null> {
 		try {
 			const response = await fetch(url);

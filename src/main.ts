@@ -424,16 +424,12 @@ export default class Trip2gSyncPlugin extends Plugin {
 	private async checkAndDownloadAssets(api: SyncApi, folder: TFolder, paths: string[]) {
 		let downloadedCount = 0;
 
-		// Fetch all note contents in batches of 100
-		const allContents = await api.fetchMultipleNoteContents(paths);
+		// Fetch only asset info (no content) in batches of 100
+		const allAssets = await api.fetchMultipleNoteAssets(paths);
 
-		for (const [path, noteData] of allContents) {
-			if (!noteData.assets || noteData.assets.length === 0) {
-				continue;
-			}
-
+		for (const [path, assets] of allAssets) {
 			const fullPath = folder.path === "/" ? path : `${folder.path}/${path}`;
-			const count = await this.downloadMissingAssetsWithCount(api, folder, fullPath, noteData.assets);
+			const count = await this.downloadMissingAssetsWithCount(api, folder, fullPath, assets);
 			downloadedCount += count;
 		}
 
