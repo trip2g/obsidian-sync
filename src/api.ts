@@ -74,62 +74,54 @@ export class SyncApi {
 	}
 
 	async fetchNoteContentWithAssets(path: string): Promise<NoteContentWithAssets | null> {
+		const results = await this.fetchMultipleNoteContents([path]);
+		return results.get(path) ?? null;
+	}
+
+	async fetchMultipleNoteContents(paths: string[]): Promise<Map<string, NoteContentWithAssets>> {
+		const contents = new Map<string, NoteContentWithAssets>();
+		if (paths.length === 0) return contents;
+
 		const query = `
 			query($filter: NotePathsFilter) {
 				notePaths(filter: $filter) {
 					path: value
-					latestNoteView {
-						content
-						assetReplaces {
-							id
-							url
-							hash
-						}
+					content
+					assetReplaces {
+						id
+						url
+						hash
 					}
 				}
 			}
 		`;
 
-		const variables = {
-			filter: { like: path },
-		};
-
-		const data = await this.graphqlRequest<{
-			notePaths: Array<{
-				path: string;
-				latestNoteView: {
-					content: string;
-					assetReplaces: RemoteAsset[];
-				} | null;
-			}>;
-		}>(query, variables);
-
-		const noteView = data?.notePaths?.[0]?.latestNoteView;
-		if (noteView?.content !== undefined) {
-			return {
-				content: noteView.content,
-				assets: noteView.assetReplaces || [],
-			};
-		}
-
-		return null;
-	}
-
-	async fetchMultipleNoteContents(paths: string[]): Promise<Map<string, NoteContentWithAssets>> {
-		const contents = new Map<string, NoteContentWithAssets>();
-
-		// Fetch in parallel with batching to avoid overwhelming the server
-		const batchSize = 5;
+		// Fetch in batches of 100
+		const batchSize = 100;
 		for (let i = 0; i < paths.length; i += batchSize) {
 			const batch = paths.slice(i, i + batchSize);
-			const results = await Promise.all(batch.map((path) => this.fetchNoteContentWithAssets(path)));
+			const variables = {
+				filter: { paths: batch },
+			};
 
-			batch.forEach((path, index) => {
-				const result = results[index];
-				if (result !== null) {
-					contents.set(path, result);
+			const data = await this.graphqlRequest<{
+				notePaths: Array<{
+					path: string;
+					content: string;
+					assetReplaces: RemoteAsset[];
+				}>;
+			}>(query, variables);
+
+			if (data?.notePaths) {
+				for (const note of data.notePaths) {
+					if (note.content !== undefined) {
+						contents.set(note.path, {
+							content: note.content,
+							assets: note.assetReplaces || [],
+						});
+					}
 				}
-			});
+			}
 		}
 
 		return contents;
