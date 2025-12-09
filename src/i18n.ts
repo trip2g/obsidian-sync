@@ -94,6 +94,17 @@ export interface Translations {
 	pushConfirmProceed: string;
 	pushConfirmCancel: string;
 	pushConfirmDontAskAgain: string;
+
+	// Asset conflict modal
+	assetConflictTitle: string;
+	assetConflictDescription: (count: number) => string;
+	assetConflictFileList: string;
+	assetConflictKeepLocal: string;
+	assetConflictKeepRemote: string;
+	assetConflictSkip: string;
+	assetConflictApplyToAll: string;
+	assetUploaded: (count: number) => string;
+	assetDownloaded: (count: number) => string;
 }
 
 const en: Translations = {
@@ -193,6 +204,18 @@ const en: Translations = {
 	pushConfirmProceed: "Upload",
 	pushConfirmCancel: "Cancel",
 	pushConfirmDontAskAgain: "Don't ask again",
+
+	// Asset conflict modal
+	assetConflictTitle: "Asset conflict",
+	assetConflictDescription: (count) =>
+		`${count} asset(s) differ between local and server. Choose which version to keep:`,
+	assetConflictFileList: "Conflicting assets:",
+	assetConflictKeepLocal: "Upload local",
+	assetConflictKeepRemote: "Download from server",
+	assetConflictSkip: "Skip",
+	assetConflictApplyToAll: "Apply to all conflicts",
+	assetUploaded: (count) => `Uploaded ${count} assets`,
+	assetDownloaded: (count) => `Downloaded ${count} assets`,
 };
 
 const ru: Translations = {
@@ -292,6 +315,18 @@ const ru: Translations = {
 	pushConfirmProceed: "Загрузить",
 	pushConfirmCancel: "Отмена",
 	pushConfirmDontAskAgain: "Больше не спрашивать",
+
+	// Asset conflict modal
+	assetConflictTitle: "Конфликт ассетов",
+	assetConflictDescription: (count) =>
+		`${count} ассет(ов) отличаются между локальной и серверной версиями. Выберите какую версию оставить:`,
+	assetConflictFileList: "Конфликтующие ассеты:",
+	assetConflictKeepLocal: "Загрузить локальные",
+	assetConflictKeepRemote: "Скачать с сервера",
+	assetConflictSkip: "Пропустить",
+	assetConflictApplyToAll: "Применить ко всем конфликтам",
+	assetUploaded: (count) => `Загружено ${count} ассетов`,
+	assetDownloaded: (count) => `Скачано ${count} ассетов`,
 };
 
 const translations: Record<Locale, Translations> = { en, ru };

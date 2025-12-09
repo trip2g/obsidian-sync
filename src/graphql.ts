@@ -2314,7 +2314,7 @@ export type FetchNoteAssetsQueryVariables = Exact<{
 }>;
 
 
-export type FetchNoteAssetsQuery = { notePaths: Array<{ path: string, assetReplaces: Array<{ id: string, url: string, hash: string, absolutePath: string }> }> };
+export type FetchNoteAssetsQuery = { notePaths: Array<{ path: string, latestNoteView?: { versionId: number } | null, assetReplaces: Array<{ id: string, url: string, hash: string, absolutePath: string }> }> };
 
 export type PushNotesMutationVariables = Exact<{
   input: PushNotesInput;
@@ -2373,6 +2373,9 @@ export const FetchNoteAssetsDocument = gql`
     query FetchNoteAssets($filter: NotePathsFilter) {
   notePaths(filter: $filter) {
     path: value
+    latestNoteView {
+      versionId
+    }
     assetReplaces {
       id
       url

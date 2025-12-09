@@ -21,6 +21,9 @@ query FetchNoteContents($filter: NotePathsFilter) {
 query FetchNoteAssets($filter: NotePathsFilter) {
 	notePaths(filter: $filter) {
 		path: value
+		latestNoteView {
+			versionId
+		}
 		assetReplaces {
 			id
 			url

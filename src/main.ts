@@ -2,7 +2,7 @@ import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, 
 import { GraphQLClient } from "graphql-request";
 import { FolderSuggest } from "./FolderSuggest";
 import { sha256Hash, sha256HashBuffer, classifyAllFiles, updateSyncState, removeFromSyncState } from "./sync";
-import { MigrationModal, ServerDeletedModal, PushConfirmModal } from "./ui/ConflictModal";
+import { MigrationModal, ServerDeletedModal, PushConfirmModal, AssetConflictModal, type AssetConflict, type AssetConflictResolution } from "./ui/ConflictModal";
 import { ConflictView, CONFLICT_VIEW_TYPE } from "./ui/ConflictView";
 import { t, setLocale, detectLocale } from "./i18n";
 import { getSdk, type Sdk, type FetchNoteContentsQuery, type PushNotesMutation } from "./graphql";
@@ -22,8 +22,12 @@ type NoteWithAssets = PushNotesPayload["notes"][0];
 
 const SYNC_STATE_KEY = "sync-state";
 
+function normalizeApiUrl(url: string): string {
+	return url.replace(/\/+$/, ""); // Remove trailing slashes
+}
+
 function createSdk(apiUrl: string, apiKey: string, pluginVersion: string): Sdk {
-	const client = new GraphQLClient(`${apiUrl}/graphql`, {
+	const client = new GraphQLClient(`${normalizeApiUrl(apiUrl)}/graphql`, {
 		headers: {
 			"X-API-Key": apiKey,
 			"X-Plugin-Version": pluginVersion,
@@ -265,8 +269,8 @@ export default class Trip2gSyncPlugin extends Plugin {
 		// Force save all open markdown editors
 		const leaves = this.app.workspace.getLeavesOfType("markdown");
 		for (const leaf of leaves) {
-			const view = leaf.view;
-			if ("save" in view && typeof view.save === "function") {
+			const view = leaf.view as { save?: () => Promise<void> };
+			if (view.save) {
 				await view.save();
 			}
 		}
@@ -493,7 +497,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 			.filter((c) => c.action === "unchanged" || c.action === "pull")
 			.map((c) => c.path);
 		if (syncedPaths.length > 0) {
-			await this.checkAndDownloadAssets(sdk, syncedPaths);
+			await this.checkAndSyncAssets(sdk, syncDir, syncedPaths);
 		}
 
 		if (unchanged > 0 && pulls.length === 0 && pushes.length === 0 && conflicts.length === 0) {
@@ -504,8 +508,9 @@ export default class Trip2gSyncPlugin extends Plugin {
 		this.checkForPendingChanges();
 	}
 
-	private async checkAndDownloadAssets(sdk: Sdk, paths: string[]) {
-		let downloadedCount = 0;
+	private async checkAndSyncAssets(sdk: Sdk, syncDir: SyncDir, paths: string[]) {
+		const conflicts: AssetConflict[] = [];
+		const toDownload: Array<{ asset: RemoteAsset }> = [];
 
 		// Fetch only asset info (no content) in batches of 100
 		const batchSize = 100;
@@ -514,67 +519,166 @@ export default class Trip2gSyncPlugin extends Plugin {
 			const data = await sdk.FetchNoteAssets({ filter: { paths: batch } });
 
 			for (const note of data.notePaths) {
-				if (note.assetReplaces && note.assetReplaces.length > 0) {
-					const count = await this.downloadMissingAssetsWithCount(note.assetReplaces);
-					downloadedCount += count;
+				if (!note.assetReplaces || note.assetReplaces.length === 0) {
+					continue;
 				}
+
+				const noteId = note.latestNoteView?.versionId;
+				if (!noteId) {
+					console.log(`[Trip2g Sync] Note ${note.path} has no versionId, skipping assets`);
+					continue;
+				}
+
+				for (const asset of note.assetReplaces) {
+					const assetPath = asset.absolutePath;
+					const existingFile = this.app.vault.getAbstractFileByPath(assetPath);
+
+					if (existingFile instanceof TFile) {
+						// Asset exists locally - check hash
+						const localBuffer = await this.app.vault.readBinary(existingFile);
+						const localHash = await sha256HashBuffer(localBuffer);
+
+						if (localHash === asset.hash) {
+							// Hashes match - no action needed
+							continue;
+						}
+
+						// Conflict: local and remote differ
+						console.log(`[Trip2g Sync] Asset conflict ${assetPath}: local=${localHash.slice(0, 8)}... remote=${asset.hash.slice(0, 8)}...`);
+						conflicts.push({
+							path: asset.id,
+							absolutePath: assetPath,
+							localHash,
+							remoteHash: asset.hash,
+							remoteUrl: asset.url,
+							noteId: String(noteId),
+						});
+					} else {
+						// Asset missing locally - download
+						console.log(`[Trip2g Sync] Asset ${assetPath} not found locally, will download`);
+						toDownload.push({ asset });
+					}
+				}
+			}
+		}
+
+		// Download missing assets (no conflict - they don't exist locally)
+		let downloadedCount = 0;
+		for (const { asset } of toDownload) {
+			const downloaded = await this.downloadSingleAsset(asset);
+			if (downloaded) {
+				downloadedCount++;
 			}
 		}
 
 		if (downloadedCount > 0) {
-			new Notice(`Downloaded ${downloadedCount} assets`);
+			new Notice(t().assetDownloaded(downloadedCount));
+		}
+
+		// Handle conflicts - ask user (deduplicate by absolutePath)
+		if (conflicts.length > 0) {
+			const uniqueConflicts = conflicts.filter(
+				(c, i, arr) => arr.findIndex((x) => x.absolutePath === c.absolutePath) === i
+			);
+			console.log(`[Trip2g Sync] Asset conflicts:`, uniqueConflicts.map(c => c.absolutePath));
+			await this.handleAssetConflicts(syncDir, uniqueConflicts);
 		}
 	}
 
-	private async downloadMissingAssetsWithCount(assets: RemoteAsset[]): Promise<number> {
-		let count = 0;
-		for (const asset of assets) {
-			try {
-				// Use absolutePath from server - exact location in vault
-				const assetPath = asset.absolutePath;
-				const existingFile = this.app.vault.getAbstractFileByPath(assetPath);
+	private async handleAssetConflicts(syncDir: SyncDir, conflicts: AssetConflict[]): Promise<void> {
+		let remaining = [...conflicts];
+		let uploadedCount = 0;
+		let downloadedCount = 0;
 
-				if (existingFile instanceof TFile) {
-					// Asset exists - check hash
-					const localBuffer = await this.app.vault.readBinary(existingFile);
-					const localHash = await sha256HashBuffer(localBuffer);
+		while (remaining.length > 0) {
+			const current = remaining[0];
 
-					if (localHash === asset.hash) {
-						continue;
+			const { resolution, applyToAll } = await new Promise<{ resolution: AssetConflictResolution; applyToAll: boolean }>((resolve) => {
+				new AssetConflictModal(this.app, remaining, (res, all) => {
+					resolve({ resolution: res, applyToAll: all });
+				}).open();
+			});
+
+			const toProcess = applyToAll ? remaining : [current];
+
+			for (const conflict of toProcess) {
+				if (resolution === "keep_local") {
+					// Upload local asset to server
+					const file = this.app.vault.getAbstractFileByPath(conflict.absolutePath);
+					if (file instanceof TFile) {
+						const buffer = await this.app.vault.readBinary(file);
+						const blob = new Blob([buffer]);
+						const success = await this.uploadAsset(
+							syncDir,
+							conflict.noteId,
+							blob,
+							file.name,
+							conflict.path,
+							conflict.absolutePath,
+							conflict.localHash
+						);
+						if (success) {
+							uploadedCount++;
+						}
 					}
-					console.log(`[Trip2g Sync] Asset ${assetPath} hash differs: local=${localHash.slice(0, 8)}... remote=${asset.hash.slice(0, 8)}...`);
-				} else {
-					console.log(`[Trip2g Sync] Asset ${assetPath} not found locally`);
+				} else if (resolution === "keep_remote") {
+					// Download from server
+					const data = await this.downloadAsset(conflict.remoteUrl);
+					if (data) {
+						const file = this.app.vault.getAbstractFileByPath(conflict.absolutePath);
+						if (file instanceof TFile) {
+							await this.app.vault.modifyBinary(file, data);
+							downloadedCount++;
+						}
+					}
 				}
+				// skip - do nothing
+			}
 
-				// Asset missing or hash differs - download
-				const data = await this.downloadAsset(asset.url);
-				if (!data) {
-					console.log(`[Trip2g Sync] Failed to download asset ${assetPath}`);
-					continue;
-				}
-
-				// Create directories if needed
-				const assetDir = assetPath.substring(0, assetPath.lastIndexOf("/"));
-				if (assetDir && !this.app.vault.getAbstractFileByPath(assetDir)) {
-					await this.app.vault.createFolder(assetDir);
-				}
-
-				// Write asset file
-				if (existingFile instanceof TFile) {
-					await this.app.vault.modifyBinary(existingFile, data);
-					console.log(`[Trip2g Sync] Updated asset: ${assetPath}`);
-				} else {
-					await this.app.vault.createBinary(assetPath, data);
-					console.log(`[Trip2g Sync] Created asset: ${assetPath}`);
-				}
-				count++;
-			} catch (error) {
-				console.error(`[Trip2g Sync] Error downloading asset ${asset.absolutePath}:`, error);
+			if (applyToAll) {
+				remaining = [];
+			} else {
+				remaining = remaining.slice(1);
 			}
 		}
 
-		return count;
+		if (uploadedCount > 0) {
+			new Notice(t().assetUploaded(uploadedCount));
+		}
+		if (downloadedCount > 0) {
+			new Notice(t().assetDownloaded(downloadedCount));
+		}
+	}
+
+	private async downloadSingleAsset(asset: RemoteAsset): Promise<boolean> {
+		try {
+			const assetPath = asset.absolutePath;
+			const data = await this.downloadAsset(asset.url);
+			if (!data) {
+				console.log(`[Trip2g Sync] Failed to download asset ${assetPath}`);
+				return false;
+			}
+
+			// Create directories if needed
+			const assetDir = assetPath.substring(0, assetPath.lastIndexOf("/"));
+			if (assetDir && !this.app.vault.getAbstractFileByPath(assetDir)) {
+				await this.app.vault.createFolder(assetDir);
+			}
+
+			// Write asset file
+			const existingFile = this.app.vault.getAbstractFileByPath(assetPath);
+			if (existingFile instanceof TFile) {
+				await this.app.vault.modifyBinary(existingFile, data);
+				console.log(`[Trip2g Sync] Updated asset: ${assetPath}`);
+			} else {
+				await this.app.vault.createBinary(assetPath, data);
+				console.log(`[Trip2g Sync] Created asset: ${assetPath}`);
+			}
+			return true;
+		} catch (error) {
+			console.error(`[Trip2g Sync] Error downloading asset ${asset.absolutePath}:`, error);
+			return false;
+		}
 	}
 
 	private async executePulls(
@@ -1039,7 +1143,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 		formData.append("0", assetBlob, fileName);
 
 		try {
-			const response = await fetch(`${syncDir.apiUrl}/graphql`, {
+			const response = await fetch(`${normalizeApiUrl(syncDir.apiUrl)}/graphql`, {
 				method: "POST",
 				headers: {
 					"X-API-Key": syncDir.apiKey,
@@ -1048,11 +1152,14 @@ export default class Trip2gSyncPlugin extends Plugin {
 				body: formData,
 			});
 
+			const responseText = await response.text();
+			console.log(`[Trip2g Sync] Upload response for ${relativePath}:`, response.status, responseText);
+
 			if (!response.ok) {
-				throw new Error(`HTTP error! status: ${response.status}`);
+				throw new Error(`HTTP error! status: ${response.status}, body: ${responseText}`);
 			}
 
-			const result = await response.json();
+			const result = JSON.parse(responseText);
 			if (result.errors) {
 				console.error(`Asset upload error for ${relativePath}:`, result.errors);
 				return false;
