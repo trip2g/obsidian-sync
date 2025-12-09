@@ -211,7 +211,10 @@ export type AssetConflictResolution = "keep_local" | "keep_remote" | "skip";
 
 export interface AssetConflict {
 	path: string;
+	/** Full path in vault (with sync folder prefix) - used for reading local file */
 	absolutePath: string;
+	/** Relative path (without sync folder prefix) - used for uploading to server */
+	relativeAbsolutePath: string;
 	localHash: string;
 	remoteHash: string;
 	remoteUrl: string;

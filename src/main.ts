@@ -26,39 +26,8 @@ function normalizeApiUrl(url: string): string {
 	return url.replace(/\/+$/, ""); // Remove trailing slashes
 }
 
-async function obsidianFetch(url: URL | RequestInfo, options?: RequestInit): Promise<Response> {
-	// Convert Headers object to plain object if needed
-	let headers: Record<string, string> = {};
-	if (options?.headers) {
-		if (options.headers instanceof Headers) {
-			options.headers.forEach((value, key) => {
-				headers[key] = value;
-			});
-		} else if (Array.isArray(options.headers)) {
-			for (const [key, value] of options.headers) {
-				headers[key] = value;
-			}
-		} else {
-			headers = options.headers as Record<string, string>;
-		}
-	}
-
-	const response = await requestUrl({
-		url: url.toString(),
-		method: (options?.method as string) || "POST",
-		headers,
-		body: options?.body as string,
-		contentType: "application/json",
-	});
-	return new Response(JSON.stringify(response.json), {
-		status: response.status,
-		headers: response.headers,
-	});
-}
-
 function createSdk(apiUrl: string, apiKey: string, pluginVersion: string): Sdk {
 	const client = new GraphQLClient(`${normalizeApiUrl(apiUrl)}/graphql`, {
-		fetch: obsidianFetch,
 		headers: {
 			"X-API-Key": apiKey,
 			"X-Plugin-Version": pluginVersion,
@@ -562,7 +531,11 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 				for (const asset of note.assetReplaces) {
 					// Remove leading slash if present (server may return /path or path)
-					const assetPath = asset.absolutePath.replace(/^\//, "");
+					// Then add sync folder prefix to get the actual vault path
+					const relativeAssetPath = asset.absolutePath.replace(/^\//, "");
+					const assetPath = syncDir.path && syncDir.path !== "/"
+						? `${syncDir.path}/${relativeAssetPath}`
+						: relativeAssetPath;
 					const existingFile = this.app.vault.getAbstractFileByPath(assetPath);
 
 					if (existingFile instanceof TFile) {
@@ -580,6 +553,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 						conflicts.push({
 							path: asset.id,
 							absolutePath: assetPath,
+							relativeAbsolutePath: relativeAssetPath,
 							localHash,
 							remoteHash: asset.hash,
 							remoteUrl: asset.url,
@@ -597,7 +571,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 		// Download missing assets (no conflict - they don't exist locally)
 		let downloadedCount = 0;
 		for (const { asset } of toDownload) {
-			const downloaded = await this.downloadSingleAsset(asset);
+			const downloaded = await this.downloadSingleAsset(asset, syncDir);
 			if (downloaded) {
 				downloadedCount++;
 			}
@@ -646,7 +620,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 							blob,
 							file.name,
 							conflict.path,
-							conflict.absolutePath,
+							conflict.relativeAbsolutePath, // Use relative path for server
 							conflict.localHash
 						);
 						if (success) {
@@ -682,10 +656,15 @@ export default class Trip2gSyncPlugin extends Plugin {
 		}
 	}
 
-	private async downloadSingleAsset(asset: RemoteAsset): Promise<boolean> {
+	private async downloadSingleAsset(asset: RemoteAsset, syncDir: SyncDir): Promise<boolean> {
 		try {
 			// Remove leading slash if present (server may return /path or path)
-			const assetPath = asset.absolutePath.replace(/^\//, "");
+			// Then add sync folder prefix to get the actual vault path
+			const relativeAssetPath = asset.absolutePath.replace(/^\//, "");
+			const assetPath = syncDir.path && syncDir.path !== "/"
+				? `${syncDir.path}/${relativeAssetPath}`
+				: relativeAssetPath;
+
 			const data = await this.downloadAsset(asset.url);
 			if (!data) {
 				console.log(`[Trip2g Sync] Failed to download asset ${assetPath}`);
@@ -756,7 +735,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 				// Download missing assets
 				if (noteData.assetReplaces && noteData.assetReplaces.length > 0) {
-					await this.downloadMissingAssets(noteData.assetReplaces);
+					await this.downloadMissingAssets(noteData.assetReplaces, folder);
 				}
 			}
 		}
@@ -764,11 +743,13 @@ export default class Trip2gSyncPlugin extends Plugin {
 		console.log(`[Trip2g Sync] executePulls: received ${totalReceived} files from server`);
 	}
 
-	private async downloadMissingAssets(assets: RemoteAsset[]) {
+	private async downloadMissingAssets(assets: RemoteAsset[], folder: TFolder) {
 		for (const asset of assets) {
 			try {
 				// Remove leading slash if present (server may return /path or path)
-				const assetPath = asset.absolutePath.replace(/^\//, "");
+				// Then add sync folder prefix to get the actual vault path
+				const relativeAssetPath = asset.absolutePath.replace(/^\//, "");
+				const assetPath = folder.path === "/" ? relativeAssetPath : `${folder.path}/${relativeAssetPath}`;
 				const existingFile = this.app.vault.getAbstractFileByPath(assetPath);
 
 				if (existingFile instanceof TFile) {
@@ -1097,7 +1078,9 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 				if (!asset.sha256Hash || asset.sha256Hash !== localHash) {
 					const blob = new Blob([arrayBuffer]);
-					await this.uploadAsset(syncDir, String(note.id), blob, resolvedFile.name, asset.path, resolvedFile.path, localHash);
+					// Use relative path (without sync folder prefix) so other users can pull to their own sync folders
+					const relativeAbsolutePath = this.getRelativePath(resolvedFile, folder);
+					await this.uploadAsset(syncDir, String(note.id), blob, resolvedFile.name, asset.path, relativeAbsolutePath, localHash);
 				}
 			} catch (error) {
 				console.error(`Error processing asset ${asset.path}:`, error);
