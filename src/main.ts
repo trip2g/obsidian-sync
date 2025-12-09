@@ -530,7 +530,8 @@ export default class Trip2gSyncPlugin extends Plugin {
 				}
 
 				for (const asset of note.assetReplaces) {
-					const assetPath = asset.absolutePath;
+					// Remove leading slash if present (server may return /path or path)
+					const assetPath = asset.absolutePath.replace(/^\//, "");
 					const existingFile = this.app.vault.getAbstractFileByPath(assetPath);
 
 					if (existingFile instanceof TFile) {
@@ -652,7 +653,8 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 	private async downloadSingleAsset(asset: RemoteAsset): Promise<boolean> {
 		try {
-			const assetPath = asset.absolutePath;
+			// Remove leading slash if present (server may return /path or path)
+			const assetPath = asset.absolutePath.replace(/^\//, "");
 			const data = await this.downloadAsset(asset.url);
 			if (!data) {
 				console.log(`[Trip2g Sync] Failed to download asset ${assetPath}`);
@@ -734,8 +736,8 @@ export default class Trip2gSyncPlugin extends Plugin {
 	private async downloadMissingAssets(assets: RemoteAsset[]) {
 		for (const asset of assets) {
 			try {
-				// Use absolutePath from server - exact location in vault
-				const assetPath = asset.absolutePath;
+				// Remove leading slash if present (server may return /path or path)
+				const assetPath = asset.absolutePath.replace(/^\//, "");
 				const existingFile = this.app.vault.getAbstractFileByPath(assetPath);
 
 				if (existingFile instanceof TFile) {
