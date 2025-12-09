@@ -1,4 +1,4 @@
-import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf } from "obsidian";
+import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf, requestUrl } from "obsidian";
 import { GraphQLClient } from "graphql-request";
 import { FolderSuggest } from "./FolderSuggest";
 import { sha256Hash, sha256HashBuffer, classifyAllFiles, updateSyncState, removeFromSyncState } from "./sync";
@@ -26,8 +26,39 @@ function normalizeApiUrl(url: string): string {
 	return url.replace(/\/+$/, ""); // Remove trailing slashes
 }
 
+async function obsidianFetch(url: URL | RequestInfo, options?: RequestInit): Promise<Response> {
+	// Convert Headers object to plain object if needed
+	let headers: Record<string, string> = {};
+	if (options?.headers) {
+		if (options.headers instanceof Headers) {
+			options.headers.forEach((value, key) => {
+				headers[key] = value;
+			});
+		} else if (Array.isArray(options.headers)) {
+			for (const [key, value] of options.headers) {
+				headers[key] = value;
+			}
+		} else {
+			headers = options.headers as Record<string, string>;
+		}
+	}
+
+	const response = await requestUrl({
+		url: url.toString(),
+		method: (options?.method as string) || "POST",
+		headers,
+		body: options?.body as string,
+		contentType: "application/json",
+	});
+	return new Response(JSON.stringify(response.json), {
+		status: response.status,
+		headers: response.headers,
+	});
+}
+
 function createSdk(apiUrl: string, apiKey: string, pluginVersion: string): Sdk {
 	const client = new GraphQLClient(`${normalizeApiUrl(apiUrl)}/graphql`, {
+		fetch: obsidianFetch,
 		headers: {
 			"X-API-Key": apiKey,
 			"X-Plugin-Version": pluginVersion,
@@ -1092,12 +1123,8 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 	private async downloadAsset(url: string): Promise<ArrayBuffer | null> {
 		try {
-			const response = await fetch(url);
-			if (!response.ok) {
-				console.error(`Failed to download asset: ${response.status}`);
-				return null;
-			}
-			return await response.arrayBuffer();
+			const response = await requestUrl({ url });
+			return response.arrayBuffer;
 		} catch (error) {
 			console.error(`Error downloading asset from ${url}:`, error);
 			return null;
