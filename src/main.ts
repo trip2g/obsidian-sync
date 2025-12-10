@@ -531,12 +531,13 @@ export default class Trip2gSyncPlugin extends Plugin {
 			await this.handleServerDeleted(folder, serverDeleted, syncState);
 		}
 
-		// Check assets for all synced notes (unchanged + just pulled)
-		const syncedPaths = classifications
-			.filter((c) => c.action === "unchanged" || c.action === "pull")
+		// Check assets for all notes (after push completes, we have full picture)
+		// Include: unchanged, pulled, pushed, local_only
+		const allSyncedPaths = classifications
+			.filter((c) => c.action === "unchanged" || c.action === "pull" || c.action === "push" || c.action === "local_only")
 			.map((c) => c.path);
-		if (syncedPaths.length > 0) {
-			await this.checkAndSyncAssets(sdk, syncDir, syncedPaths);
+		if (allSyncedPaths.length > 0) {
+			await this.checkAndSyncAssets(sdk, syncDir, allSyncedPaths);
 		}
 
 		if (unchanged > 0 && pulls.length === 0 && pushes.length === 0 && conflicts.length === 0) {
