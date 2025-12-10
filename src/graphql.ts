@@ -1288,6 +1288,12 @@ export type ClearBackgroundQueuePayload = {
   queue: AdminBackgroundQueue;
 };
 
+export type CommitNotesOrErrorPayload = CommitNotesPayload | ErrorPayload;
+
+export type CommitNotesPayload = {
+  success: Scalars['Boolean']['output'];
+};
+
 export type CreateApiKeyInput = {
   description: Scalars['String']['input'];
 };
@@ -1592,6 +1598,8 @@ export type MakeReleaseLivePayload = {
 
 export type Mutation = {
   admin: AdminMutation;
+  /** X-Api-Key header must be set. */
+  commitNotes: CommitNotesOrErrorPayload;
   createEmailWaitListRequest: CreateEmailWaitListRequestOrErrorPayload;
   createPaymentLink: CreatePaymentLinkOrErrorPayload;
   generateTgAttachCode: GenerateTgAttachCodeOrErrorPayload;
@@ -1759,6 +1767,7 @@ export type PushNoteInput = {
 };
 
 export type PushNotesInput = {
+  skipCommit?: InputMaybe<Scalars['Boolean']['input']>;
   updates: Array<PushNoteInput>;
 };
 
@@ -2241,6 +2250,7 @@ export type UploadNoteAssetInput = {
   noteId: Scalars['Int64']['input'];
   path: Scalars['String']['input'];
   sha256Hash: Scalars['String']['input'];
+  skipCommit?: InputMaybe<Scalars['Boolean']['input']>;
 };
 
 export type UploadNoteAssetOrErrorPayload = ErrorPayload | UploadNoteAssetPayload;
@@ -2343,6 +2353,14 @@ export type UploadNoteAssetMutation = { uploadNoteAsset:
     | { __typename: 'UploadNoteAssetPayload', uploadSkipped: boolean }
    };
 
+export type CommitNotesMutationVariables = Exact<{ [key: string]: never; }>;
+
+
+export type CommitNotesMutation = { commitNotes:
+    | { success: boolean }
+    | { message: string }
+   };
+
 
 export const FetchServerHashesDocument = gql`
     query FetchServerHashes {
@@ -2407,6 +2425,18 @@ export const UploadNoteAssetDocument = gql`
   }
 }
     `;
+export const CommitNotesDocument = gql`
+    mutation CommitNotes {
+  commitNotes {
+    ... on CommitNotesPayload {
+      success
+    }
+    ... on ErrorPayload {
+      message
+    }
+  }
+}
+    `;
 
 export type SdkFunctionWrapper = <T>(action: (requestHeaders?:Record<string, string>) => Promise<T>, operationName: string, operationType?: string, variables?: any) => Promise<T>;
 
@@ -2429,6 +2459,9 @@ export function getSdk(client: GraphQLClient, withWrapper: SdkFunctionWrapper = 
     },
     UploadNoteAsset(variables: UploadNoteAssetMutationVariables, requestHeaders?: GraphQLClientRequestHeaders, signal?: RequestInit['signal']): Promise<UploadNoteAssetMutation> {
       return withWrapper((wrappedRequestHeaders) => client.request<UploadNoteAssetMutation>({ document: UploadNoteAssetDocument, variables, requestHeaders: { ...requestHeaders, ...wrappedRequestHeaders }, signal }), 'UploadNoteAsset', 'mutation', variables);
+    },
+    CommitNotes(variables?: CommitNotesMutationVariables, requestHeaders?: GraphQLClientRequestHeaders, signal?: RequestInit['signal']): Promise<CommitNotesMutation> {
+      return withWrapper((wrappedRequestHeaders) => client.request<CommitNotesMutation>({ document: CommitNotesDocument, variables, requestHeaders: { ...requestHeaders, ...wrappedRequestHeaders }, signal }), 'CommitNotes', 'mutation', variables);
     }
   };
 }

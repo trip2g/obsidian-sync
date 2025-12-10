@@ -250,6 +250,19 @@ export default class Trip2gSyncPlugin extends Plugin {
 		}
 	}
 
+	private async commitNotes(sdk: Sdk): Promise<void> {
+		try {
+			const result = await sdk.CommitNotes();
+			if ("message" in result.commitNotes) {
+				console.error("[Trip2g Sync] Commit failed:", result.commitNotes.message);
+				new Notice(`Commit failed: ${result.commitNotes.message}`);
+			}
+		} catch (error) {
+			console.error("[Trip2g Sync] Commit error:", error);
+			throw error;
+		}
+	}
+
 	/**
 	 * Check if a file has any of the frontmatter fields with a truthy value.
 	 * Supports comma-separated list of field names (e.g., "publish, public").
@@ -362,6 +375,9 @@ export default class Trip2gSyncPlugin extends Plugin {
 				// Normal sync flow
 				await this.processSyncActions(sdk, syncDir, folder, classifications, syncState);
 			}
+
+			// Commit all changes (pushNotes and uploadAsset use skipCommit: true)
+			await this.commitNotes(sdk);
 
 			await this.saveSyncStates();
 		} catch (error) {
@@ -554,7 +570,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 		const twoWaySync = syncDir.twoWaySync ?? false;
 
 		// Fetch all assets in one request using PushNotes with empty updates
-		const result = await sdk.PushNotes({ input: { updates: [] } });
+		const result = await sdk.PushNotes({ input: { skipCommit: true, updates: [] } });
 		if (!("notes" in result.pushNotes)) {
 			return;
 		}
@@ -947,7 +963,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 			case "keep_local":
 				// Push local to server immediately
 				if (file instanceof TFile) {
-					const result = await sdk.PushNotes({ input: { updates: [{ path: conflict.path, content: conflict.localContent }] } });
+					const result = await sdk.PushNotes({ input: { skipCommit: true, updates: [{ path: conflict.path, content: conflict.localContent }] } });
 					updateSyncState(syncState, conflict.path, conflict.localHash);
 					new Notice(`${t().pushed}: ${conflict.path}`);
 					// Process assets if any
@@ -1014,7 +1030,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 			return;
 		}
 
-		const result = await sdk.PushNotes({ input: { updates } });
+		const result = await sdk.PushNotes({ input: { skipCommit: true, updates } });
 
 		// Update sync state and process assets
 		for (const update of updates) {
@@ -1176,6 +1192,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 			const operations = JSON.stringify({
 				variables: {
 					input: {
+						skipCommit: true,
 						file: null,
 						noteId: noteId,
 						sha256Hash: sha256Hash,

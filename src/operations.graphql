@@ -55,3 +55,14 @@ mutation UploadNoteAsset($input: UploadNoteAssetInput!) {
 		}
 	}
 }
+
+mutation CommitNotes {
+	commitNotes {
+		... on CommitNotesPayload {
+			success
+		}
+		... on ErrorPayload {
+			message
+		}
+	}
+}
