@@ -1324,7 +1324,13 @@ export default class Trip2gSyncPlugin extends Plugin {
 				const result = JSON.parse(responseText);
 				if (result.errors) {
 					console.error(`Asset upload error for ${relativePath}:`, result.errors);
-					throw new Error(`GraphQL errors: ${JSON.stringify(result.errors)}`);
+					// Check for "too large" error - don't retry
+					const errorMessage = JSON.stringify(result.errors);
+					if (errorMessage.includes("too large")) {
+						new Notice(t().assetTooLarge(fileName));
+						return false;
+					}
+					throw new Error(`GraphQL errors: ${errorMessage}`);
 				}
 
 				const payload = result.data?.uploadNoteAsset;
