@@ -165,6 +165,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 				const files = this.getAllMarkdownFiles(folder);
 				const localFiles = new Map<string, string>();
 				const cachedMtimes = syncState.mtimes || {};
+				const cachedLocalHashes = syncState.localHashes || {};
 
 				for (const file of files) {
 					const relativePath = this.getRelativePath(file, folder);
@@ -172,7 +173,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 					// Use cached hash if mtime hasn't changed
 					const cachedMtime = cachedMtimes[relativePath];
-					const cachedHash = syncState.files[relativePath];
+					const cachedHash = cachedLocalHashes[relativePath];
 					if (cachedMtime === mtime && cachedHash) {
 						localFiles.set(relativePath, cachedHash);
 					} else {
@@ -295,6 +296,8 @@ export default class Trip2gSyncPlugin extends Plugin {
 				this.ribbonIcon.addClass("is-syncing");
 			} else {
 				this.ribbonIcon.removeClass("is-syncing");
+				// Clear badge after sync completes
+				this.ribbonIcon.removeClass("has-pending", "has-pull", "has-push", "has-conflict");
 				this.ribbonIcon.setAttribute("aria-label", "Trip2g Sync");
 			}
 		}
@@ -352,11 +355,20 @@ export default class Trip2gSyncPlugin extends Plugin {
 				return;
 			}
 
+			console.time("[Trip2g Sync] Get file list");
 			const files = this.getAllMarkdownFiles(folder);
+			console.timeEnd("[Trip2g Sync] Get file list");
+			console.log(`[Trip2g Sync] Total files: ${files.length}`);
 			const localFiles = new Map<string, string>();
 			const newMtimes: Record<string, number> = {};
+			const newLocalHashes: Record<string, string> = {};
 			const cachedMtimes = syncState.mtimes || {};
+			const cachedLocalHashes = syncState.localHashes || {};
+			console.log(`[Trip2g Sync] Cache state: mtimes=${Object.keys(cachedMtimes).length}, localHashes=${Object.keys(cachedLocalHashes).length}`);
 
+			console.time("[Trip2g Sync] Hash files");
+			let cachedCount = 0;
+			let hashedCount = 0;
 			for (const file of files) {
 				const relativePath = this.getRelativePath(file, folder);
 				const mtime = file.stat.mtime;
@@ -364,21 +376,30 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 				// Use cached hash if mtime hasn't changed
 				const cachedMtime = cachedMtimes[relativePath];
-				const cachedHash = syncState.files[relativePath];
+				const cachedHash = cachedLocalHashes[relativePath];
 				if (cachedMtime === mtime && cachedHash) {
 					localFiles.set(relativePath, cachedHash);
+					newLocalHashes[relativePath] = cachedHash;
+					cachedCount++;
 				} else {
 					const content = await this.app.vault.read(file);
 					const hash = await sha256Hash(content);
 					localFiles.set(relativePath, hash);
+					newLocalHashes[relativePath] = hash;
+					hashedCount++;
 				}
 			}
+			console.timeEnd("[Trip2g Sync] Hash files");
+			console.log(`[Trip2g Sync] Cached: ${cachedCount}, Hashed: ${hashedCount}`);
 
-			// Update mtimes cache
+			// Update hash cache (separate from sync state)
 			syncState.mtimes = newMtimes;
+			syncState.localHashes = newLocalHashes;
 
 			// Step 2: Get server hashes
+			console.time("[Trip2g Sync] Fetch server hashes");
 			const data = await sdk.FetchServerHashes();
+			console.timeEnd("[Trip2g Sync] Fetch server hashes");
 			const serverHashes = new Map<string, string>();
 			for (const item of data.notePaths) {
 				if (item.path && item.hash) {
@@ -387,12 +408,15 @@ export default class Trip2gSyncPlugin extends Plugin {
 			}
 
 			// Step 3: Classify all files
+			console.time("[Trip2g Sync] Classify files");
 			const classifications = classifyAllFiles(localFiles, serverHashes, syncState);
+			console.timeEnd("[Trip2g Sync] Classify files");
 
 			// Step 4: Check if this is first sync (migration scenario)
 			const isFirstSync = Object.keys(syncState.files).length === 0;
 			const conflicts = classifications.filter((c) => c.action === "conflict");
 
+			console.time("[Trip2g Sync] Process sync actions");
 			if (isFirstSync && conflicts.length > 0) {
 				// Show migration modal
 				await this.handleMigration(sdk, syncDir, folder, classifications, syncState);
@@ -400,9 +424,12 @@ export default class Trip2gSyncPlugin extends Plugin {
 				// Normal sync flow
 				await this.processSyncActions(sdk, syncDir, folder, classifications, syncState);
 			}
+			console.timeEnd("[Trip2g Sync] Process sync actions");
 
 			// Commit all changes (pushNotes and uploadAsset use skipCommit: true)
+			console.time("[Trip2g Sync] Commit notes");
 			await this.commitNotes(sdk);
+			console.timeEnd("[Trip2g Sync] Commit notes");
 
 			await this.saveSyncStates();
 		} catch (error) {
@@ -556,9 +583,13 @@ export default class Trip2gSyncPlugin extends Plugin {
 		const toPush = [...pushes, ...localOnly];
 		let pushedNotes: NoteWithAssets[] = [];
 		if (toPush.length > 0) {
+			console.time("[Trip2g Sync] Confirm push");
 			const shouldPush = await this.confirmPush(toPush);
+			console.timeEnd("[Trip2g Sync] Confirm push");
 			if (shouldPush) {
+				console.time("[Trip2g Sync] Execute pushes");
 				pushedNotes = await this.executePushes(sdk, syncDir, folder, toPush, syncState);
+				console.timeEnd("[Trip2g Sync] Execute pushes");
 				new Notice(t().pushedFiles(toPush.length));
 			}
 		}
@@ -576,7 +607,9 @@ export default class Trip2gSyncPlugin extends Plugin {
 		// Check assets for pushed notes (assets already processed in executePushes,
 		// but this handles conflicts and downloads for two-way sync)
 		if (pushedNotes.length > 0) {
+			console.time("[Trip2g Sync] Check and sync assets");
 			await this.checkAndSyncAssets(syncDir, pushedNotes);
+			console.timeEnd("[Trip2g Sync] Check and sync assets");
 		}
 
 		if (unchanged > 0 && pulls.length === 0 && pushes.length === 0 && conflicts.length === 0) {
@@ -1103,18 +1136,16 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 		const result = await sdk.PushNotes({ input: { skipCommit: true, updates } });
 
-		// Update sync state and process assets
+		// Update sync state
 		for (const update of updates) {
 			const hash = await sha256Hash(update.content);
 			updateSyncState(syncState, update.path, hash);
 		}
 
-		// Process assets and return notes for further processing
+		// Return only pushed notes for asset processing (server returns ALL notes)
 		if ("notes" in result.pushNotes) {
-			for (const note of result.pushNotes.notes) {
-				await this.processNoteAssets(syncDir, note, folder);
-			}
-			return result.pushNotes.notes;
+			const pushedPaths = new Set(updates.map((u) => u.path));
+			return result.pushNotes.notes.filter((n) => pushedPaths.has(n.path));
 		}
 		return [];
 	}

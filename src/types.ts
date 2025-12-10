@@ -23,10 +23,12 @@ export const DEFAULT_SETTINGS: PluginSettings = {
 
 // Sync state - stored locally to track last synced hashes
 export interface SyncState {
-	// Map of relative path -> lastSyncedHash
+	// Map of relative path -> lastSyncedHash (what was last synced to server)
 	files: Record<string, string>;
 	// Map of relative path -> mtime (for hash caching)
 	mtimes?: Record<string, number>;
+	// Map of relative path -> localHash (cache of computed hashes, separate from sync state)
+	localHashes?: Record<string, string>;
 	// Timestamp of last sync
 	lastSyncedAt?: number;
 }
