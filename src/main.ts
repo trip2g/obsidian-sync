@@ -272,7 +272,14 @@ export default class Trip2gSyncPlugin extends Plugin {
 				this.ribbonIcon.addClass("is-syncing");
 			} else {
 				this.ribbonIcon.removeClass("is-syncing");
+				this.ribbonIcon.setAttribute("aria-label", "Trip2g Sync");
 			}
+		}
+	}
+
+	private setProgress(message: string): void {
+		if (this.ribbonIcon) {
+			this.ribbonIcon.setAttribute("aria-label", message);
 		}
 	}
 
@@ -309,6 +316,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 		}
 
 		new Notice(t().syncStarting);
+		this.setProgress(t().progressClassifying);
 
 		const sdk = createSdk(syncDir.apiUrl, syncDir.apiKey, this.manifest.version);
 		const syncState = this.getSyncState(syncDir.apiUrl);
@@ -603,9 +611,11 @@ export default class Trip2gSyncPlugin extends Plugin {
 		// Download missing assets (no conflict - they don't exist locally)
 		// Only if two-way sync is enabled
 		let downloadedCount = 0;
-		if (twoWaySync) {
-			for (const { asset } of toDownload) {
-				const downloaded = await this.downloadSingleAsset(asset, syncDir);
+		if (twoWaySync && toDownload.length > 0) {
+			const total = toDownload.length;
+			for (let i = 0; i < toDownload.length; i++) {
+				this.setProgress(t().progressDownloadingAssets(i + 1, total));
+				const downloaded = await this.downloadSingleAsset(toDownload[i].asset, syncDir);
 				if (downloaded) {
 					downloadedCount++;
 				}
@@ -700,8 +710,12 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 	private async autoUploadLocalAssets(syncDir: SyncDir, conflicts: AssetConflict[]): Promise<void> {
 		let uploadedCount = 0;
+		const total = conflicts.length;
 
-		for (const conflict of conflicts) {
+		for (let i = 0; i < conflicts.length; i++) {
+			const conflict = conflicts[i];
+			this.setProgress(t().progressUploadingAssets(i + 1, total));
+
 			const file = this.app.vault.getAbstractFileByPath(conflict.absolutePath);
 			if (file instanceof TFile) {
 				const buffer = await this.app.vault.readBinary(file);
@@ -770,18 +784,21 @@ export default class Trip2gSyncPlugin extends Plugin {
 		syncState: SyncState
 	) {
 		const paths = pulls.map((p) => p.path);
-		console.log(`[Trip2g Sync] executePulls: fetching ${paths.length} files`);
+		const total = paths.length;
+		console.log(`[Trip2g Sync] executePulls: fetching ${total} files`);
 
 		// Fetch in batches of 100
 		const batchSize = 100;
-		let totalReceived = 0;
+		let processed = 0;
 
 		for (let i = 0; i < paths.length; i += batchSize) {
 			const batch = paths.slice(i, i + batchSize);
 			const data = await sdk.FetchNoteContents({ filter: { paths: batch } });
-			totalReceived += data.notePaths.length;
 
 			for (const noteData of data.notePaths) {
+				processed++;
+				this.setProgress(t().progressPulling(processed, total));
+
 				console.log(`[Trip2g Sync] executePulls: processing ${noteData.path}, content length=${noteData.content?.length}`);
 				const fullPath = folder.path === "/" ? noteData.path : `${folder.path}/${noteData.path}`;
 
@@ -810,7 +827,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 			}
 		}
 
-		console.log(`[Trip2g Sync] executePulls: received ${totalReceived} files from server`);
+		console.log(`[Trip2g Sync] executePulls: received ${processed} files from server`);
 	}
 
 	private async downloadMissingAssets(assets: RemoteAsset[], folder: TFolder) {
@@ -1022,8 +1039,12 @@ export default class Trip2gSyncPlugin extends Plugin {
 		syncState: SyncState
 	) {
 		const updates: Array<{ path: string; content: string }> = [];
+		const total = pushes.length;
 
-		for (const push of pushes) {
+		for (let i = 0; i < pushes.length; i++) {
+			const push = pushes[i];
+			this.setProgress(t().progressPushing(i + 1, total));
+
 			const fullPath = folder.path === "/" ? push.path : `${folder.path}/${push.path}`;
 			const file = this.app.vault.getAbstractFileByPath(fullPath);
 

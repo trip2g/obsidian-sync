@@ -81,6 +81,13 @@ export interface Translations {
 	pendingPull: (count: number) => string;
 	pendingPush: (count: number) => string;
 
+	// Progress messages
+	progressPulling: (current: number, total: number) => string;
+	progressPushing: (current: number, total: number) => string;
+	progressDownloadingAssets: (current: number, total: number) => string;
+	progressUploadingAssets: (current: number, total: number) => string;
+	progressClassifying: string;
+
 	// Server deleted modal
 	serverDeletedTitle: string;
 	serverDeletedDescription: (count: number) => string;
@@ -191,6 +198,13 @@ const en: Translations = {
 	pendingChanges: (pull, push) => `Trip2g Sync (↓${pull} ↑${push})`,
 	pendingPull: (count) => `Trip2g Sync (↓${count} from server)`,
 	pendingPush: (count) => `Trip2g Sync (↑${count} to push)`,
+
+	// Progress messages
+	progressPulling: (current, total) => `Pulling ${current}/${total}...`,
+	progressPushing: (current, total) => `Pushing ${current}/${total}...`,
+	progressDownloadingAssets: (current, total) => `Downloading assets ${current}/${total}...`,
+	progressUploadingAssets: (current, total) => `Uploading assets ${current}/${total}...`,
+	progressClassifying: "Analyzing files...",
 
 	// Server deleted modal
 	serverDeletedTitle: "Files deleted on server",
@@ -305,6 +319,13 @@ const ru: Translations = {
 	pendingChanges: (pull, push) => `Trip2g Sync (↓${pull} ↑${push})`,
 	pendingPull: (count) => `Trip2g Sync (↓${count} с сервера)`,
 	pendingPush: (count) => `Trip2g Sync (↑${count} к отправке)`,
+
+	// Progress messages
+	progressPulling: (current, total) => `Загрузка ${current}/${total}...`,
+	progressPushing: (current, total) => `Отправка ${current}/${total}...`,
+	progressDownloadingAssets: (current, total) => `Загрузка ассетов ${current}/${total}...`,
+	progressUploadingAssets: (current, total) => `Отправка ассетов ${current}/${total}...`,
+	progressClassifying: "Анализ файлов...",
 
 	// Server deleted modal
 	serverDeletedTitle: "Файлы удалены на сервере",
