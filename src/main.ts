@@ -1170,71 +1170,85 @@ export default class Trip2gSyncPlugin extends Plugin {
 		absolutePath: string,
 		sha256Hash: string
 	): Promise<boolean> {
-		const operations = JSON.stringify({
-			variables: {
-				input: {
-					file: null,
-					noteId: noteId,
-					sha256Hash: sha256Hash,
-					path: relativePath,
-					absolutePath: absolutePath,
+		const maxRetries = 3;
+
+		for (let attempt = 1; attempt <= maxRetries; attempt++) {
+			const operations = JSON.stringify({
+				variables: {
+					input: {
+						file: null,
+						noteId: noteId,
+						sha256Hash: sha256Hash,
+						path: relativePath,
+						absolutePath: absolutePath,
+					},
 				},
-			},
-			query: `mutation($input: UploadNoteAssetInput!) {
-				uploadNoteAsset(input: $input) {
-					... on ErrorPayload {
-						__typename
-						message
+				query: `mutation($input: UploadNoteAssetInput!) {
+					uploadNoteAsset(input: $input) {
+						... on ErrorPayload {
+							__typename
+							message
+						}
+						... on UploadNoteAssetPayload {
+							__typename
+							uploadSkipped
+						}
 					}
-					... on UploadNoteAssetPayload {
-						__typename
-						uploadSkipped
-					}
-				}
-			}`,
-		});
-
-		const map = JSON.stringify({ "0": ["variables.input.file"] });
-
-		const formData = new FormData();
-		formData.append("operations", operations);
-		formData.append("map", map);
-		formData.append("0", assetBlob, fileName);
-
-		try {
-			const response = await fetch(`${normalizeApiUrl(syncDir.apiUrl)}/graphql`, {
-				method: "POST",
-				headers: {
-					"X-API-Key": syncDir.apiKey,
-					"X-Plugin-Version": this.manifest.version,
-				},
-				body: formData,
+				}`,
 			});
 
-			const responseText = await response.text();
-			console.log(`[Trip2g Sync] Upload response for ${relativePath}:`, response.status, responseText);
+			const map = JSON.stringify({ "0": ["variables.input.file"] });
 
-			if (!response.ok) {
-				throw new Error(`HTTP error! status: ${response.status}, body: ${responseText}`);
+			const formData = new FormData();
+			formData.append("operations", operations);
+			formData.append("map", map);
+			formData.append("0", assetBlob, fileName);
+
+			try {
+				const response = await fetch(`${normalizeApiUrl(syncDir.apiUrl)}/graphql`, {
+					method: "POST",
+					headers: {
+						"X-API-Key": syncDir.apiKey,
+						"X-Plugin-Version": this.manifest.version,
+					},
+					body: formData,
+				});
+
+				const responseText = await response.text();
+				console.log(`[Trip2g Sync] Upload response for ${relativePath} (attempt ${attempt}):`, response.status, responseText);
+
+				if (!response.ok) {
+					throw new Error(`HTTP error! status: ${response.status}, body: ${responseText}`);
+				}
+
+				const result = JSON.parse(responseText);
+				if (result.errors) {
+					console.error(`Asset upload error for ${relativePath}:`, result.errors);
+					throw new Error(`GraphQL errors: ${JSON.stringify(result.errors)}`);
+				}
+
+				const payload = result.data?.uploadNoteAsset;
+				if (payload?.__typename === "ErrorPayload") {
+					new Notice(`Asset upload failed: ${payload.message}`);
+					return false;
+				}
+
+				return true;
+			} catch (error) {
+				console.error(`Failed to upload asset ${relativePath} (attempt ${attempt}/${maxRetries}):`, error);
+
+				if (attempt < maxRetries) {
+					// Exponential backoff: 1s, 2s, 4s
+					const delay = Math.pow(2, attempt - 1) * 1000;
+					console.log(`[Trip2g Sync] Retrying in ${delay}ms...`);
+					await new Promise((resolve) => setTimeout(resolve, delay));
+				} else {
+					return false;
+				}
 			}
-
-			const result = JSON.parse(responseText);
-			if (result.errors) {
-				console.error(`Asset upload error for ${relativePath}:`, result.errors);
-				return false;
-			}
-
-			const payload = result.data?.uploadNoteAsset;
-			if (payload?.__typename === "ErrorPayload") {
-				new Notice(`Asset upload failed: ${payload.message}`);
-				return false;
-			}
-
-			return true;
-		} catch (error) {
-			console.error(`Failed to upload asset ${relativePath}:`, error);
-			return false;
 		}
+
+		return false;
 	}
 
 	private shouldExcludeFile(filePath: string): boolean {
