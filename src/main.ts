@@ -164,12 +164,22 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 				const files = this.getAllMarkdownFiles(folder);
 				const localFiles = new Map<string, string>();
+				const cachedMtimes = syncState.mtimes || {};
 
 				for (const file of files) {
-					const content = await this.app.vault.read(file);
-					const hash = await sha256Hash(content);
 					const relativePath = this.getRelativePath(file, folder);
-					localFiles.set(relativePath, hash);
+					const mtime = file.stat.mtime;
+
+					// Use cached hash if mtime hasn't changed
+					const cachedMtime = cachedMtimes[relativePath];
+					const cachedHash = syncState.files[relativePath];
+					if (cachedMtime === mtime && cachedHash) {
+						localFiles.set(relativePath, cachedHash);
+					} else {
+						const content = await this.app.vault.read(file);
+						const hash = await sha256Hash(content);
+						localFiles.set(relativePath, hash);
+					}
 				}
 
 				// Get server hashes (silent - don't show errors for background checks)
@@ -344,13 +354,28 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 			const files = this.getAllMarkdownFiles(folder);
 			const localFiles = new Map<string, string>();
+			const newMtimes: Record<string, number> = {};
+			const cachedMtimes = syncState.mtimes || {};
 
 			for (const file of files) {
-				const content = await this.app.vault.read(file);
-				const hash = await sha256Hash(content);
 				const relativePath = this.getRelativePath(file, folder);
-				localFiles.set(relativePath, hash);
+				const mtime = file.stat.mtime;
+				newMtimes[relativePath] = mtime;
+
+				// Use cached hash if mtime hasn't changed
+				const cachedMtime = cachedMtimes[relativePath];
+				const cachedHash = syncState.files[relativePath];
+				if (cachedMtime === mtime && cachedHash) {
+					localFiles.set(relativePath, cachedHash);
+				} else {
+					const content = await this.app.vault.read(file);
+					const hash = await sha256Hash(content);
+					localFiles.set(relativePath, hash);
+				}
 			}
+
+			// Update mtimes cache
+			syncState.mtimes = newMtimes;
 
 			// Step 2: Get server hashes
 			const data = await sdk.FetchServerHashes();

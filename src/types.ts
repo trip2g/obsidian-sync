@@ -25,6 +25,8 @@ export const DEFAULT_SETTINGS: PluginSettings = {
 export interface SyncState {
 	// Map of relative path -> lastSyncedHash
 	files: Record<string, string>;
+	// Map of relative path -> mtime (for hash caching)
+	mtimes?: Record<string, number>;
 	// Timestamp of last sync
 	lastSyncedAt?: number;
 }
