@@ -638,43 +638,37 @@ export default class Trip2gSyncPlugin extends Plugin {
 			}
 		}
 
-		// Upload assets that are not yet on server
+		// Upload assets that are not yet on server (sequentially)
 		if (toUpload.length > 0) {
 			let uploadedCount = 0;
 			const total = toUpload.length;
-			let processed = 0;
 
-			// Process in parallel batches of 5
-			const concurrency = 5;
-			for (let i = 0; i < toUpload.length; i += concurrency) {
-				const batch = toUpload.slice(i, i + concurrency);
-				const results = await Promise.all(
-					batch.map(async ({ noteId, notePath, asset }) => {
-						const noteFile = this.app.vault.getAbstractFileByPath(notePath);
-						if (!(noteFile instanceof TFile)) {
-							return false;
-						}
+			for (let i = 0; i < toUpload.length; i++) {
+				const { noteId, notePath, asset } = toUpload[i];
+				this.setProgress(t().progressUploadingAssets(i + 1, total));
 
-						const resolvedFile = this.app.metadataCache.getFirstLinkpathDest(asset.path, noteFile.path);
-						if (!(resolvedFile instanceof TFile)) {
-							return false;
-						}
+				const noteFile = this.app.vault.getAbstractFileByPath(notePath);
+				if (!(noteFile instanceof TFile)) {
+					continue;
+				}
 
-						try {
-							const arrayBuffer = await this.app.vault.readBinary(resolvedFile);
-							const localHash = await sha256HashBuffer(arrayBuffer);
-							const blob = new Blob([arrayBuffer]);
-							const relativeAbsolutePath = this.getRelativePath(resolvedFile, folder);
-							return this.uploadAsset(syncDir, noteId, blob, resolvedFile.name, asset.path, relativeAbsolutePath, localHash);
-						} catch (error) {
-							console.error(`Error uploading asset ${asset.path}:`, error);
-							return false;
-						}
-					})
-				);
-				uploadedCount += results.filter(Boolean).length;
-				processed += batch.length;
-				this.setProgress(t().progressUploadingAssets(processed, total));
+				const resolvedFile = this.app.metadataCache.getFirstLinkpathDest(asset.path, noteFile.path);
+				if (!(resolvedFile instanceof TFile)) {
+					continue;
+				}
+
+				try {
+					const arrayBuffer = await this.app.vault.readBinary(resolvedFile);
+					const localHash = await sha256HashBuffer(arrayBuffer);
+					const blob = new Blob([arrayBuffer]);
+					const relativeAbsolutePath = this.getRelativePath(resolvedFile, folder);
+					const success = await this.uploadAsset(syncDir, noteId, blob, resolvedFile.name, asset.path, relativeAbsolutePath, localHash);
+					if (success) {
+						uploadedCount++;
+					}
+				} catch (error) {
+					console.error(`Error uploading asset ${asset.path}:`, error);
+				}
 			}
 
 			if (uploadedCount > 0) {
@@ -791,34 +785,29 @@ export default class Trip2gSyncPlugin extends Plugin {
 	private async autoUploadLocalAssets(syncDir: SyncDir, conflicts: AssetConflict[]): Promise<void> {
 		let uploadedCount = 0;
 		const total = conflicts.length;
-		let processed = 0;
 
-		// Process in parallel batches of 5
-		const concurrency = 5;
-		for (let i = 0; i < conflicts.length; i += concurrency) {
-			const batch = conflicts.slice(i, i + concurrency);
-			const results = await Promise.all(
-				batch.map(async (conflict) => {
-					const file = this.app.vault.getAbstractFileByPath(conflict.absolutePath);
-					if (file instanceof TFile) {
-						const buffer = await this.app.vault.readBinary(file);
-						const blob = new Blob([buffer]);
-						return this.uploadAsset(
-							syncDir,
-							conflict.noteId,
-							blob,
-							file.name,
-							conflict.path,
-							conflict.relativeAbsolutePath,
-							conflict.localHash
-						);
-					}
-					return false;
-				})
-			);
-			uploadedCount += results.filter(Boolean).length;
-			processed += batch.length;
-			this.setProgress(t().progressUploadingAssets(processed, total));
+		// Upload sequentially
+		for (let i = 0; i < conflicts.length; i++) {
+			const conflict = conflicts[i];
+			this.setProgress(t().progressUploadingAssets(i + 1, total));
+
+			const file = this.app.vault.getAbstractFileByPath(conflict.absolutePath);
+			if (file instanceof TFile) {
+				const buffer = await this.app.vault.readBinary(file);
+				const blob = new Blob([buffer]);
+				const success = await this.uploadAsset(
+					syncDir,
+					conflict.noteId,
+					blob,
+					file.name,
+					conflict.path,
+					conflict.relativeAbsolutePath,
+					conflict.localHash
+				);
+				if (success) {
+					uploadedCount++;
+				}
+			}
 		}
 
 		if (uploadedCount > 0) {
@@ -1194,9 +1183,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 			return;
 		}
 
-		// Prepare upload tasks
-		const uploadTasks: Array<() => Promise<void>> = [];
-
+		// Upload sequentially
 		for (const asset of note.assets) {
 			const resolvedFile = this.app.metadataCache.getFirstLinkpathDest(asset.path, noteFile.path);
 
@@ -1204,28 +1191,19 @@ export default class Trip2gSyncPlugin extends Plugin {
 				continue;
 			}
 
-			uploadTasks.push(async () => {
-				try {
-					const arrayBuffer = await this.app.vault.readBinary(resolvedFile);
-					const localHash = await sha256HashBuffer(arrayBuffer);
+			try {
+				const arrayBuffer = await this.app.vault.readBinary(resolvedFile);
+				const localHash = await sha256HashBuffer(arrayBuffer);
 
-					if (!asset.sha256Hash || asset.sha256Hash !== localHash) {
-						const blob = new Blob([arrayBuffer]);
-						// Use relative path (without sync folder prefix) so other users can pull to their own sync folders
-						const relativeAbsolutePath = this.getRelativePath(resolvedFile, folder);
-						await this.uploadAsset(syncDir, String(note.id), blob, resolvedFile.name, asset.path, relativeAbsolutePath, localHash);
-					}
-				} catch (error) {
-					console.error(`Error processing asset ${asset.path}:`, error);
+				if (!asset.sha256Hash || asset.sha256Hash !== localHash) {
+					const blob = new Blob([arrayBuffer]);
+					// Use relative path (without sync folder prefix) so other users can pull to their own sync folders
+					const relativeAbsolutePath = this.getRelativePath(resolvedFile, folder);
+					await this.uploadAsset(syncDir, String(note.id), blob, resolvedFile.name, asset.path, relativeAbsolutePath, localHash);
 				}
-			});
-		}
-
-		// Process in parallel batches of 5
-		const concurrency = 5;
-		for (let i = 0; i < uploadTasks.length; i += concurrency) {
-			const batch = uploadTasks.slice(i, i + concurrency);
-			await Promise.all(batch.map((task) => task()));
+			} catch (error) {
+				console.error(`Error processing asset ${asset.path}:`, error);
+			}
 		}
 	}
 
