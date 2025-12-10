@@ -9,27 +9,6 @@ query FetchNoteContents($filter: NotePathsFilter) {
 	notePaths(filter: $filter) {
 		path: value
 		content
-		assetReplaces {
-			id
-			url
-			hash
-			absolutePath
-		}
-	}
-}
-
-query FetchNoteAssets($filter: NotePathsFilter) {
-	notePaths(filter: $filter) {
-		path: value
-		latestNoteView {
-			versionId
-		}
-		assetReplaces {
-			id
-			url
-			hash
-			absolutePath
-		}
 	}
 }
 
@@ -45,6 +24,8 @@ mutation PushNotes($input: PushNotesInput!) {
 				assets {
 					path
 					sha256Hash
+					absolutePath
+					url
 				}
 			}
 		}

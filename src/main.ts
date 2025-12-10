@@ -5,7 +5,7 @@ import { sha256Hash, sha256HashBuffer, classifyAllFiles, updateSyncState, remove
 import { MigrationModal, ServerDeletedModal, PushConfirmModal, AssetConflictModal, type AssetConflict, type AssetConflictResolution } from "./ui/ConflictModal";
 import { ConflictView, CONFLICT_VIEW_TYPE } from "./ui/ConflictView";
 import { t, setLocale, detectLocale } from "./i18n";
-import { getSdk, type Sdk, type FetchNoteContentsQuery, type PushNotesMutation } from "./graphql";
+import { getSdk, type Sdk, type PushNotesMutation } from "./graphql";
 import type {
 	PluginSettings,
 	SyncDir,
@@ -16,9 +16,9 @@ import type {
 } from "./types";
 import { DEFAULT_SETTINGS, DEFAULT_SYNC_STATE } from "./types";
 
-type RemoteAsset = FetchNoteContentsQuery["notePaths"][0]["assetReplaces"][0];
 type PushNotesPayload = Extract<PushNotesMutation["pushNotes"], { notes: unknown[] }>;
 type NoteWithAssets = PushNotesPayload["notes"][0];
+type NoteAsset = NoteWithAssets["assets"][0];
 
 const SYNC_STATE_KEY = "sync-state";
 
@@ -549,61 +549,58 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 	private async checkAndSyncAssets(sdk: Sdk, syncDir: SyncDir, paths: string[]) {
 		const conflicts: AssetConflict[] = [];
-		const toDownload: Array<{ asset: RemoteAsset }> = [];
+		const toDownload: Array<{ asset: NoteAsset }> = [];
 		const twoWaySync = syncDir.twoWaySync ?? false;
 
-		// Fetch only asset info (no content) in batches of 100
-		const batchSize = 100;
-		for (let i = 0; i < paths.length; i += batchSize) {
-			const batch = paths.slice(i, i + batchSize);
-			const data = await sdk.FetchNoteAssets({ filter: { paths: batch } });
+		// Fetch all assets in one request using PushNotes with empty updates
+		const result = await sdk.PushNotes({ input: { updates: [] } });
+		if (!("notes" in result.pushNotes)) {
+			return;
+		}
 
-			for (const note of data.notePaths) {
-				if (!note.assetReplaces || note.assetReplaces.length === 0) {
-					continue;
-				}
+		// Filter to only notes we care about (synced paths)
+		const pathSet = new Set(paths);
+		const relevantNotes = result.pushNotes.notes.filter((n) => pathSet.has(n.path));
 
-				const noteId = note.latestNoteView?.versionId;
-				if (!noteId) {
-					console.log(`[Trip2g Sync] Note ${note.path} has no versionId, skipping assets`);
-					continue;
-				}
+		for (const note of relevantNotes) {
+			if (!note.assets || note.assets.length === 0) {
+				continue;
+			}
 
-				for (const asset of note.assetReplaces) {
-					// Remove leading slash if present (server may return /path or path)
-					// Then add sync folder prefix to get the actual vault path
-					const relativeAssetPath = asset.absolutePath.replace(/^\//, "");
-					const assetPath = syncDir.path && syncDir.path !== "/"
-						? `${syncDir.path}/${relativeAssetPath}`
-						: relativeAssetPath;
-					const existingFile = this.app.vault.getAbstractFileByPath(assetPath);
+			for (const asset of note.assets) {
+				// Remove leading slash if present (server may return /path or path)
+				// Then add sync folder prefix to get the actual vault path
+				const relativeAssetPath = asset.absolutePath.replace(/^\//, "");
+				const assetPath = syncDir.path && syncDir.path !== "/"
+					? `${syncDir.path}/${relativeAssetPath}`
+					: relativeAssetPath;
+				const existingFile = this.app.vault.getAbstractFileByPath(assetPath);
 
-					if (existingFile instanceof TFile) {
-						// Asset exists locally - check hash
-						const localBuffer = await this.app.vault.readBinary(existingFile);
-						const localHash = await sha256HashBuffer(localBuffer);
+				if (existingFile instanceof TFile) {
+					// Asset exists locally - check hash
+					const localBuffer = await this.app.vault.readBinary(existingFile);
+					const localHash = await sha256HashBuffer(localBuffer);
 
-						if (localHash === asset.hash) {
-							// Hashes match - no action needed
-							continue;
-						}
-
-						// Conflict: local and remote differ
-						console.log(`[Trip2g Sync] Asset conflict ${assetPath}: local=${localHash.slice(0, 8)}... remote=${asset.hash.slice(0, 8)}...`);
-						conflicts.push({
-							path: asset.id,
-							absolutePath: assetPath,
-							relativeAbsolutePath: relativeAssetPath,
-							localHash,
-							remoteHash: asset.hash,
-							remoteUrl: asset.url,
-							noteId: String(noteId),
-						});
-					} else if (twoWaySync) {
-						// Asset missing locally - download only if two-way sync is enabled
-						console.log(`[Trip2g Sync] Asset ${assetPath} not found locally, will download`);
-						toDownload.push({ asset });
+					if (localHash === asset.sha256Hash) {
+						// Hashes match - no action needed
+						continue;
 					}
+
+					// Conflict: local and remote differ
+					console.log(`[Trip2g Sync] Asset conflict ${assetPath}: local=${localHash.slice(0, 8)}... remote=${asset.sha256Hash?.slice(0, 8)}...`);
+					conflicts.push({
+						path: asset.path,
+						absolutePath: assetPath,
+						relativeAbsolutePath: relativeAssetPath,
+						localHash,
+						remoteHash: asset.sha256Hash || "",
+						remoteUrl: asset.url,
+						noteId: String(note.id),
+					});
+				} else if (twoWaySync) {
+					// Asset missing locally - download only if two-way sync is enabled
+					console.log(`[Trip2g Sync] Asset ${assetPath} not found locally, will download`);
+					toDownload.push({ asset });
 				}
 			}
 		}
@@ -746,7 +743,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 		}
 	}
 
-	private async downloadSingleAsset(asset: RemoteAsset, syncDir: SyncDir): Promise<boolean> {
+	private async downloadSingleAsset(asset: NoteAsset, syncDir: SyncDir): Promise<boolean> {
 		try {
 			// Remove leading slash if present (server may return /path or path)
 			// Then add sync folder prefix to get the actual vault path
@@ -825,58 +822,10 @@ export default class Trip2gSyncPlugin extends Plugin {
 				// Update sync state
 				const hash = await sha256Hash(noteData.content);
 				updateSyncState(syncState, noteData.path, hash);
-
-				// Download missing assets
-				if (noteData.assetReplaces && noteData.assetReplaces.length > 0) {
-					await this.downloadMissingAssets(noteData.assetReplaces, folder);
-				}
 			}
 		}
 
 		console.log(`[Trip2g Sync] executePulls: received ${processed} files from server`);
-	}
-
-	private async downloadMissingAssets(assets: RemoteAsset[], folder: TFolder) {
-		for (const asset of assets) {
-			try {
-				// Remove leading slash if present (server may return /path or path)
-				// Then add sync folder prefix to get the actual vault path
-				const relativeAssetPath = asset.absolutePath.replace(/^\//, "");
-				const assetPath = folder.path === "/" ? relativeAssetPath : `${folder.path}/${relativeAssetPath}`;
-				const existingFile = this.app.vault.getAbstractFileByPath(assetPath);
-
-				if (existingFile instanceof TFile) {
-					// Asset exists - check hash
-					const localBuffer = await this.app.vault.readBinary(existingFile);
-					const localHash = await sha256HashBuffer(localBuffer);
-
-					if (localHash === asset.hash) {
-						continue;
-					}
-				}
-
-				// Asset missing or hash differs - download
-				const data = await this.downloadAsset(asset.url);
-				if (!data) {
-					continue;
-				}
-
-				// Create directories if needed
-				const assetDir = assetPath.substring(0, assetPath.lastIndexOf("/"));
-				if (assetDir && !this.app.vault.getAbstractFileByPath(assetDir)) {
-					await this.app.vault.createFolder(assetDir);
-				}
-
-				// Write asset file
-				if (existingFile instanceof TFile) {
-					await this.app.vault.modifyBinary(existingFile, data);
-				} else {
-					await this.app.vault.createBinary(assetPath, data);
-				}
-			} catch (error) {
-				console.error(`[Trip2g Sync] Error downloading asset ${asset.absolutePath}:`, error);
-			}
-		}
 	}
 
 	private async handleConflicts(

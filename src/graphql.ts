@@ -1775,8 +1775,12 @@ export type PushedNote = {
 };
 
 export type PushedNoteAsset = {
+  absolutePath: Scalars['String']['output'];
+  assetId: Scalars['Int64']['output'];
+  id: Scalars['String']['output'];
   path: Scalars['String']['output'];
   sha256Hash?: Maybe<Scalars['String']['output']>;
+  url: Scalars['String']['output'];
 };
 
 export type Query = {
@@ -2307,14 +2311,7 @@ export type FetchNoteContentsQueryVariables = Exact<{
 }>;
 
 
-export type FetchNoteContentsQuery = { notePaths: Array<{ content: string, path: string, assetReplaces: Array<{ id: string, url: string, hash: string, absolutePath: string }> }> };
-
-export type FetchNoteAssetsQueryVariables = Exact<{
-  filter?: InputMaybe<NotePathsFilter>;
-}>;
-
-
-export type FetchNoteAssetsQuery = { notePaths: Array<{ path: string, latestNoteView?: { versionId: number } | null, assetReplaces: Array<{ id: string, url: string, hash: string, absolutePath: string }> }> };
+export type FetchNoteContentsQuery = { notePaths: Array<{ content: string, path: string }> };
 
 export type PushNotesMutationVariables = Exact<{
   input: PushNotesInput;
@@ -2323,7 +2320,7 @@ export type PushNotesMutationVariables = Exact<{
 
 export type PushNotesMutation = { pushNotes:
     | { message: string }
-    | { notes: Array<{ id: number, path: string, assets: Array<{ path: string, sha256Hash?: string | null }> }> }
+    | { notes: Array<{ id: number, path: string, assets: Array<{ path: string, sha256Hash?: string | null, absolutePath: string, url: string }> }> }
    };
 
 export type HideNotesMutationVariables = Exact<{
@@ -2360,28 +2357,6 @@ export const FetchNoteContentsDocument = gql`
   notePaths(filter: $filter) {
     path: value
     content
-    assetReplaces {
-      id
-      url
-      hash
-      absolutePath
-    }
-  }
-}
-    `;
-export const FetchNoteAssetsDocument = gql`
-    query FetchNoteAssets($filter: NotePathsFilter) {
-  notePaths(filter: $filter) {
-    path: value
-    latestNoteView {
-      versionId
-    }
-    assetReplaces {
-      id
-      url
-      hash
-      absolutePath
-    }
   }
 }
     `;
@@ -2398,6 +2373,8 @@ export const PushNotesDocument = gql`
         assets {
           path
           sha256Hash
+          absolutePath
+          url
         }
       }
     }
@@ -2443,9 +2420,6 @@ export function getSdk(client: GraphQLClient, withWrapper: SdkFunctionWrapper = 
     },
     FetchNoteContents(variables?: FetchNoteContentsQueryVariables, requestHeaders?: GraphQLClientRequestHeaders, signal?: RequestInit['signal']): Promise<FetchNoteContentsQuery> {
       return withWrapper((wrappedRequestHeaders) => client.request<FetchNoteContentsQuery>({ document: FetchNoteContentsDocument, variables, requestHeaders: { ...requestHeaders, ...wrappedRequestHeaders }, signal }), 'FetchNoteContents', 'query', variables);
-    },
-    FetchNoteAssets(variables?: FetchNoteAssetsQueryVariables, requestHeaders?: GraphQLClientRequestHeaders, signal?: RequestInit['signal']): Promise<FetchNoteAssetsQuery> {
-      return withWrapper((wrappedRequestHeaders) => client.request<FetchNoteAssetsQuery>({ document: FetchNoteAssetsDocument, variables, requestHeaders: { ...requestHeaders, ...wrappedRequestHeaders }, signal }), 'FetchNoteAssets', 'query', variables);
     },
     PushNotes(variables: PushNotesMutationVariables, requestHeaders?: GraphQLClientRequestHeaders, signal?: RequestInit['signal']): Promise<PushNotesMutation> {
       return withWrapper((wrappedRequestHeaders) => client.request<PushNotesMutation>({ document: PushNotesDocument, variables, requestHeaders: { ...requestHeaders, ...wrappedRequestHeaders }, signal }), 'PushNotes', 'mutation', variables);
