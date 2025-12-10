@@ -529,10 +529,11 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 		// Push local changes (including local_only files)
 		const toPush = [...pushes, ...localOnly];
+		let pushedNotes: NoteWithAssets[] = [];
 		if (toPush.length > 0) {
 			const shouldPush = await this.confirmPush(toPush);
 			if (shouldPush) {
-				await this.executePushes(sdk, syncDir, folder, toPush, syncState);
+				pushedNotes = await this.executePushes(sdk, syncDir, folder, toPush, syncState);
 				new Notice(t().pushedFiles(toPush.length));
 			}
 		}
@@ -547,44 +548,34 @@ export default class Trip2gSyncPlugin extends Plugin {
 			await this.handleServerDeleted(folder, serverDeleted, syncState);
 		}
 
-		// Check assets for all notes (after push completes, we have full picture)
-		// Include: unchanged, pulled, pushed, local_only
-		const allSyncedPaths = classifications
-			.filter((c) => c.action === "unchanged" || c.action === "pull" || c.action === "push" || c.action === "local_only")
-			.map((c) => c.path);
-		if (allSyncedPaths.length > 0) {
-			await this.checkAndSyncAssets(sdk, syncDir, allSyncedPaths);
+		// Check assets for pushed notes (assets already processed in executePushes,
+		// but this handles conflicts and downloads for two-way sync)
+		if (pushedNotes.length > 0) {
+			await this.checkAndSyncAssets(syncDir, pushedNotes);
 		}
 
 		if (unchanged > 0 && pulls.length === 0 && pushes.length === 0 && conflicts.length === 0) {
 			new Notice(t().allFilesUpToDate);
 		}
-
-		// Update badge after sync
-		this.checkForPendingChanges();
 	}
 
-	private async checkAndSyncAssets(sdk: Sdk, syncDir: SyncDir, paths: string[]) {
+	private async checkAndSyncAssets(syncDir: SyncDir, notes: NoteWithAssets[]) {
+		if (notes.length === 0) {
+			return;
+		}
+
 		const conflicts: AssetConflict[] = [];
 		const toDownload: Array<{ asset: NoteAsset }> = [];
 		const toUpload: Array<{ noteId: string; notePath: string; asset: NoteAsset }> = [];
 		const twoWaySync = syncDir.twoWaySync ?? false;
-
-		// Fetch all assets in one request using PushNotes with empty updates
-		const result = await sdk.PushNotes({ input: { skipCommit: true, updates: [] } });
-		if (!("notes" in result.pushNotes)) {
-			return;
-		}
-
-		// Filter to only notes we care about (synced paths)
-		const pathSet = new Set(paths);
-		const relevantNotes = result.pushNotes.notes.filter((n) => pathSet.has(n.path));
 
 		// Get sync folder for resolving asset paths
 		const folder = this.app.vault.getAbstractFileByPath(syncDir.path);
 		if (!folder || !(folder instanceof TFolder)) {
 			return;
 		}
+
+		const relevantNotes = notes;
 
 		for (const note of relevantNotes) {
 			if (!note.assets || note.assets.length === 0) {
@@ -1064,7 +1055,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 		folder: TFolder,
 		pushes: FileClassification[],
 		syncState: SyncState
-	) {
+	): Promise<NoteWithAssets[]> {
 		const updates: Array<{ path: string; content: string }> = [];
 		const total = pushes.length;
 
@@ -1082,7 +1073,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 		}
 
 		if (updates.length === 0) {
-			return;
+			return [];
 		}
 
 		const result = await sdk.PushNotes({ input: { skipCommit: true, updates } });
@@ -1093,12 +1084,14 @@ export default class Trip2gSyncPlugin extends Plugin {
 			updateSyncState(syncState, update.path, hash);
 		}
 
-		// Process assets
+		// Process assets and return notes for further processing
 		if ("notes" in result.pushNotes) {
 			for (const note of result.pushNotes.notes) {
 				await this.processNoteAssets(syncDir, note, folder);
 			}
+			return result.pushNotes.notes;
 		}
+		return [];
 	}
 
 	private async handleLocalDeleted(sdk: Sdk, localDeleted: FileClassification[], syncState: SyncState) {
