@@ -613,12 +613,18 @@ export default class Trip2gSyncPlugin extends Plugin {
 		let downloadedCount = 0;
 		if (twoWaySync && toDownload.length > 0) {
 			const total = toDownload.length;
-			for (let i = 0; i < toDownload.length; i++) {
-				this.setProgress(t().progressDownloadingAssets(i + 1, total));
-				const downloaded = await this.downloadSingleAsset(toDownload[i].asset, syncDir);
-				if (downloaded) {
-					downloadedCount++;
-				}
+			let processed = 0;
+
+			// Process in parallel batches of 10
+			const concurrency = 10;
+			for (let i = 0; i < toDownload.length; i += concurrency) {
+				const batch = toDownload.slice(i, i + concurrency);
+				const results = await Promise.all(
+					batch.map(({ asset }) => this.downloadSingleAsset(asset, syncDir))
+				);
+				downloadedCount += results.filter(Boolean).length;
+				processed += batch.length;
+				this.setProgress(t().progressDownloadingAssets(processed, total));
 			}
 
 			if (downloadedCount > 0) {
