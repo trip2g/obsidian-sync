@@ -585,6 +585,11 @@ export default class Trip2gSyncPlugin extends Plugin {
 			}
 
 			for (const asset of note.assets) {
+				// Skip assets not yet uploaded to server
+				if (!asset.sha256Hash || !asset.absolutePath || !asset.url) {
+					continue;
+				}
+
 				// Remove leading slash if present (server may return /path or path)
 				// Then add sync folder prefix to get the actual vault path
 				const relativeAssetPath = asset.absolutePath.replace(/^\//, "");
@@ -731,28 +736,34 @@ export default class Trip2gSyncPlugin extends Plugin {
 	private async autoUploadLocalAssets(syncDir: SyncDir, conflicts: AssetConflict[]): Promise<void> {
 		let uploadedCount = 0;
 		const total = conflicts.length;
+		let processed = 0;
 
-		for (let i = 0; i < conflicts.length; i++) {
-			const conflict = conflicts[i];
-			this.setProgress(t().progressUploadingAssets(i + 1, total));
-
-			const file = this.app.vault.getAbstractFileByPath(conflict.absolutePath);
-			if (file instanceof TFile) {
-				const buffer = await this.app.vault.readBinary(file);
-				const blob = new Blob([buffer]);
-				const success = await this.uploadAsset(
-					syncDir,
-					conflict.noteId,
-					blob,
-					file.name,
-					conflict.path,
-					conflict.relativeAbsolutePath,
-					conflict.localHash
-				);
-				if (success) {
-					uploadedCount++;
-				}
-			}
+		// Process in parallel batches of 5
+		const concurrency = 5;
+		for (let i = 0; i < conflicts.length; i += concurrency) {
+			const batch = conflicts.slice(i, i + concurrency);
+			const results = await Promise.all(
+				batch.map(async (conflict) => {
+					const file = this.app.vault.getAbstractFileByPath(conflict.absolutePath);
+					if (file instanceof TFile) {
+						const buffer = await this.app.vault.readBinary(file);
+						const blob = new Blob([buffer]);
+						return this.uploadAsset(
+							syncDir,
+							conflict.noteId,
+							blob,
+							file.name,
+							conflict.path,
+							conflict.relativeAbsolutePath,
+							conflict.localHash
+						);
+					}
+					return false;
+				})
+			);
+			uploadedCount += results.filter(Boolean).length;
+			processed += batch.length;
+			this.setProgress(t().progressUploadingAssets(processed, total));
 		}
 
 		if (uploadedCount > 0) {
@@ -1128,26 +1139,38 @@ export default class Trip2gSyncPlugin extends Plugin {
 			return;
 		}
 
+		// Prepare upload tasks
+		const uploadTasks: Array<() => Promise<void>> = [];
+
 		for (const asset of note.assets) {
-			try {
-				const resolvedFile = this.app.metadataCache.getFirstLinkpathDest(asset.path, noteFile.path);
+			const resolvedFile = this.app.metadataCache.getFirstLinkpathDest(asset.path, noteFile.path);
 
-				if (!(resolvedFile instanceof TFile)) {
-					continue;
-				}
-
-				const arrayBuffer = await this.app.vault.readBinary(resolvedFile);
-				const localHash = await sha256HashBuffer(arrayBuffer);
-
-				if (!asset.sha256Hash || asset.sha256Hash !== localHash) {
-					const blob = new Blob([arrayBuffer]);
-					// Use relative path (without sync folder prefix) so other users can pull to their own sync folders
-					const relativeAbsolutePath = this.getRelativePath(resolvedFile, folder);
-					await this.uploadAsset(syncDir, String(note.id), blob, resolvedFile.name, asset.path, relativeAbsolutePath, localHash);
-				}
-			} catch (error) {
-				console.error(`Error processing asset ${asset.path}:`, error);
+			if (!(resolvedFile instanceof TFile)) {
+				continue;
 			}
+
+			uploadTasks.push(async () => {
+				try {
+					const arrayBuffer = await this.app.vault.readBinary(resolvedFile);
+					const localHash = await sha256HashBuffer(arrayBuffer);
+
+					if (!asset.sha256Hash || asset.sha256Hash !== localHash) {
+						const blob = new Blob([arrayBuffer]);
+						// Use relative path (without sync folder prefix) so other users can pull to their own sync folders
+						const relativeAbsolutePath = this.getRelativePath(resolvedFile, folder);
+						await this.uploadAsset(syncDir, String(note.id), blob, resolvedFile.name, asset.path, relativeAbsolutePath, localHash);
+					}
+				} catch (error) {
+					console.error(`Error processing asset ${asset.path}:`, error);
+				}
+			});
+		}
+
+		// Process in parallel batches of 5
+		const concurrency = 5;
+		for (let i = 0; i < uploadTasks.length; i += concurrency) {
+			const batch = uploadTasks.slice(i, i + concurrency);
+			await Promise.all(batch.map((task) => task()));
 		}
 	}
 
