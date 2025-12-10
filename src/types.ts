@@ -6,6 +6,8 @@ export interface SyncDir {
 	error?: string | null;
 	/** Frontmatter field to filter files for push (e.g., "publish"). If empty, all files are synced. */
 	publishField?: string;
+	/** Enable two-way sync (pull updates from server). Useful for TG channel import or server-side automation. */
+	twoWaySync?: boolean;
 }
 
 export interface PluginSettings {

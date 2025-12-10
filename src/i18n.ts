@@ -26,6 +26,8 @@ export interface Translations {
 	publishFieldLabel: string;
 	publishFieldPlaceholder: string;
 	publishFieldDesc: string;
+	twoWaySyncLabel: string;
+	twoWaySyncDesc: string;
 	testConnection: string;
 	resetSyncState: string;
 	resetSyncStateConfirm: string;
@@ -34,6 +36,7 @@ export interface Translations {
 	removeDirectoryConfirm: string;
 	error: string;
 	successfulConnections: (success: number, fail: number) => string;
+	globalSettingsHeading: string;
 	skipPushConfirmationLabel: string;
 	skipPushConfirmationDesc: string;
 	onboardingLink: string;
@@ -133,6 +136,8 @@ const en: Translations = {
 	publishFieldLabel: "Publish fields",
 	publishFieldPlaceholder: "publish, public",
 	publishFieldDesc: "Only sync files with these frontmatter fields set to true. Comma-separated list. Leave empty to sync all files.",
+	twoWaySyncLabel: "Two-way sync",
+	twoWaySyncDesc: "Download updates from server. Enable for TG channel import or server-side automation.",
 	testConnection: "Test connection",
 	resetSyncState: "Reset sync state",
 	resetSyncStateConfirm: "Reset sync state? Next sync will re-download all files from server.",
@@ -142,6 +147,7 @@ const en: Translations = {
 	error: "Error",
 	successfulConnections: (success, fail) =>
 		fail === 0 ? `All connections successful (${success})` : `${success} successful, ${fail} failed`,
+	globalSettingsHeading: "Global settings",
 	skipPushConfirmationLabel: "Skip push confirmation",
 	skipPushConfirmationDesc: "Don't show confirmation dialog before uploading files to server",
 	onboardingLink: "Onboarding guide",
@@ -244,6 +250,8 @@ const ru: Translations = {
 	publishFieldLabel: "Поля публикации",
 	publishFieldPlaceholder: "publish, public",
 	publishFieldDesc: "Синхронизировать только файлы с этими полями в frontmatter (значение true). Через запятую. Оставьте пустым для синхронизации всех файлов.",
+	twoWaySyncLabel: "Двусторонняя синхронизация",
+	twoWaySyncDesc: "Загружать обновления с сервера. Включите для импорта TG каналов или серверной автоматизации.",
 	testConnection: "Проверить соединение",
 	resetSyncState: "Сбросить состояние синхронизации",
 	resetSyncStateConfirm: "Сбросить состояние? При следующей синхронизации все файлы будут загружены с сервера.",
@@ -253,6 +261,7 @@ const ru: Translations = {
 	error: "Ошибка",
 	successfulConnections: (success, fail) =>
 		fail === 0 ? `Все соединения успешны (${success})` : `${success} успешно, ${fail} с ошибкой`,
+	globalSettingsHeading: "Общие настройки",
 	skipPushConfirmationLabel: "Не спрашивать подтверждение",
 	skipPushConfirmationDesc: "Не показывать диалог подтверждения перед загрузкой файлов на сервер",
 	onboardingLink: "Руководство по настройке",

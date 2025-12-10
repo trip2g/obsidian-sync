@@ -183,13 +183,17 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 				// Classify files
 				const classifications = classifyAllFiles(localFiles, serverHashes, syncState);
+				const twoWaySync = syncDir.twoWaySync ?? false;
 
 				for (const c of classifications) {
 					switch (c.action) {
 						case "pull":
 						case "remote_only":
-							console.log(`[Trip2g Sync] Badge: ${c.path} -> ${c.action}`);
-							totalPull++;
+							// Only count pulls if two-way sync is enabled
+							if (twoWaySync) {
+								console.log(`[Trip2g Sync] Badge: ${c.path} -> ${c.action}`);
+								totalPull++;
+							}
 							break;
 						case "push":
 						case "local_only":
@@ -197,8 +201,15 @@ export default class Trip2gSyncPlugin extends Plugin {
 							totalPush++;
 							break;
 						case "conflict":
-							console.log(`[Trip2g Sync] Badge: ${c.path} -> conflict`);
-							hasConflict = true;
+							// Only show conflict if two-way sync is enabled
+							// Otherwise conflicts auto-resolve to local version (push)
+							if (twoWaySync) {
+								console.log(`[Trip2g Sync] Badge: ${c.path} -> conflict`);
+								hasConflict = true;
+							} else {
+								console.log(`[Trip2g Sync] Badge: ${c.path} -> conflict (will push)`);
+								totalPush++;
+							}
 							break;
 					}
 				}
@@ -402,6 +413,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 		let unchanged = 0;
 
 		const publishField = syncDir.publishField || "";
+		const twoWaySync = syncDir.twoWaySync ?? false;
 
 		for (const c of classifications) {
 			const fullPath = folder.path === "/" ? c.path : `${folder.path}/${c.path}`;
@@ -413,6 +425,10 @@ export default class Trip2gSyncPlugin extends Plugin {
 					unchanged++;
 					break;
 				case "pull":
+					// Skip pull if two-way sync is disabled
+					if (!twoWaySync) {
+						break;
+					}
 					// Don't pull if local file exists and doesn't have publish field (protected)
 					if (publishField && localFile instanceof TFile && !hasPublish) {
 						// Skip - protected local file
@@ -427,6 +443,13 @@ export default class Trip2gSyncPlugin extends Plugin {
 					}
 					break;
 				case "conflict":
+					// Skip conflict handling if two-way sync is disabled (just push local)
+					if (!twoWaySync) {
+						if (hasPublish) {
+							pushes.push(c);
+						}
+						break;
+					}
 					// Don't show conflict if local file is protected (no publish field)
 					if (publishField && localFile instanceof TFile && !hasPublish) {
 						// Skip - protected local file, server changes are ignored
@@ -441,6 +464,10 @@ export default class Trip2gSyncPlugin extends Plugin {
 					}
 					break;
 				case "remote_only":
+					// Skip if two-way sync is disabled
+					if (!twoWaySync) {
+						break;
+					}
 					// Fallback: treat as pull (new file from server)
 					pulls.push(c);
 					break;
@@ -451,6 +478,10 @@ export default class Trip2gSyncPlugin extends Plugin {
 					}
 					break;
 				case "server_deleted":
+					// Skip if two-way sync is disabled
+					if (!twoWaySync) {
+						break;
+					}
 					serverDeleted.push(c);
 					break;
 			}
@@ -511,6 +542,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 	private async checkAndSyncAssets(sdk: Sdk, syncDir: SyncDir, paths: string[]) {
 		const conflicts: AssetConflict[] = [];
 		const toDownload: Array<{ asset: RemoteAsset }> = [];
+		const twoWaySync = syncDir.twoWaySync ?? false;
 
 		// Fetch only asset info (no content) in batches of 100
 		const batchSize = 100;
@@ -559,8 +591,8 @@ export default class Trip2gSyncPlugin extends Plugin {
 							remoteUrl: asset.url,
 							noteId: String(noteId),
 						});
-					} else {
-						// Asset missing locally - download
+					} else if (twoWaySync) {
+						// Asset missing locally - download only if two-way sync is enabled
 						console.log(`[Trip2g Sync] Asset ${assetPath} not found locally, will download`);
 						toDownload.push({ asset });
 					}
@@ -569,16 +601,19 @@ export default class Trip2gSyncPlugin extends Plugin {
 		}
 
 		// Download missing assets (no conflict - they don't exist locally)
+		// Only if two-way sync is enabled
 		let downloadedCount = 0;
-		for (const { asset } of toDownload) {
-			const downloaded = await this.downloadSingleAsset(asset, syncDir);
-			if (downloaded) {
-				downloadedCount++;
+		if (twoWaySync) {
+			for (const { asset } of toDownload) {
+				const downloaded = await this.downloadSingleAsset(asset, syncDir);
+				if (downloaded) {
+					downloadedCount++;
+				}
 			}
-		}
 
-		if (downloadedCount > 0) {
-			new Notice(t().assetDownloaded(downloadedCount));
+			if (downloadedCount > 0) {
+				new Notice(t().assetDownloaded(downloadedCount));
+			}
 		}
 
 		// Handle conflicts - ask user (deduplicate by absolutePath)
@@ -587,7 +622,14 @@ export default class Trip2gSyncPlugin extends Plugin {
 				(c, i, arr) => arr.findIndex((x) => x.absolutePath === c.absolutePath) === i
 			);
 			console.log(`[Trip2g Sync] Asset conflicts:`, uniqueConflicts.map(c => c.absolutePath));
-			await this.handleAssetConflicts(syncDir, uniqueConflicts);
+
+			if (twoWaySync) {
+				// Two-way sync: ask user what to do
+				await this.handleAssetConflicts(syncDir, uniqueConflicts);
+			} else {
+				// One-way sync: auto-upload local assets to server
+				await this.autoUploadLocalAssets(syncDir, uniqueConflicts);
+			}
 		}
 	}
 
@@ -653,6 +695,34 @@ export default class Trip2gSyncPlugin extends Plugin {
 		}
 		if (downloadedCount > 0) {
 			new Notice(t().assetDownloaded(downloadedCount));
+		}
+	}
+
+	private async autoUploadLocalAssets(syncDir: SyncDir, conflicts: AssetConflict[]): Promise<void> {
+		let uploadedCount = 0;
+
+		for (const conflict of conflicts) {
+			const file = this.app.vault.getAbstractFileByPath(conflict.absolutePath);
+			if (file instanceof TFile) {
+				const buffer = await this.app.vault.readBinary(file);
+				const blob = new Blob([buffer]);
+				const success = await this.uploadAsset(
+					syncDir,
+					conflict.noteId,
+					blob,
+					file.name,
+					conflict.path,
+					conflict.relativeAbsolutePath,
+					conflict.localHash
+				);
+				if (success) {
+					uploadedCount++;
+				}
+			}
+		}
+
+		if (uploadedCount > 0) {
+			new Notice(t().assetUploaded(uploadedCount));
 		}
 	}
 
@@ -1421,9 +1491,22 @@ class SyncSettingTab extends PluginSettingTab {
 							this.plugin.saveSettings();
 						});
 				});
+
+			// Two-way sync toggle
+			new Setting(containerEl)
+				.setName(i18n.twoWaySyncLabel)
+				.setDesc(i18n.twoWaySyncDesc)
+				.addToggle((toggle) =>
+					toggle.setValue(dir.twoWaySync ?? false).onChange(async (value) => {
+						this.plugin.settings.syncDirs[dirIndex].twoWaySync = value;
+						await this.plugin.saveSettings();
+					})
+				);
 		});
 
-		// Global settings
+		// Global settings section with visual separator
+		new Setting(containerEl).setName(i18n.globalSettingsHeading).setHeading();
+
 		new Setting(containerEl)
 			.setName(i18n.skipPushConfirmationLabel)
 			.setDesc(i18n.skipPushConfirmationDesc)
