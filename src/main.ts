@@ -567,6 +567,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 	private async checkAndSyncAssets(sdk: Sdk, syncDir: SyncDir, paths: string[]) {
 		const conflicts: AssetConflict[] = [];
 		const toDownload: Array<{ asset: NoteAsset }> = [];
+		const toUpload: Array<{ noteId: string; notePath: string; asset: NoteAsset }> = [];
 		const twoWaySync = syncDir.twoWaySync ?? false;
 
 		// Fetch all assets in one request using PushNotes with empty updates
@@ -579,14 +580,24 @@ export default class Trip2gSyncPlugin extends Plugin {
 		const pathSet = new Set(paths);
 		const relevantNotes = result.pushNotes.notes.filter((n) => pathSet.has(n.path));
 
+		// Get sync folder for resolving asset paths
+		const folder = this.app.vault.getAbstractFileByPath(syncDir.path);
+		if (!folder || !(folder instanceof TFolder)) {
+			return;
+		}
+
 		for (const note of relevantNotes) {
 			if (!note.assets || note.assets.length === 0) {
 				continue;
 			}
 
+			const notePathInVault = folder.path === "/" ? note.path : `${folder.path}/${note.path}`;
+			const noteFile = this.app.vault.getAbstractFileByPath(notePathInVault);
+
 			for (const asset of note.assets) {
-				// Skip assets not yet uploaded to server
+				// Asset not yet uploaded to server - need to upload
 				if (!asset.sha256Hash || !asset.absolutePath || !asset.url) {
+					toUpload.push({ noteId: String(note.id), notePath: notePathInVault, asset });
 					continue;
 				}
 
@@ -624,6 +635,50 @@ export default class Trip2gSyncPlugin extends Plugin {
 					console.log(`[Trip2g Sync] Asset ${assetPath} not found locally, will download`);
 					toDownload.push({ asset });
 				}
+			}
+		}
+
+		// Upload assets that are not yet on server
+		if (toUpload.length > 0) {
+			let uploadedCount = 0;
+			const total = toUpload.length;
+			let processed = 0;
+
+			// Process in parallel batches of 5
+			const concurrency = 5;
+			for (let i = 0; i < toUpload.length; i += concurrency) {
+				const batch = toUpload.slice(i, i + concurrency);
+				const results = await Promise.all(
+					batch.map(async ({ noteId, notePath, asset }) => {
+						const noteFile = this.app.vault.getAbstractFileByPath(notePath);
+						if (!(noteFile instanceof TFile)) {
+							return false;
+						}
+
+						const resolvedFile = this.app.metadataCache.getFirstLinkpathDest(asset.path, noteFile.path);
+						if (!(resolvedFile instanceof TFile)) {
+							return false;
+						}
+
+						try {
+							const arrayBuffer = await this.app.vault.readBinary(resolvedFile);
+							const localHash = await sha256HashBuffer(arrayBuffer);
+							const blob = new Blob([arrayBuffer]);
+							const relativeAbsolutePath = this.getRelativePath(resolvedFile, folder);
+							return this.uploadAsset(syncDir, noteId, blob, resolvedFile.name, asset.path, relativeAbsolutePath, localHash);
+						} catch (error) {
+							console.error(`Error uploading asset ${asset.path}:`, error);
+							return false;
+						}
+					})
+				);
+				uploadedCount += results.filter(Boolean).length;
+				processed += batch.length;
+				this.setProgress(t().progressUploadingAssets(processed, total));
+			}
+
+			if (uploadedCount > 0) {
+				new Notice(t().assetUploaded(uploadedCount));
 			}
 		}
 
