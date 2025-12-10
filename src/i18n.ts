@@ -115,6 +115,7 @@ export interface Translations {
 	assetConflictApplyToAll: string;
 	assetUploaded: (count: number) => string;
 	assetDownloaded: (count: number) => string;
+	assetTooLarge: (fileName: string) => string;
 }
 
 const en: Translations = {
@@ -236,6 +237,7 @@ const en: Translations = {
 	assetConflictApplyToAll: "Apply to all conflicts",
 	assetUploaded: (count) => `Uploaded ${count} assets`,
 	assetDownloaded: (count) => `Downloaded ${count} assets`,
+	assetTooLarge: (fileName) => `File "${fileName}" is too large to upload`,
 };
 
 const ru: Translations = {
@@ -357,6 +359,7 @@ const ru: Translations = {
 	assetConflictApplyToAll: "Применить ко всем конфликтам",
 	assetUploaded: (count) => `Загружено ${count} ассетов`,
 	assetDownloaded: (count) => `Скачано ${count} ассетов`,
+	assetTooLarge: (fileName) => `Файл "${fileName}" слишком большой для загрузки`,
 };
 
 const translations: Record<Locale, Translations> = { en, ru };

@@ -1258,6 +1258,11 @@ export default class Trip2gSyncPlugin extends Plugin {
 				console.log(`[Trip2g Sync] Upload response for ${relativePath} (attempt ${attempt}):`, response.status, responseText);
 
 				if (!response.ok) {
+					if (response.status === 413) {
+						// File too large - don't retry, show user-friendly message
+						new Notice(t().assetTooLarge(fileName));
+						return false;
+					}
 					throw new Error(`HTTP error! status: ${response.status}, body: ${responseText}`);
 				}
 
