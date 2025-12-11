@@ -11,7 +11,13 @@
 		"format:check": "prettier --check \"**/*.ts\"",
 		"lint": "eslint . --ext .ts",
 		"lint:fix": "eslint . --ext .ts --fix",
-		"codegen": "graphql-codegen --config codegen.ts"
+		"codegen": "graphql-codegen --config codegen.ts",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"test:coverage": "vitest run --coverage",
+		"test:mutation": "stryker run",
+		"sync": "tsx src/sync/cli/cmd.ts",
+		"server-edit": "tsx src/sync/cli/server-edit.ts"
 	},
 	"keywords": [],
 	"author": "Alexey Yurchenko",
@@ -26,6 +32,9 @@
 		"@graphql-codegen/typescript": "^5.0.6",
 		"@graphql-codegen/typescript-graphql-request": "^6.3.0",
 		"@graphql-codegen/typescript-operations": "^5.0.6",
+		"@stryker-mutator/core": "^9.4.0",
+		"@stryker-mutator/typescript-checker": "^9.4.0",
+		"@stryker-mutator/vitest-runner": "^9.4.0",
 		"@types/node": "^16.11.6",
 		"@typescript-eslint/eslint-plugin": "5.29.0",
 		"@typescript-eslint/parser": "5.29.0",
@@ -35,7 +44,9 @@
 		"obsidian": "latest",
 		"prettier": "^3.6.2",
 		"tslib": "2.4.0",
-		"typescript": "4.7.4"
+		"tsx": "^4.21.0",
+		"typescript": "4.7.4",
+		"vitest": "^3.2.4"
 	},
 	"dependencies": {
 		"@lottiefiles/lottie-player": "^2.0.2",
