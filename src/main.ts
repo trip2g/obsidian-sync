@@ -604,12 +604,21 @@ export default class Trip2gSyncPlugin extends Plugin {
 			await this.handleServerDeleted(folder, serverDeleted, syncState);
 		}
 
-		// Check assets for pushed notes (assets already processed in executePushes,
-		// but this handles conflicts and downloads for two-way sync)
+		// Check assets for pushed notes and two-way sync
 		if (pushedNotes.length > 0) {
 			console.time("[Trip2g Sync] Check and sync assets");
 			await this.checkAndSyncAssets(syncDir, pushedNotes);
 			console.timeEnd("[Trip2g Sync] Check and sync assets");
+		} else if (twoWaySync) {
+			// For two-way sync without pushes, fetch all notes to check assets
+			console.time("[Trip2g Sync] Fetch notes for asset sync");
+			const result = await sdk.PushNotes({ input: { skipCommit: true, updates: [] } });
+			console.timeEnd("[Trip2g Sync] Fetch notes for asset sync");
+			if ("notes" in result.pushNotes && result.pushNotes.notes.length > 0) {
+				console.time("[Trip2g Sync] Check and sync assets (two-way)");
+				await this.checkAndSyncAssets(syncDir, result.pushNotes.notes);
+				console.timeEnd("[Trip2g Sync] Check and sync assets (two-way)");
+			}
 		}
 
 		if (unchanged > 0 && pulls.length === 0 && pushes.length === 0 && conflicts.length === 0) {
