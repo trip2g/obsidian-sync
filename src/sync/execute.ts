@@ -60,6 +60,16 @@ export async function executePlan(
 		result.errors.push(...assetResult.errors);
 	}
 
+	// 1c. Check assets for unchanged files (may have missing assets from interrupted sync)
+	const unchangedServerPaths = plan.classifications
+		.filter((c) => c.action === "unchanged" && c.remoteHash !== null)
+		.map((c) => c.path);
+	if (unchangedServerPaths.length > 0) {
+		const assetResult = await downloadAssetsForNotes(env, unchangedServerPaths);
+		result.assetsDownloaded += assetResult.downloaded;
+		result.errors.push(...assetResult.errors);
+	}
+
 	// Stryker disable next-line ConditionalExpression,EqualityOperator: optimization - handleServerDeleted handles empty array
 	// 2. Handle server-deleted files (ask user what to do)
 	if (plan.serverDeleted.length > 0) {
