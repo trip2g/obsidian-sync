@@ -75,7 +75,7 @@ function parseArgs(): CliArgs {
 				result.dryRun = true;
 				break;
 			case "--conflict-resolution":
-			case "-c":
+			case "-c": {
 				const crValue = value ?? args[++i];
 				if (crValue === "local" || crValue === "remote" || crValue === "skip" || crValue === "fail") {
 					result.conflictResolution = crValue;
@@ -84,10 +84,12 @@ function parseArgs(): CliArgs {
 					process.exit(1);
 				}
 				break;
+			}
 			case "--help":
 			case "-h":
 				printHelp();
 				process.exit(0);
+				break;
 			default:
 				// First positional arg is folder
 				if (!result.folder && !arg.startsWith("-")) {

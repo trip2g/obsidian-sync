@@ -6,6 +6,7 @@
  * [[image.png]] resolves to /image.png even when referenced from /folder/note.md
  */
 
+/* eslint-disable import/no-nodejs-modules */
 import * as path from "path";
 
 /**

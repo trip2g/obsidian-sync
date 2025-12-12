@@ -1,6 +1,7 @@
+/* eslint-disable @typescript-eslint/unbound-method */
 import { describe, it, expect, vi } from "vitest";
 import { classifyFile, classifySync } from "./classify";
-import type { ClassifyEnv, LocalFile, ServerHash, SyncState } from "./types";
+import type { ClassifyEnv, ServerHash, SyncState } from "./types";
 
 describe("classifyFile", () => {
 	// Test 1: Both hashes match -> unchanged

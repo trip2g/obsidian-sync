@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+/* eslint-disable @typescript-eslint/unbound-method */
+import { describe, it, expect, vi } from "vitest";
 import { executePlan } from "./execute";
 import type {
 	SyncEnv,

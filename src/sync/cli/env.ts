@@ -3,6 +3,7 @@
  * Uses generated GraphQL SDK from src/graphql.ts
  */
 
+/* eslint-disable import/no-nodejs-modules */
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";

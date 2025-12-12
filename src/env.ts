@@ -155,7 +155,7 @@ export class ObsidianSyncEnv implements SyncEnv {
 		const fullPath = this.getFullPath(path);
 		const file = this.app.vault.getAbstractFileByPath(fullPath);
 		if (file instanceof TFile) {
-			await this.app.vault.delete(file);
+			await this.app.fileManager.trashFile(file);
 		}
 	}
 
@@ -307,7 +307,15 @@ export class ObsidianSyncEnv implements SyncEnv {
 			throw new Error(`HTTP error! status: ${response.status}`);
 		}
 
-		const result = await response.json();
+		const result = (await response.json()) as {
+			errors?: Array<{ message: string }>;
+			data?: {
+				uploadNoteAsset?: {
+					__typename: string;
+					message?: string;
+				};
+			};
+		};
 		if (result.errors) {
 			throw new Error(`GraphQL errors: ${JSON.stringify(result.errors)}`);
 		}

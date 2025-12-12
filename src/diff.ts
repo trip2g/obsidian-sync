@@ -29,7 +29,7 @@ export function computeSideBySideDiff(localContent: string, remoteContent: strin
 
 	const left: DiffLine[] = [];
 	const right: DiffLine[] = [];
-	let stats = { added: 0, removed: 0, modified: 0 };
+	const stats = { added: 0, removed: 0, modified: 0 };
 
 	let localIdx = 0;
 	let remoteIdx = 0;
@@ -119,9 +119,10 @@ function computeLCS(local: string[], remote: string[]): LCSMatch[] {
 	const n = remote.length;
 
 	// Build DP table
-	const dp: number[][] = Array(m + 1)
-		.fill(null)
-		.map(() => Array(n + 1).fill(0));
+	const dp: number[][] = [];
+	for (let i = 0; i <= m; i++) {
+		dp[i] = new Array(n + 1).fill(0) as number[];
+	}
 
 	for (let i = 1; i <= m; i++) {
 		for (let j = 1; j <= n; j++) {

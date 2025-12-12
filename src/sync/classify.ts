@@ -1,4 +1,4 @@
-import type { SyncAction, FileClassification, SyncPlan, SyncState, ClassifyEnv, LocalFile, ServerHash } from "./types";
+import type { SyncAction, FileClassification, SyncPlan, ClassifyEnv } from "./types";
 
 /**
  * Classify a single file based on local, remote, and last synced hashes.

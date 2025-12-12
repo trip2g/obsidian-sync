@@ -277,6 +277,7 @@ async function handleConflicts(
 				remoteHash: conflict.remoteHash!,
 			});
 		} catch (e) {
+			console.warn(`Failed to read local file for conflict ${conflict.path}:`, e);
 			// Stryker disable next-line StringLiteral: error message content doesn't affect behavior
 			errors.push(`Failed to read local file for conflict: ${conflict.path}`);
 		}
@@ -331,7 +332,7 @@ async function resolveConflict(
 			syncState.files[conflict.path] = conflict.remoteHash;
 			break;
 
-		case "keep_both":
+		case "keep_both": {
 			// Create copy with server version
 			const ext = conflict.path.substring(conflict.path.lastIndexOf("."));
 			const baseName = conflict.path.substring(0, conflict.path.lastIndexOf("."));
@@ -344,6 +345,7 @@ async function resolveConflict(
 			const remoteHash = await env.computeHash(conflict.remoteContent);
 			syncState.files[newPath] = remoteHash;
 			break;
+		}
 
 		// Stryker disable next-line StringLiteral,ConditionalExpression: skip case is intentionally empty
 		case "skip":
@@ -375,7 +377,7 @@ async function handleServerDeleted(
 				await env.deleteFile(c.path);
 				delete syncState.files[c.path];
 			} catch (e) {
-				// File might not exist, ignore
+				console.warn(`Failed to delete file ${c.path}:`, e);
 			}
 		}
 	} else {

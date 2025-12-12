@@ -1,4 +1,4 @@
-import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf, requestUrl } from "obsidian";
+import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder } from "obsidian";
 import { GraphQLClient } from "graphql-request";
 import { FolderSuggest } from "./FolderSuggest";
 import { MigrationModal, ServerDeletedModal, PushConfirmModal, AssetConflictModal, type AssetConflict, type AssetConflictResolution as UIAssetConflictResolution } from "./ui/ConflictModal";
@@ -18,7 +18,6 @@ import type {
 } from "./types";
 import type {
 	ConflictInfo as SyncConflictInfo,
-	ConflictResolution as SyncConflictResolution,
 	AssetConflictInfo,
 	AssetConflictResolution,
 	Progress,
@@ -59,7 +58,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 		// Register conflict view
 		this.registerView(CONFLICT_VIEW_TYPE, (leaf) => new ConflictView(leaf));
 
-		this.ribbonIcon = this.addRibbonIcon("sync", "Trip2g Sync", () => {
+		this.ribbonIcon = this.addRibbonIcon("sync", "Trip2g sync", () => {
 			if (this.isSyncing) {
 				return; // Already syncing
 			}
@@ -91,9 +90,6 @@ export default class Trip2gSyncPlugin extends Plugin {
 	}
 
 	onunload() {
-		// Clean up view
-		this.app.workspace.detachLeavesOfType(CONFLICT_VIEW_TYPE);
-
 		// Clean up timer and listeners
 		if (this.checkInterval !== null) {
 			window.clearInterval(this.checkInterval);
@@ -102,7 +98,8 @@ export default class Trip2gSyncPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		const data = (await this.loadData()) as Partial<PluginSettings> | null;
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
 	}
 
 	async saveSettings() {
@@ -222,7 +219,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 			this.ribbonIcon.addClass("has-pending", "has-push");
 			this.ribbonIcon.setAttribute("aria-label", t().pendingPush(totalPush));
 		} else {
-			this.ribbonIcon.setAttribute("aria-label", "Trip2g Sync");
+			this.ribbonIcon.setAttribute("aria-label", "Trip2g sync");
 		}
 	}
 
@@ -260,7 +257,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 				this.ribbonIcon.removeClass("is-syncing");
 				// Clear badge after sync completes
 				this.ribbonIcon.removeClass("has-pending", "has-pull", "has-push", "has-conflict");
-				this.ribbonIcon.setAttribute("aria-label", "Trip2g Sync");
+				this.ribbonIcon.setAttribute("aria-label", "Trip2g sync");
 			}
 		}
 	}
