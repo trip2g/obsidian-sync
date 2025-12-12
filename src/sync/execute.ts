@@ -133,8 +133,6 @@ async function executePulls(
 	const pulledPaths: string[] = [];
 	let count = 0;
 
-	env.showProgress(`Pulling ${paths.length} files...`);
-
 	// Fetch contents from server
 	const contents = await env.fetchNoteContents(paths);
 	const contentMap = new Map(contents.map((c) => [c.path, c.content]));
@@ -144,7 +142,7 @@ async function executePulls(
 
 	for (const pull of pulls) {
 		current++;
-		env.updateProgress({ step: "pull", current, total, path: pull.path });
+		env.onProgress({ step: "pull", current, total, path: pull.path });
 
 		const content = contentMap.get(pull.path);
 		if (content === undefined) {
@@ -193,15 +191,13 @@ async function executePushes(
 	const errors: string[] = [];
 	const updates: NoteUpdate[] = [];
 
-	env.showProgress(`Pushing ${pushes.length} files...`);
-
 	// Read all file contents
 	const total = pushes.length;
 	let current = 0;
 
 	for (const push of pushes) {
 		current++;
-		env.updateProgress({ step: "push", current, total, path: push.path });
+		env.onProgress({ step: "push", current, total, path: push.path });
 
 		try {
 			const content = await env.readFileContent(push.path);
@@ -515,14 +511,12 @@ async function syncAssets(
 		}
 
 		const deduped = Array.from(uniqueUploads.values());
-		env.showProgress(`Uploading ${deduped.length} assets...`);
-
 		const uploadTotal = deduped.length;
 		let uploadCurrent = 0;
 
 		for (const item of deduped) {
 			uploadCurrent++;
-			env.updateProgress({ step: "upload_asset", current: uploadCurrent, total: uploadTotal, path: item.asset.path });
+			env.onProgress({ step: "upload_asset", current: uploadCurrent, total: uploadTotal, path: item.asset.path });
 
 			try {
 				const localData = await env.readBinaryFile(item.localPath);
@@ -550,14 +544,12 @@ async function syncAssets(
 
 	// Download missing assets (two-way sync only)
 	if (toDownload.length > 0) {
-		env.showProgress(`Downloading ${toDownload.length} assets...`);
-
 		const downloadTotal = toDownload.length;
 		let downloadCurrent = 0;
 
 		for (const item of toDownload) {
 			downloadCurrent++;
-			env.updateProgress({ step: "download_asset", current: downloadCurrent, total: downloadTotal, path: item.asset.path });
+			env.onProgress({ step: "download_asset", current: downloadCurrent, total: downloadTotal, path: item.asset.path });
 
 			if (!item.asset.url) {
 				continue;
@@ -713,14 +705,12 @@ async function downloadAssetsForNotes(
 		return result;
 	}
 
-	env.showProgress(`Downloading ${toDownload.size} assets for pulled notes...`);
-
 	const total = toDownload.size;
 	let current = 0;
 
 	for (const [absolutePath, { url }] of toDownload) {
 		current++;
-		env.updateProgress({ step: "download_asset", current, total, path: absolutePath });
+		env.onProgress({ step: "download_asset", current, total, path: absolutePath });
 
 		try {
 			const data = await env.downloadAsset(url);

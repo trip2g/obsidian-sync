@@ -115,8 +115,7 @@ function createMockEnv(options: {
 		saveSyncState: vi.fn().mockResolvedValue(undefined),
 
 		// UI callbacks
-		showProgress: vi.fn(),
-		updateProgress: vi.fn(),
+		onProgress: vi.fn(),
 		onConflict: vi.fn().mockImplementation(async () => {
 			return conflictResolutions.slice(resolutionIndex, resolutionIndex + 100);
 		}),
@@ -506,7 +505,7 @@ describe("executePlan", () => {
 
 			await executePlan(env, plan);
 
-			expect(env.showProgress).toHaveBeenCalledWith(expect.stringContaining("Pulling"));
+			expect(env.onProgress).toHaveBeenCalledWith(expect.objectContaining({ step: "pull" }));
 		});
 
 		it("shows progress during pushes", async () => {
@@ -518,7 +517,7 @@ describe("executePlan", () => {
 
 			await executePlan(env, plan);
 
-			expect(env.showProgress).toHaveBeenCalledWith(expect.stringContaining("Pushing"));
+			expect(env.onProgress).toHaveBeenCalledWith(expect.objectContaining({ step: "push" }));
 		});
 
 		it("calls confirmPush with correct paths", async () => {

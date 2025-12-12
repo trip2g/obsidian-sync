@@ -421,11 +421,7 @@ export class NodeEnv implements SyncEnv {
 
 	// ============ UI Callbacks (CLI versions) ============
 
-	showProgress(message: string): void {
-		console.log(message);
-	}
-
-	updateProgress(progress: import("../types").Progress): void {
+	onProgress(progress: import("../types").Progress): void {
 		if (this.verbose) {
 			console.log(`  [${progress.step}] ${progress.current}/${progress.total}: ${progress.path ?? ""}`);
 		}

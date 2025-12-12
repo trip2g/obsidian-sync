@@ -217,8 +217,7 @@ export interface SyncEnv extends ClassifyEnv {
 	saveSyncState(state: SyncState): Promise<void>;
 
 	// UI callbacks (can be mocked as no-op in tests)
-	showProgress(message: string): void;
-	updateProgress(progress: Progress): void;
+	onProgress(progress: Progress): void;
 	onConflict(conflicts: ConflictInfo[]): Promise<ConflictResolution[]>;
 	onAssetConflict(conflicts: AssetConflictInfo[]): Promise<AssetConflictResolution[]>;
 	onServerDeleted(paths: string[]): Promise<boolean>;
