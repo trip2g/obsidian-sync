@@ -175,6 +175,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 					apiKey: syncDir.apiKey,
 					pluginVersion: this.manifest.version,
 					publishField,
+					twoWaySync: false,
 					onProgressCallback: () => {},
 					onConflictCallback: async () => [],
 					onAssetConflictCallback: async () => [],
@@ -326,6 +327,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 				apiKey: syncDir.apiKey,
 				pluginVersion: this.manifest.version,
 				publishField,
+				twoWaySync,
 				onProgressCallback: (progress: Progress) => {
 					const messages: Record<string, string> = {
 						pull: t().progressPulling(progress.current, progress.total),

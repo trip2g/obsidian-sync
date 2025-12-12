@@ -31,6 +31,7 @@ export interface ObsidianEnvOptions {
 	apiKey: string;
 	pluginVersion: string;
 	publishField?: string;
+	twoWaySync: boolean;
 	// Callbacks for UI interactions
 	onProgressCallback: (progress: Progress) => void;
 	onConflictCallback: (conflicts: ConflictInfo[]) => Promise<ConflictResolution[]>;
@@ -53,6 +54,7 @@ export class ObsidianSyncEnv implements SyncEnv {
 	private apiKey: string;
 	private pluginVersion: string;
 	private publishField: string;
+	private twoWaySync: boolean;
 	private onProgressCallback: (progress: Progress) => void;
 	private onConflictCallback: (conflicts: ConflictInfo[]) => Promise<ConflictResolution[]>;
 	private onAssetConflictCallback: (conflicts: AssetConflictInfo[]) => Promise<AssetConflictResolution[]>;
@@ -69,12 +71,19 @@ export class ObsidianSyncEnv implements SyncEnv {
 		this.apiKey = options.apiKey;
 		this.pluginVersion = options.pluginVersion;
 		this.publishField = options.publishField || "";
+		this.twoWaySync = options.twoWaySync;
 		this.onProgressCallback = options.onProgressCallback;
 		this.onConflictCallback = options.onConflictCallback;
 		this.onAssetConflictCallback = options.onAssetConflictCallback;
 		this.onServerDeletedCallback = options.onServerDeletedCallback;
 		this.confirmPushCallback = options.confirmPushCallback;
 		this.saveSyncStateCallback = options.saveSyncStateCallback;
+	}
+
+	private assertTwoWaySync(operation: string): void {
+		if (!this.twoWaySync) {
+			throw new Error(`[Bug] ${operation} called with twoWaySync disabled`);
+		}
 	}
 
 	// ============ ClassifyEnv ============
@@ -123,6 +132,7 @@ export class ObsidianSyncEnv implements SyncEnv {
 	// ============ File Operations ============
 
 	async writeFile(path: string, content: string): Promise<void> {
+		this.assertTwoWaySync("writeFile");
 		const fullPath = this.getFullPath(path);
 		const existingFile = this.app.vault.getAbstractFileByPath(fullPath);
 		if (existingFile instanceof TFile) {
@@ -133,6 +143,7 @@ export class ObsidianSyncEnv implements SyncEnv {
 	}
 
 	async writeBinaryFile(path: string, data: ArrayBuffer): Promise<void> {
+		this.assertTwoWaySync("writeBinaryFile");
 		const fullPath = this.getFullPath(path);
 		const existingFile = this.app.vault.getAbstractFileByPath(fullPath);
 		if (existingFile instanceof TFile) {
@@ -152,6 +163,7 @@ export class ObsidianSyncEnv implements SyncEnv {
 	}
 
 	async deleteFile(path: string): Promise<void> {
+		this.assertTwoWaySync("deleteFile");
 		const fullPath = this.getFullPath(path);
 		const file = this.app.vault.getAbstractFileByPath(fullPath);
 		if (file instanceof TFile) {
@@ -160,6 +172,7 @@ export class ObsidianSyncEnv implements SyncEnv {
 	}
 
 	async createFolder(folderPath: string): Promise<void> {
+		this.assertTwoWaySync("createFolder");
 		const fullPath = this.getFullPath(folderPath);
 		if (!this.app.vault.getAbstractFileByPath(fullPath)) {
 			await this.app.vault.createFolder(fullPath);
