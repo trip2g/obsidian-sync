@@ -102,6 +102,7 @@ function createMockEnv(options: {
 				.filter((p) => serverContents[p] !== undefined)
 				.map((p) => ({ path: p, content: serverContents[p] })) as NoteContent[];
 		}),
+		fetchNoteAssets: vi.fn().mockResolvedValue([]),
 		uploadAsset: vi.fn().mockResolvedValue(true),
 		downloadAsset: vi.fn().mockResolvedValue(new ArrayBuffer(8)),
 		commitNotes: vi.fn().mockResolvedValue(undefined),
@@ -115,6 +116,7 @@ function createMockEnv(options: {
 
 		// UI callbacks
 		showProgress: vi.fn(),
+		updateProgress: vi.fn(),
 		onConflict: vi.fn().mockImplementation(async () => {
 			return conflictResolutions.slice(resolutionIndex, resolutionIndex + 100);
 		}),

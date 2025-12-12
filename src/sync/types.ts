@@ -110,6 +110,20 @@ export interface NoteContent {
 	content: string;
 }
 
+export interface NoteAssetInfo {
+	path: string;
+	assets: Array<{
+		/** Wikilink id (e.g., "image.png") */
+		id: string;
+		/** Download URL */
+		url: string;
+		/** SHA256 hash for verification */
+		hash: string;
+		/** Resolved path in vault (e.g., "assets/image.png") */
+		absolutePath: string;
+	}>;
+}
+
 export interface UploadAssetParams {
 	noteId: string;
 	blob: Blob;
@@ -145,6 +159,25 @@ export interface AssetConflictInfo {
 
 export type AssetConflictResolution = "keep_local" | "keep_remote" | "skip";
 
+// ============ Progress Types ============
+
+export type ProgressStep =
+	| "classify"
+	| "pull"
+	| "push"
+	| "upload_asset"
+	| "download_asset"
+	| "conflict"
+	| "commit";
+
+export interface Progress {
+	step: ProgressStep;
+	current: number;
+	total: number;
+	/** Optional: current item path for detailed progress */
+	path?: string;
+}
+
 export interface AssetSyncResult {
 	uploaded: number;
 	downloaded: number;
@@ -165,6 +198,7 @@ export interface SyncEnv extends ClassifyEnv {
 	pushNotes(updates: NoteUpdate[], skipCommit: boolean): Promise<PushedNote[]>;
 	hideNotes(paths: string[]): Promise<void>;
 	fetchNoteContents(paths: string[]): Promise<NoteContent[]>;
+	fetchNoteAssets(paths: string[]): Promise<NoteAssetInfo[]>;
 	uploadAsset(params: UploadAssetParams): Promise<boolean>;
 	downloadAsset(url: string): Promise<ArrayBuffer | null>;
 	commitNotes(): Promise<void>;
@@ -184,6 +218,7 @@ export interface SyncEnv extends ClassifyEnv {
 
 	// UI callbacks (can be mocked as no-op in tests)
 	showProgress(message: string): void;
+	updateProgress(progress: Progress): void;
 	onConflict(conflicts: ConflictInfo[]): Promise<ConflictResolution[]>;
 	onAssetConflict(conflicts: AssetConflictInfo[]): Promise<AssetConflictResolution[]>;
 	onServerDeleted(paths: string[]): Promise<boolean>;

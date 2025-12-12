@@ -44,10 +44,20 @@ export async function executePlan(
 
 	// Stryker disable next-line ConditionalExpression,EqualityOperator: optimization - executePulls handles empty array
 	// 1. Execute pulls (download from server)
+	const pulledPaths: string[] = [];
 	if (plan.pulls.length > 0 || plan.remoteOnly.length > 0) {
-		const pullResult = await executePulls(env, [...plan.pulls, ...plan.remoteOnly], syncState);
+		const toPull = [...plan.pulls, ...plan.remoteOnly];
+		const pullResult = await executePulls(env, toPull, syncState);
 		result.pulled = pullResult.count;
 		result.errors.push(...pullResult.errors);
+		pulledPaths.push(...pullResult.pulledPaths);
+	}
+
+	// 1b. Download assets for pulled notes
+	if (pulledPaths.length > 0) {
+		const assetResult = await downloadAssetsForNotes(env, pulledPaths);
+		result.assetsDownloaded += assetResult.downloaded;
+		result.errors.push(...assetResult.errors);
 	}
 
 	// Stryker disable next-line ConditionalExpression,EqualityOperator: optimization - handleServerDeleted handles empty array
@@ -110,16 +120,17 @@ async function executePulls(
 	env: SyncEnv,
 	pulls: FileClassification[],
 	syncState: SyncState
-): Promise<{ count: number; errors: string[] }> {
+): Promise<{ count: number; errors: string[]; pulledPaths: string[] }> {
 	// Stryker disable all
 	// optimization - caller already filters empty
 	if (pulls.length === 0) {
-		return { count: 0, errors: [] };
+		return { count: 0, errors: [], pulledPaths: [] };
 	}
 	// Stryker restore all
 
 	const paths = pulls.map((p) => p.path);
 	const errors: string[] = [];
+	const pulledPaths: string[] = [];
 	let count = 0;
 
 	env.showProgress(`Pulling ${paths.length} files...`);
@@ -128,7 +139,13 @@ async function executePulls(
 	const contents = await env.fetchNoteContents(paths);
 	const contentMap = new Map(contents.map((c) => [c.path, c.content]));
 
+	const total = pulls.length;
+	let current = 0;
+
 	for (const pull of pulls) {
+		current++;
+		env.updateProgress({ step: "pull", current, total, path: pull.path });
+
 		const content = contentMap.get(pull.path);
 		if (content === undefined) {
 			errors.push(`Failed to fetch: ${pull.path}`);
@@ -149,12 +166,13 @@ async function executePulls(
 			const hash = await env.computeHash(content);
 			syncState.files[pull.path] = hash;
 			count++;
+			pulledPaths.push(pull.path);
 		} catch (e) {
 			errors.push(`Failed to write ${pull.path}: ${e}`);
 		}
 	}
 
-	return { count, errors };
+	return { count, errors, pulledPaths };
 }
 
 /**
@@ -178,7 +196,13 @@ async function executePushes(
 	env.showProgress(`Pushing ${pushes.length} files...`);
 
 	// Read all file contents
+	const total = pushes.length;
+	let current = 0;
+
 	for (const push of pushes) {
+		current++;
+		env.updateProgress({ step: "push", current, total, path: push.path });
+
 		try {
 			const content = await env.readFileContent(push.path);
 			updates.push({ path: push.path, content });
@@ -481,10 +505,25 @@ async function syncAssets(
 	}
 
 	// Upload new assets (sequentially to avoid overwhelming server)
+	// Deduplicate by localPath to avoid uploading same file multiple times
 	if (toUpload.length > 0) {
-		env.showProgress(`Uploading ${toUpload.length} assets...`);
-
+		const uniqueUploads = new Map<string, AssetToUpload>();
 		for (const item of toUpload) {
+			if (!uniqueUploads.has(item.localPath)) {
+				uniqueUploads.set(item.localPath, item);
+			}
+		}
+
+		const deduped = Array.from(uniqueUploads.values());
+		env.showProgress(`Uploading ${deduped.length} assets...`);
+
+		const uploadTotal = deduped.length;
+		let uploadCurrent = 0;
+
+		for (const item of deduped) {
+			uploadCurrent++;
+			env.updateProgress({ step: "upload_asset", current: uploadCurrent, total: uploadTotal, path: item.asset.path });
+
 			try {
 				const localData = await env.readBinaryFile(item.localPath);
 				const localHash = await env.computeBinaryHash(localData);
@@ -513,7 +552,13 @@ async function syncAssets(
 	if (toDownload.length > 0) {
 		env.showProgress(`Downloading ${toDownload.length} assets...`);
 
+		const downloadTotal = toDownload.length;
+		let downloadCurrent = 0;
+
 		for (const item of toDownload) {
+			downloadCurrent++;
+			env.updateProgress({ step: "download_asset", current: downloadCurrent, total: downloadTotal, path: item.asset.path });
+
 			if (!item.asset.url) {
 				continue;
 			}
@@ -622,6 +667,78 @@ async function handleAssetConflicts(
 			// skip: do nothing
 		} catch (e) {
 			result.errors.push(`Failed to resolve asset conflict for ${conflict.path}: ${e}`);
+		}
+	}
+
+	return result;
+}
+
+// ============ Asset Download for Pulled Notes ============
+
+/**
+ * Download assets for pulled notes.
+ * Fetches asset info from server and downloads missing assets.
+ */
+async function downloadAssetsForNotes(
+	env: SyncEnv,
+	notePaths: string[]
+): Promise<{ downloaded: number; errors: string[] }> {
+	const result = { downloaded: 0, errors: [] as string[] };
+
+	if (notePaths.length === 0) {
+		return result;
+	}
+
+	// Fetch asset info for pulled notes
+	const noteAssets = await env.fetchNoteAssets(notePaths);
+	if (noteAssets.length === 0) {
+		return result;
+	}
+
+	// Collect all assets to download (deduplicate by absolutePath)
+	const toDownload = new Map<string, { url: string; hash: string }>();
+	for (const note of noteAssets) {
+		for (const asset of note.assets) {
+			if (!toDownload.has(asset.absolutePath)) {
+				// Check if asset already exists locally
+				const exists = await env.fileExists(asset.absolutePath);
+				if (!exists) {
+					toDownload.set(asset.absolutePath, { url: asset.url, hash: asset.hash });
+				}
+			}
+		}
+	}
+
+	if (toDownload.size === 0) {
+		return result;
+	}
+
+	env.showProgress(`Downloading ${toDownload.size} assets for pulled notes...`);
+
+	const total = toDownload.size;
+	let current = 0;
+
+	for (const [absolutePath, { url }] of toDownload) {
+		current++;
+		env.updateProgress({ step: "download_asset", current, total, path: absolutePath });
+
+		try {
+			const data = await env.downloadAsset(url);
+			if (!data) {
+				result.errors.push(`Failed to download asset ${absolutePath}`);
+				continue;
+			}
+
+			// Create directories if needed
+			const dirPath = absolutePath.substring(0, absolutePath.lastIndexOf("/"));
+			if (dirPath) {
+				await env.createFolder(dirPath);
+			}
+
+			await env.writeBinaryFile(absolutePath, data);
+			result.downloaded++;
+		} catch (e) {
+			result.errors.push(`Failed to download asset ${absolutePath}: ${e}`);
 		}
 	}
 

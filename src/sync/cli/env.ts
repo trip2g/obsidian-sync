@@ -20,6 +20,7 @@ import type {
 	AssetConflictInfo,
 	AssetConflictResolution,
 } from "../types";
+import { resolveAssetPath } from "../resolve";
 import { createClient, type ClientOptions } from "./client";
 import type { Sdk } from "../../graphql";
 
@@ -167,6 +168,10 @@ export class NodeEnv implements SyncEnv {
 	}
 
 	async fileExists(filePath: string): Promise<boolean> {
+		return this.fileExistsSync(filePath);
+	}
+
+	fileExistsSync(filePath: string): boolean {
 		const fullPath = path.join(this.folder, filePath);
 		return fs.existsSync(fullPath);
 	}
@@ -250,10 +255,55 @@ export class NodeEnv implements SyncEnv {
 		}
 	}
 
-	async uploadAsset(params: UploadAssetParams): Promise<boolean> {
+	async fetchNoteAssets(paths: string[]): Promise<import("../types").NoteAssetInfo[]> {
+		if (paths.length === 0) {
+			return [];
+		}
+
 		try {
-			// Use FormData multipart upload (graphql-request doesn't support file uploads)
-			const query = `mutation UploadNoteAsset($input: UploadNoteAssetInput!) {
+			const result = await this.sdk.FetchNoteAssets({
+				filter: { paths },
+			});
+
+			return result.notePaths.map((np) => ({
+				path: np.path,
+				assets: np.assetReplaces.map((a) => ({
+					id: a.id,
+					url: a.url,
+					hash: a.hash,
+					absolutePath: a.absolutePath,
+				})),
+			}));
+		} catch (e) {
+			console.error(`❌ Failed to fetch note assets: ${e}`);
+			return [];
+		}
+	}
+
+	async uploadAsset(params: UploadAssetParams): Promise<boolean> {
+		const maxRetries = 3;
+
+		for (let attempt = 1; attempt <= maxRetries; attempt++) {
+			try {
+				const success = await this.uploadAssetOnce(params);
+				if (success) {
+					return true;
+				}
+			} catch (e) {
+				if (attempt < maxRetries) {
+					this.log(`⚠️ Upload attempt ${attempt} failed, retrying: ${params.relativePath}`);
+					continue;
+				}
+				console.error(`❌ Failed to upload asset ${params.relativePath} after ${maxRetries} attempts: ${e}`);
+				return false;
+			}
+		}
+		return false;
+	}
+
+	private async uploadAssetOnce(params: UploadAssetParams): Promise<boolean> {
+		// Use FormData multipart upload (graphql-request doesn't support file uploads)
+		const query = `mutation UploadNoteAsset($input: UploadNoteAssetInput!) {
 	uploadNoteAsset(input: $input) {
 		... on ErrorPayload {
 			__typename
@@ -266,61 +316,57 @@ export class NodeEnv implements SyncEnv {
 	}
 }`;
 
-			const operations = JSON.stringify({
-				query,
-				variables: {
-					input: {
-						file: null, // Will be replaced by multipart map
-						noteId: parseInt(params.noteId),
-						sha256Hash: params.sha256Hash,
-						path: params.relativePath,
-						absolutePath: params.absolutePath,
-					},
+		const operations = JSON.stringify({
+			query,
+			variables: {
+				input: {
+					file: null, // Will be replaced by multipart map
+					noteId: parseInt(params.noteId),
+					sha256Hash: params.sha256Hash,
+					path: params.relativePath,
+					absolutePath: params.absolutePath,
 				},
-			});
+			},
+		});
 
-			const map = JSON.stringify({
-				"0": ["variables.input.file"],
-			});
+		const map = JSON.stringify({
+			"0": ["variables.input.file"],
+		});
 
-			const formData = new FormData();
-			formData.append("operations", operations);
-			formData.append("map", map);
-			formData.append("0", params.blob, params.fileName);
+		const formData = new FormData();
+		formData.append("operations", operations);
+		formData.append("map", map);
+		formData.append("0", params.blob, params.fileName);
 
-			const response = await fetch(this.apiUrl, {
-				method: "POST",
-				headers: {
-					"X-API-Key": this.apiKey,
-				},
-				body: formData,
-			});
+		const response = await fetch(this.apiUrl, {
+			method: "POST",
+			headers: {
+				"X-API-Key": this.apiKey,
+			},
+			body: formData,
+		});
 
-			if (!response.ok) {
-				throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-			}
-
-			const result = await response.json();
-
-			if (result.errors) {
-				throw new Error(result.errors[0]?.message || "Unknown GraphQL error");
-			}
-
-			const payload = result.data?.uploadNoteAsset;
-			if (payload?.__typename === "ErrorPayload") {
-				throw new Error(`Upload failed: ${payload.message}`);
-			}
-
-			if (payload?.uploadSkipped) {
-				this.log(`⏩ Asset skipped (already exists): ${params.relativePath}`);
-			} else {
-				console.log(`✅ Asset uploaded: ${params.relativePath}`);
-			}
-			return true;
-		} catch (e) {
-			console.error(`❌ Failed to upload asset ${params.relativePath}: ${e}`);
-			return false;
+		if (!response.ok) {
+			throw new Error(`HTTP ${response.status}: ${response.statusText}`);
 		}
+
+		const result = await response.json();
+
+		if (result.errors) {
+			throw new Error(result.errors[0]?.message || "Unknown GraphQL error");
+		}
+
+		const payload = result.data?.uploadNoteAsset;
+		if (payload?.__typename === "ErrorPayload") {
+			throw new Error(`Upload failed: ${payload.message}`);
+		}
+
+		if (payload?.uploadSkipped) {
+			this.log(`⏩ Asset skipped (already exists): ${params.relativePath}`);
+		} else {
+			console.log(`✅ Asset uploaded: ${params.relativePath}`);
+		}
+		return true;
 	}
 
 	async downloadAsset(url: string): Promise<ArrayBuffer | null> {
@@ -368,35 +414,21 @@ export class NodeEnv implements SyncEnv {
 	}
 
 	async resolveAssetPath(assetPath: string, notePath: string): Promise<string | null> {
-		// In CLI mode, we use simple path resolution relative to note's directory
-		// This doesn't support Obsidian's smart wikilink resolution
-
-		// First try: asset path relative to note's directory
-		const noteDir = path.dirname(notePath);
-		const relativePath = noteDir ? path.join(noteDir, assetPath) : assetPath;
-		if (await this.fileExists(relativePath)) {
-			return relativePath;
-		}
-
-		// Second try: asset path from root
-		if (await this.fileExists(assetPath)) {
-			return assetPath;
-		}
-
-		// Third try: common assets folder
-		const assetsPath = path.join("assets", assetPath);
-		if (await this.fileExists(assetsPath)) {
-			return assetsPath;
-		}
-
-		// Not found
-		return null;
+		// Use the pure function with Obsidian's link resolution algorithm
+		// See docs/obsidian_links.md and src/sync/resolve.ts
+		return resolveAssetPath(this, assetPath, notePath);
 	}
 
 	// ============ UI Callbacks (CLI versions) ============
 
 	showProgress(message: string): void {
 		console.log(message);
+	}
+
+	updateProgress(progress: import("../types").Progress): void {
+		if (this.verbose) {
+			console.log(`  [${progress.step}] ${progress.current}/${progress.total}: ${progress.path ?? ""}`);
+		}
 	}
 
 	async onConflict(conflicts: ConflictInfo[]): Promise<ConflictResolution[]> {
