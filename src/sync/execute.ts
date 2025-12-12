@@ -700,11 +700,13 @@ async function downloadAssetsForNotes(
 	const toDownload = new Map<string, { url: string; hash: string }>();
 	for (const note of noteAssets) {
 		for (const asset of note.assets) {
-			if (!toDownload.has(asset.absolutePath)) {
+			// Strip leading slash - Obsidian paths don't start with /
+			const absolutePath = asset.absolutePath.replace(/^\//, "");
+			if (!toDownload.has(absolutePath)) {
 				// Check if asset already exists locally
-				const exists = await env.fileExists(asset.absolutePath);
+				const exists = await env.fileExists(absolutePath);
 				if (!exists) {
-					toDownload.set(asset.absolutePath, { url: asset.url, hash: asset.hash });
+					toDownload.set(absolutePath, { url: asset.url, hash: asset.hash });
 				}
 			}
 		}
