@@ -6,6 +6,7 @@ import type {
 	SyncState,
 	FileClassification,
 	ConflictResolution,
+	AssetConflictResolution,
 	NoteContent,
 	PushedNote,
 } from "./types";
@@ -39,18 +40,22 @@ function makeClassification(
 function createMockEnv(options: {
 	syncState?: SyncState;
 	fileContents?: Record<string, string>;
+	binaryContents?: Record<string, ArrayBuffer>;
 	serverContents?: Record<string, string>;
 	confirmPush?: boolean;
 	onServerDeleted?: boolean;
 	conflictResolutions?: ConflictResolution[];
+	assetConflictResolutions?: AssetConflictResolution[];
 }): SyncEnv {
 	const {
 		syncState = { files: {} },
 		fileContents = {},
+		binaryContents = {},
 		serverContents = {},
 		confirmPush = true,
 		onServerDeleted = false,
 		conflictResolutions = [],
+		assetConflictResolutions = [],
 	} = options;
 
 	let resolutionIndex = 0;
@@ -71,9 +76,17 @@ function createMockEnv(options: {
 		// File operations
 		writeFile: vi.fn().mockResolvedValue(undefined),
 		writeBinaryFile: vi.fn().mockResolvedValue(undefined),
-		readBinaryFile: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
+		readBinaryFile: vi.fn().mockImplementation(async (path: string) => {
+			if (binaryContents[path] !== undefined) {
+				return binaryContents[path];
+			}
+			return new ArrayBuffer(0);
+		}),
 		deleteFile: vi.fn().mockResolvedValue(undefined),
 		createFolder: vi.fn().mockResolvedValue(undefined),
+		fileExists: vi.fn().mockImplementation(async (path: string) => {
+			return fileContents[path] !== undefined || binaryContents[path] !== undefined;
+		}),
 
 		// Server operations
 		pushNotes: vi.fn().mockImplementation(async (updates) => {
@@ -90,7 +103,12 @@ function createMockEnv(options: {
 				.map((p) => ({ path: p, content: serverContents[p] })) as NoteContent[];
 		}),
 		uploadAsset: vi.fn().mockResolvedValue(true),
+		downloadAsset: vi.fn().mockResolvedValue(new ArrayBuffer(8)),
 		commitNotes: vi.fn().mockResolvedValue(undefined),
+
+		// Asset operations
+		computeBinaryHash: vi.fn().mockImplementation(async () => "binary_hash"),
+		resolveAssetPath: vi.fn().mockImplementation(async (assetPath: string) => assetPath),
 
 		// State
 		saveSyncState: vi.fn().mockResolvedValue(undefined),
@@ -99,6 +117,9 @@ function createMockEnv(options: {
 		showProgress: vi.fn(),
 		onConflict: vi.fn().mockImplementation(async () => {
 			return conflictResolutions.slice(resolutionIndex, resolutionIndex + 100);
+		}),
+		onAssetConflict: vi.fn().mockImplementation(async () => {
+			return assetConflictResolutions;
 		}),
 		onServerDeleted: vi.fn().mockResolvedValue(onServerDeleted),
 		confirmPush: vi.fn().mockResolvedValue(confirmPush),

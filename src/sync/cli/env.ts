@@ -17,6 +17,8 @@ import type {
 	UploadAssetParams,
 	ConflictInfo,
 	ConflictResolution,
+	AssetConflictInfo,
+	AssetConflictResolution,
 } from "../types";
 import { createClient, type ClientOptions } from "./client";
 import type { Sdk } from "../../graphql";
@@ -154,6 +156,11 @@ export class NodeEnv implements SyncEnv {
 		fs.mkdirSync(fullPath, { recursive: true });
 	}
 
+	async fileExists(filePath: string): Promise<boolean> {
+		const fullPath = path.join(this.folder, filePath);
+		return fs.existsSync(fullPath);
+	}
+
 	// ============ Server Operations ============
 
 	async pushNotes(updates: NoteUpdate[], skipCommit: boolean): Promise<PushedNote[]> {
@@ -182,9 +189,9 @@ export class NodeEnv implements SyncEnv {
 				path: n.path,
 				assets: n.assets.map((a) => ({
 					path: a.path,
-					sha256Hash: a.sha256Hash,
-					absolutePath: a.absolutePath,
-					url: a.url,
+					sha256Hash: a.sha256Hash ?? null,
+					absolutePath: a.absolutePath ?? null,
+					url: a.url ?? null,
 				})),
 			}));
 		} catch (e) {
@@ -261,6 +268,20 @@ export class NodeEnv implements SyncEnv {
 		}
 	}
 
+	async downloadAsset(url: string): Promise<ArrayBuffer | null> {
+		try {
+			const response = await fetch(url);
+			if (!response.ok) {
+				console.error(`❌ Failed to download asset: HTTP ${response.status}`);
+				return null;
+			}
+			return await response.arrayBuffer();
+		} catch (e) {
+			console.error(`❌ Failed to download asset from ${url}: ${e}`);
+			return null;
+		}
+	}
+
 	async commitNotes(): Promise<void> {
 		try {
 			const result = await this.sdk.CommitNotes();
@@ -284,6 +305,41 @@ export class NodeEnv implements SyncEnv {
 		this.syncState = state;
 	}
 
+	// ============ Asset Operations ============
+
+	async computeBinaryHash(data: ArrayBuffer): Promise<string> {
+		const hash = crypto.createHash("sha256").update(Buffer.from(data)).digest();
+		// URL-safe base64 with padding (same as Python's urlsafe_b64encode)
+		const b64 = hash.toString("base64");
+		return b64.replace(/\+/g, "-").replace(/\//g, "_");
+	}
+
+	async resolveAssetPath(assetPath: string, notePath: string): Promise<string | null> {
+		// In CLI mode, we use simple path resolution relative to note's directory
+		// This doesn't support Obsidian's smart wikilink resolution
+
+		// First try: asset path relative to note's directory
+		const noteDir = path.dirname(notePath);
+		const relativePath = noteDir ? path.join(noteDir, assetPath) : assetPath;
+		if (await this.fileExists(relativePath)) {
+			return relativePath;
+		}
+
+		// Second try: asset path from root
+		if (await this.fileExists(assetPath)) {
+			return assetPath;
+		}
+
+		// Third try: common assets folder
+		const assetsPath = path.join("assets", assetPath);
+		if (await this.fileExists(assetsPath)) {
+			return assetsPath;
+		}
+
+		// Not found
+		return null;
+	}
+
 	// ============ UI Callbacks (CLI versions) ============
 
 	showProgress(message: string): void {
@@ -294,6 +350,12 @@ export class NodeEnv implements SyncEnv {
 		// In CLI mode without twoWaySync, conflicts become pushes (handled by filterPlan)
 		// If twoWaySync is enabled, we default to keeping local version
 		console.log(`⚠️ ${conflicts.length} conflicts detected, keeping local versions`);
+		return conflicts.map(() => "keep_local");
+	}
+
+	async onAssetConflict(conflicts: AssetConflictInfo[]): Promise<AssetConflictResolution[]> {
+		// In CLI mode, we default to keeping local version (upload to server)
+		console.log(`⚠️ ${conflicts.length} asset conflicts detected, keeping local versions`);
 		return conflicts.map(() => "keep_local");
 	}
 

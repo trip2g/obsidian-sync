@@ -60,6 +60,8 @@ export interface SyncResult {
 	pulled: number;
 	pushed: number;
 	conflictsResolved: number;
+	assetsUploaded: number;
+	assetsDownloaded: number;
 	errors: string[];
 }
 
@@ -127,6 +129,29 @@ export interface ConflictInfo {
 
 export type ConflictResolution = "keep_local" | "keep_remote" | "keep_both" | "skip";
 
+// ============ Asset Types ============
+
+export interface AssetConflictInfo {
+	/** Wikilink path (e.g., "image.png") */
+	path: string;
+	/** Full path in vault (e.g., "folder/image.png") */
+	absolutePath: string;
+	/** Note ID for upload */
+	noteId: string;
+	localHash: string;
+	remoteHash: string;
+	remoteUrl: string;
+}
+
+export type AssetConflictResolution = "keep_local" | "keep_remote" | "skip";
+
+export interface AssetSyncResult {
+	uploaded: number;
+	downloaded: number;
+	conflictsResolved: number;
+	errors: string[];
+}
+
 export interface SyncEnv extends ClassifyEnv {
 	// File operations
 	writeFile(path: string, content: string): Promise<void>;
@@ -134,13 +159,25 @@ export interface SyncEnv extends ClassifyEnv {
 	readBinaryFile(path: string): Promise<ArrayBuffer>;
 	deleteFile(path: string): Promise<void>;
 	createFolder(path: string): Promise<void>;
+	fileExists(path: string): Promise<boolean>;
 
 	// Server operations
 	pushNotes(updates: NoteUpdate[], skipCommit: boolean): Promise<PushedNote[]>;
 	hideNotes(paths: string[]): Promise<void>;
 	fetchNoteContents(paths: string[]): Promise<NoteContent[]>;
 	uploadAsset(params: UploadAssetParams): Promise<boolean>;
+	downloadAsset(url: string): Promise<ArrayBuffer | null>;
 	commitNotes(): Promise<void>;
+
+	// Asset operations
+	/** Compute SHA256 hash for binary data (URL-safe base64 with padding) */
+	computeBinaryHash(data: ArrayBuffer): Promise<string>;
+	/**
+	 * Resolve wikilink asset path to absolute path in vault.
+	 * E.g., "image.png" referenced from "folder/note.md" -> "folder/image.png" or "assets/image.png"
+	 * Returns null if asset cannot be resolved.
+	 */
+	resolveAssetPath(assetPath: string, notePath: string): Promise<string | null>;
 
 	// State
 	saveSyncState(state: SyncState): Promise<void>;
@@ -148,6 +185,7 @@ export interface SyncEnv extends ClassifyEnv {
 	// UI callbacks (can be mocked as no-op in tests)
 	showProgress(message: string): void;
 	onConflict(conflicts: ConflictInfo[]): Promise<ConflictResolution[]>;
+	onAssetConflict(conflicts: AssetConflictInfo[]): Promise<AssetConflictResolution[]>;
 	onServerDeleted(paths: string[]): Promise<boolean>;
 	confirmPush(paths: string[]): Promise<boolean>;
 }

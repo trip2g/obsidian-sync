@@ -7,20 +7,36 @@ import type {
 	ConflictInfo,
 	ConflictResolution,
 	NoteUpdate,
+	PushedNote,
+	NoteAsset,
+	AssetConflictInfo,
+	AssetConflictResolution,
+	AssetSyncResult,
 } from "./types";
 
+export interface ExecuteOptions {
+	twoWaySync: boolean;
+}
+
 /**
- * Execute a sync plan - performs all pulls, pushes, and handles conflicts/deletes.
+ * Execute a sync plan - performs all pulls, pushes, handles conflicts/deletes, and syncs assets.
  *
  * @param env - Environment providing IO operations
  * @param plan - Sync plan from classifySync + filterPlan
+ * @param options - Execution options (twoWaySync affects asset sync behavior)
  * @returns Result with counts of operations performed
  */
-export async function executePlan(env: SyncEnv, plan: SyncPlan): Promise<SyncResult> {
+export async function executePlan(
+	env: SyncEnv,
+	plan: SyncPlan,
+	options: ExecuteOptions = { twoWaySync: false }
+): Promise<SyncResult> {
 	const result: SyncResult = {
 		pulled: 0,
 		pushed: 0,
 		conflictsResolved: 0,
+		assetsUploaded: 0,
+		assetsDownloaded: 0,
 		errors: [],
 	};
 
@@ -50,6 +66,7 @@ export async function executePlan(env: SyncEnv, plan: SyncPlan): Promise<SyncRes
 
 	// 4. Confirm and execute pushes (upload to server)
 	const toPush = [...plan.pushes, ...plan.localOnly];
+	let pushedNotes: PushedNote[] = [];
 	// Stryker disable next-line ConditionalExpression,EqualityOperator: optimization - executePushes handles empty array
 	if (toPush.length > 0) {
 		const confirmed = await env.confirmPush(toPush.map((c) => c.path));
@@ -57,6 +74,7 @@ export async function executePlan(env: SyncEnv, plan: SyncPlan): Promise<SyncRes
 			const pushResult = await executePushes(env, toPush, syncState);
 			result.pushed = pushResult.count;
 			result.errors.push(...pushResult.errors);
+			pushedNotes = pushResult.pushedNotes;
 		}
 	}
 
@@ -66,12 +84,20 @@ export async function executePlan(env: SyncEnv, plan: SyncPlan): Promise<SyncRes
 		await handleLocalDeleted(env, plan.localDeleted, syncState);
 	}
 
-	// 6. Commit all changes
-	if (result.pushed > 0) {
+	// 6. Sync assets for pushed notes
+	if (pushedNotes.length > 0) {
+		const assetResult = await syncAssets(env, pushedNotes, options.twoWaySync);
+		result.assetsUploaded = assetResult.uploaded;
+		result.assetsDownloaded = assetResult.downloaded;
+		result.errors.push(...assetResult.errors);
+	}
+
+	// 7. Commit all changes
+	if (result.pushed > 0 || result.assetsUploaded > 0) {
 		await env.commitNotes();
 	}
 
-	// 7. Save sync state
+	// 8. Save sync state
 	await env.saveSyncState(syncState);
 
 	return result;
@@ -138,11 +164,11 @@ async function executePushes(
 	env: SyncEnv,
 	pushes: FileClassification[],
 	syncState: SyncState
-): Promise<{ count: number; errors: string[] }> {
+): Promise<{ count: number; errors: string[]; pushedNotes: PushedNote[] }> {
 	// Stryker disable all
 	// optimization - caller already filters empty
 	if (pushes.length === 0) {
-		return { count: 0, errors: [] };
+		return { count: 0, errors: [], pushedNotes: [] };
 	}
 	// Stryker restore all
 
@@ -164,7 +190,7 @@ async function executePushes(
 
 	// Stryker disable next-line ConditionalExpression,BlockStatement: optimization when all reads fail
 	if (updates.length === 0) {
-		return { count: 0, errors };
+		return { count: 0, errors, pushedNotes: [] };
 	}
 
 	// Push to server (skipCommit=true, we'll commit at the end)
@@ -179,7 +205,9 @@ async function executePushes(
 		}
 	}
 
-	return { count: pushedPaths.size, errors };
+	// Return only notes that were actually pushed (filter by paths we sent)
+	const filteredNotes = pushedNotes.filter((n) => pushedPaths.has(n.path));
+	return { count: pushedPaths.size, errors, pushedNotes: filteredNotes };
 }
 
 /**
@@ -353,4 +381,249 @@ async function handleLocalDeleted(
 	for (const path of paths) {
 		delete syncState.files[path];
 	}
+}
+
+// ============ Asset Sync ============
+
+interface AssetToUpload {
+	noteId: string;
+	notePath: string;
+	asset: NoteAsset;
+	localPath: string;
+}
+
+interface AssetToDownload {
+	asset: NoteAsset;
+	localPath: string;
+}
+
+/**
+ * Sync assets for pushed notes.
+ *
+ * For each note's assets:
+ * - If asset has no sha256Hash on server → upload local file
+ * - If asset exists locally with different hash → conflict (or auto-upload in one-way mode)
+ * - If asset doesn't exist locally (two-way only) → download from server
+ */
+async function syncAssets(
+	env: SyncEnv,
+	pushedNotes: PushedNote[],
+	twoWaySync: boolean
+): Promise<AssetSyncResult> {
+	const result: AssetSyncResult = {
+		uploaded: 0,
+		downloaded: 0,
+		conflictsResolved: 0,
+		errors: [],
+	};
+
+	// Stryker disable all
+	// optimization - caller already filters empty
+	if (pushedNotes.length === 0) {
+		return result;
+	}
+	// Stryker restore all
+
+	const toUpload: AssetToUpload[] = [];
+	const toDownload: AssetToDownload[] = [];
+	const conflicts: AssetConflictInfo[] = [];
+
+	// Classify each asset
+	for (const note of pushedNotes) {
+		if (!note.assets || note.assets.length === 0) {
+			continue;
+		}
+
+		for (const asset of note.assets) {
+			// Resolve asset path relative to note
+			const localPath = await env.resolveAssetPath(asset.path, note.path);
+			if (!localPath) {
+				// Cannot resolve asset path (e.g., file doesn't exist in Obsidian)
+				continue;
+			}
+
+			// Asset not yet uploaded to server - need to upload
+			if (!asset.sha256Hash || !asset.absolutePath || !asset.url) {
+				toUpload.push({ noteId: note.id, notePath: note.path, asset, localPath });
+				continue;
+			}
+
+			// Check if asset exists locally
+			const exists = await env.fileExists(localPath);
+			if (exists) {
+				// Asset exists locally - check hash
+				try {
+					const localData = await env.readBinaryFile(localPath);
+					const localHash = await env.computeBinaryHash(localData);
+
+					if (localHash === asset.sha256Hash) {
+						// Hashes match - no action needed
+						continue;
+					}
+
+					// Conflict: local and remote differ
+					conflicts.push({
+						path: asset.path,
+						absolutePath: localPath,
+						noteId: note.id,
+						localHash,
+						remoteHash: asset.sha256Hash,
+						remoteUrl: asset.url,
+					});
+				} catch (e) {
+					result.errors.push(`Failed to read local asset ${localPath}: ${e}`);
+				}
+			} else if (twoWaySync) {
+				// Asset missing locally - download only if two-way sync is enabled
+				toDownload.push({ asset, localPath });
+			}
+		}
+	}
+
+	// Upload new assets (sequentially to avoid overwhelming server)
+	if (toUpload.length > 0) {
+		env.showProgress(`Uploading ${toUpload.length} assets...`);
+
+		for (const item of toUpload) {
+			try {
+				const localData = await env.readBinaryFile(item.localPath);
+				const localHash = await env.computeBinaryHash(localData);
+				const blob = new Blob([localData]);
+				const fileName = item.localPath.substring(item.localPath.lastIndexOf("/") + 1);
+
+				const success = await env.uploadAsset({
+					noteId: item.noteId,
+					blob,
+					fileName,
+					relativePath: item.asset.path,
+					absolutePath: item.localPath,
+					sha256Hash: localHash,
+				});
+
+				if (success) {
+					result.uploaded++;
+				}
+			} catch (e) {
+				result.errors.push(`Failed to upload asset ${item.asset.path}: ${e}`);
+			}
+		}
+	}
+
+	// Download missing assets (two-way sync only)
+	if (toDownload.length > 0) {
+		env.showProgress(`Downloading ${toDownload.length} assets...`);
+
+		for (const item of toDownload) {
+			if (!item.asset.url) {
+				continue;
+			}
+
+			try {
+				const data = await env.downloadAsset(item.asset.url);
+				if (!data) {
+					result.errors.push(`Failed to download asset ${item.asset.path}`);
+					continue;
+				}
+
+				// Create directories if needed
+				const dirPath = item.localPath.substring(0, item.localPath.lastIndexOf("/"));
+				if (dirPath) {
+					await env.createFolder(dirPath);
+				}
+
+				await env.writeBinaryFile(item.localPath, data);
+				result.downloaded++;
+			} catch (e) {
+				result.errors.push(`Failed to download asset ${item.asset.path}: ${e}`);
+			}
+		}
+	}
+
+	// Handle conflicts
+	if (conflicts.length > 0) {
+		const assetResult = await handleAssetConflicts(env, conflicts, twoWaySync);
+		result.uploaded += assetResult.uploaded;
+		result.downloaded += assetResult.downloaded;
+		result.conflictsResolved = assetResult.conflictsResolved;
+		result.errors.push(...assetResult.errors);
+	}
+
+	return result;
+}
+
+/**
+ * Handle asset conflicts - in one-way mode auto-upload local, in two-way mode ask user.
+ */
+async function handleAssetConflicts(
+	env: SyncEnv,
+	conflicts: AssetConflictInfo[],
+	twoWaySync: boolean
+): Promise<AssetSyncResult> {
+	const result: AssetSyncResult = {
+		uploaded: 0,
+		downloaded: 0,
+		conflictsResolved: 0,
+		errors: [],
+	};
+
+	// Stryker disable all
+	// optimization - caller already filters empty
+	if (conflicts.length === 0) {
+		return result;
+	}
+	// Stryker restore all
+
+	let resolutions: AssetConflictResolution[];
+
+	if (twoWaySync) {
+		// Two-way sync: ask user what to do
+		resolutions = await env.onAssetConflict(conflicts);
+	} else {
+		// One-way sync: auto-upload local assets to server
+		resolutions = conflicts.map(() => "keep_local" as const);
+	}
+
+	// Process each resolution
+	for (let i = 0; i < conflicts.length; i++) {
+		const conflict = conflicts[i];
+		const resolution = resolutions[i] || "skip";
+
+		try {
+			if (resolution === "keep_local") {
+				// Upload local asset to server
+				const localData = await env.readBinaryFile(conflict.absolutePath);
+				const blob = new Blob([localData]);
+				const fileName = conflict.absolutePath.substring(conflict.absolutePath.lastIndexOf("/") + 1);
+
+				const success = await env.uploadAsset({
+					noteId: conflict.noteId,
+					blob,
+					fileName,
+					relativePath: conflict.path,
+					absolutePath: conflict.absolutePath,
+					sha256Hash: conflict.localHash,
+				});
+
+				if (success) {
+					result.uploaded++;
+					result.conflictsResolved++;
+				}
+			} else if (resolution === "keep_remote") {
+				// Download from server
+				const data = await env.downloadAsset(conflict.remoteUrl);
+				if (data) {
+					await env.writeBinaryFile(conflict.absolutePath, data);
+					result.downloaded++;
+					result.conflictsResolved++;
+				} else {
+					result.errors.push(`Failed to download asset ${conflict.path}`);
+				}
+			}
+			// skip: do nothing
+		} catch (e) {
+			result.errors.push(`Failed to resolve asset conflict for ${conflict.path}: ${e}`);
+		}
+	}
+
+	return result;
 }

@@ -218,7 +218,7 @@ async function main(): Promise<void> {
 	}
 
 	console.log("\n🚀 Executing sync...");
-	const result = await executePlan(env, filteredPlan);
+	const result = await executePlan(env, filteredPlan, { twoWaySync: args.twoWaySync });
 
 	// 5. Print results
 	console.log("\n" + "=".repeat(60));
@@ -227,6 +227,8 @@ async function main(): Promise<void> {
 	console.log(`  Pushed:             ${result.pushed}`);
 	console.log(`  Pulled:             ${result.pulled}`);
 	console.log(`  Conflicts resolved: ${result.conflictsResolved}`);
+	console.log(`  Assets uploaded:    ${result.assetsUploaded}`);
+	console.log(`  Assets downloaded:  ${result.assetsDownloaded}`);
 	if (result.errors.length > 0) {
 		console.log(`  Errors:             ${result.errors.length}`);
 		for (const err of result.errors) {
