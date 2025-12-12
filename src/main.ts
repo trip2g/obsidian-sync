@@ -1,7 +1,6 @@
 import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf, requestUrl } from "obsidian";
 import { GraphQLClient } from "graphql-request";
 import { FolderSuggest } from "./FolderSuggest";
-import { sha256Hash, classifyAllFiles } from "./syncOld";
 import { MigrationModal, ServerDeletedModal, PushConfirmModal, AssetConflictModal, type AssetConflict, type AssetConflictResolution as UIAssetConflictResolution } from "./ui/ConflictModal";
 import { ConflictView, CONFLICT_VIEW_TYPE } from "./ui/ConflictView";
 import { t, setLocale, detectLocale } from "./i18n";
@@ -161,81 +160,51 @@ export default class Trip2gSyncPlugin extends Plugin {
 			try {
 				const sdk = createSdk(syncDir.apiUrl, syncDir.apiKey, this.manifest.version);
 				const syncState = this.getSyncState(syncDir.apiUrl);
+				const twoWaySync = syncDir.twoWaySync ?? false;
+				const publishField = syncDir.publishField || "";
 
-				// Get folder and local files
 				const folder = this.app.vault.getAbstractFileByPath(syncDir.path);
 				if (!folder || !(folder instanceof TFolder)) {
 					continue;
 				}
 
-				const files = this.getAllMarkdownFiles(folder);
-				const localFiles = new Map<string, string>();
-				const cachedMtimes = syncState.mtimes || {};
-				const cachedLocalHashes = syncState.localHashes || {};
+				// Create minimal env for classification
+				const env = new ObsidianSyncEnv({
+					app: this.app,
+					sdk,
+					folder,
+					syncState,
+					apiUrl: syncDir.apiUrl,
+					apiKey: syncDir.apiKey,
+					pluginVersion: this.manifest.version,
+					publishField,
+					onProgressCallback: () => {},
+					onConflictCallback: async () => [],
+					onAssetConflictCallback: async () => [],
+					onServerDeletedCallback: async () => false,
+					confirmPushCallback: async () => true,
+					saveSyncStateCallback: async () => {},
+				});
 
-				for (const file of files) {
-					const relativePath = this.getRelativePath(file, folder);
-					const mtime = file.stat.mtime;
+				// Classify and filter
+				const plan = await classifySync(env);
+				const filteredPlan = filterPlan(plan, {
+					twoWaySync,
+					hasPublishFields: publishField
+						? (path: string) => this.hasPublishFieldByPath(path, folder, publishField)
+						: undefined,
+				});
 
-					// Use cached hash if mtime hasn't changed
-					const cachedMtime = cachedMtimes[relativePath];
-					const cachedHash = cachedLocalHashes[relativePath];
-					if (cachedMtime === mtime && cachedHash) {
-						localFiles.set(relativePath, cachedHash);
-					} else {
-						const content = await this.app.vault.read(file);
-						const hash = await sha256Hash(content);
-						localFiles.set(relativePath, hash);
-					}
-				}
-
-				// Get server hashes (silent - don't show errors for background checks)
-				const data = await sdk.FetchServerHashes();
-				const serverHashes = new Map<string, string>();
-				for (const item of data.notePaths) {
-					if (item.path && item.hash) {
-						serverHashes.set(item.path, item.hash);
-					}
-				}
-
-				// Classify files
-				const classifications = classifyAllFiles(localFiles, serverHashes, syncState);
-				const twoWaySync = syncDir.twoWaySync ?? false;
-
-				for (const c of classifications) {
-					switch (c.action) {
-						case "pull":
-						case "remote_only":
-							// Only count pulls if two-way sync is enabled
-							if (twoWaySync) {
-								console.log(`[Trip2g Sync] Badge: ${c.path} -> ${c.action}`);
-								totalPull++;
-							}
-							break;
-						case "push":
-						case "local_only":
-							console.log(`[Trip2g Sync] Badge: ${c.path} -> ${c.action}`);
-							totalPush++;
-							break;
-						case "conflict":
-							// Only show conflict if two-way sync is enabled
-							// Otherwise conflicts auto-resolve to local version (push)
-							if (twoWaySync) {
-								console.log(`[Trip2g Sync] Badge: ${c.path} -> conflict`);
-								hasConflict = true;
-							} else {
-								console.log(`[Trip2g Sync] Badge: ${c.path} -> conflict (will push)`);
-								totalPush++;
-							}
-							break;
-					}
+				// Count from filtered plan
+				totalPull += filteredPlan.pulls.length + filteredPlan.remoteOnly.length;
+				totalPush += filteredPlan.pushes.length + filteredPlan.localOnly.length;
+				if (filteredPlan.conflicts.length > 0) {
+					hasConflict = true;
 				}
 			} catch {
 				// Silently ignore errors during background check
 			}
 		}
-
-		console.log(`[Trip2g Sync] Badge totals: pull=${totalPull}, push=${totalPush}, conflict=${hasConflict}`);
 
 		// Update badge
 		this.ribbonIcon.removeClass("has-pending", "has-pull", "has-push", "has-conflict");
