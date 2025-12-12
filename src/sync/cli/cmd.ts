@@ -11,7 +11,7 @@
  *   ENDPOINT    - GraphQL endpoint (alternative to --api-url)
  */
 
-import { NodeEnv } from "./env";
+import { NodeEnv, type CliConflictResolution } from "./env";
 import { classifySync } from "../classify";
 import { filterPlan } from "../filter";
 import { executePlan } from "../execute";
@@ -23,6 +23,7 @@ interface CliArgs {
 	twoWaySync: boolean;
 	verbose: boolean;
 	dryRun: boolean;
+	conflictResolution: CliConflictResolution;
 }
 
 function parseArgs(): CliArgs {
@@ -34,22 +35,32 @@ function parseArgs(): CliArgs {
 		twoWaySync: false,
 		verbose: false,
 		dryRun: false,
+		conflictResolution: "local",
 	};
 
 	for (let i = 0; i < args.length; i++) {
-		const arg = args[i];
+		let arg = args[i];
+		let value: string | undefined;
+
+		// Handle --arg=value syntax
+		if (arg.includes("=")) {
+			const eqIndex = arg.indexOf("=");
+			value = arg.substring(eqIndex + 1);
+			arg = arg.substring(0, eqIndex);
+		}
+
 		switch (arg) {
 			case "--folder":
 			case "-f":
-				result.folder = args[++i];
+				result.folder = value ?? args[++i];
 				break;
 			case "--api-url":
 			case "-u":
-				result.apiUrl = args[++i];
+				result.apiUrl = value ?? args[++i];
 				break;
 			case "--api-key":
 			case "-k":
-				result.apiKey = args[++i];
+				result.apiKey = value ?? args[++i];
 				break;
 			case "--two-way":
 			case "-2":
@@ -62,6 +73,16 @@ function parseArgs(): CliArgs {
 			case "--dry-run":
 			case "-n":
 				result.dryRun = true;
+				break;
+			case "--conflict-resolution":
+			case "-c":
+				const crValue = value ?? args[++i];
+				if (crValue === "local" || crValue === "remote" || crValue === "skip" || crValue === "fail") {
+					result.conflictResolution = crValue;
+				} else {
+					console.error(`❌ Invalid conflict resolution: ${crValue}. Use: local, remote, skip, fail`);
+					process.exit(1);
+				}
 				break;
 			case "--help":
 			case "-h":
@@ -86,13 +107,19 @@ Usage:
   npx ts-node src/sync/cli/cmd.ts [options] [folder]
 
 Options:
-  -f, --folder <path>    Folder to sync (required)
-  -u, --api-url <url>    GraphQL endpoint (default: $ENDPOINT or http://localhost:8081/graphql)
-  -k, --api-key <key>    API key (default: $API_KEY)
-  -2, --two-way          Enable two-way sync (pull changes from server)
-  -v, --verbose          Verbose output
-  -n, --dry-run          Show what would be done without making changes
-  -h, --help             Show this help
+  -f, --folder <path>      Folder to sync (required)
+  -u, --api-url <url>      GraphQL endpoint (default: $ENDPOINT or http://localhost:8081/graphql)
+  -k, --api-key <key>      API key (default: $API_KEY)
+  -2, --two-way            Enable two-way sync (pull changes from server)
+  -c, --conflict-resolution <mode>
+                           How to resolve conflicts (default: local)
+                           - local:  Keep local version, push to server
+                           - remote: Keep remote version, overwrite local
+                           - skip:   Skip conflicting files
+                           - fail:   Exit with error on first conflict
+  -v, --verbose            Verbose output
+  -n, --dry-run            Show what would be done without making changes
+  -h, --help               Show this help
 
 Environment Variables:
   ENDPOINT    GraphQL endpoint URL
@@ -104,6 +131,9 @@ Examples:
 
   # Two-way sync
   npx ts-node src/sync/cli/cmd.ts --folder ./vault --api-key xxx --two-way
+
+  # Two-way sync, fail on conflicts (for CI)
+  npx ts-node src/sync/cli/cmd.ts --folder ./vault --api-key xxx --two-way -c fail
 
   # Dry run to see what would happen
   npx ts-node src/sync/cli/cmd.ts --folder ./vault --api-key xxx --dry-run
@@ -128,10 +158,11 @@ async function main(): Promise<void> {
 	console.log("=".repeat(60));
 	console.log("obsidian-sync CLI");
 	console.log("=".repeat(60));
-	console.log(`Folder:    ${args.folder}`);
-	console.log(`API URL:   ${args.apiUrl}`);
-	console.log(`Two-way:   ${args.twoWaySync}`);
-	console.log(`Dry run:   ${args.dryRun}`);
+	console.log(`Folder:     ${args.folder}`);
+	console.log(`API URL:    ${args.apiUrl}`);
+	console.log(`Two-way:    ${args.twoWaySync}`);
+	console.log(`Conflicts:  ${args.conflictResolution}`);
+	console.log(`Dry run:    ${args.dryRun}`);
 	console.log("=".repeat(60));
 
 	// Create env
@@ -141,6 +172,7 @@ async function main(): Promise<void> {
 		apiKey: args.apiKey,
 		twoWaySync: args.twoWaySync,
 		verbose: args.verbose,
+		conflictResolution: args.conflictResolution,
 	});
 
 	// 1. Classify files
@@ -210,9 +242,13 @@ async function main(): Promise<void> {
 		filteredPlan.localOnly.length +
 		filteredPlan.pulls.length +
 		filteredPlan.remoteOnly.length +
-		filteredPlan.localDeleted.length;
+		filteredPlan.conflicts.length +
+		filteredPlan.localDeleted.length +
+		filteredPlan.serverDeleted.length;
 
 	if (totalActions === 0) {
+		// Still save sync state to establish baseline for unchanged files
+		await env.saveSyncState(env.getSyncState());
 		console.log("\n✅ Everything is up to date!");
 		return;
 	}

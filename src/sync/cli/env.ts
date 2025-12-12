@@ -23,10 +23,14 @@ import type {
 import { createClient, type ClientOptions } from "./client";
 import type { Sdk } from "../../graphql";
 
+/** CLI conflict resolution strategy */
+export type CliConflictResolution = "local" | "remote" | "skip" | "fail";
+
 export interface NodeEnvOptions extends ClientOptions {
 	folder: string;
 	twoWaySync: boolean;
 	verbose?: boolean;
+	conflictResolution?: CliConflictResolution;
 }
 
 const STATE_FILE = ".sync-state.json";
@@ -35,6 +39,7 @@ export class NodeEnv implements SyncEnv {
 	private folder: string;
 	private twoWaySync: boolean;
 	private verbose: boolean;
+	private conflictResolution: CliConflictResolution;
 	private syncState: SyncState;
 	private sdk: Sdk;
 
@@ -42,6 +47,7 @@ export class NodeEnv implements SyncEnv {
 		this.folder = path.resolve(options.folder);
 		this.twoWaySync = options.twoWaySync;
 		this.verbose = options.verbose ?? false;
+		this.conflictResolution = options.conflictResolution ?? "local";
 		this.syncState = this.loadSyncState();
 		this.sdk = createClient({ apiUrl: options.apiUrl, apiKey: options.apiKey });
 	}
@@ -347,16 +353,57 @@ export class NodeEnv implements SyncEnv {
 	}
 
 	async onConflict(conflicts: ConflictInfo[]): Promise<ConflictResolution[]> {
-		// In CLI mode without twoWaySync, conflicts become pushes (handled by filterPlan)
-		// If twoWaySync is enabled, we default to keeping local version
-		console.log(`⚠️ ${conflicts.length} conflicts detected, keeping local versions`);
-		return conflicts.map(() => "keep_local");
+		if (this.conflictResolution === "fail") {
+			console.error(`❌ ${conflicts.length} conflicts detected:`);
+			for (const c of conflicts) {
+				console.error(`   - ${c.path}`);
+			}
+			throw new Error(`Conflicts detected and --conflict-resolution=fail is set`);
+		}
+
+		const resolution = this.cliToConflictResolution(this.conflictResolution);
+		console.log(`⚠️ ${conflicts.length} conflicts detected, resolving with: ${this.conflictResolution}`);
+		return conflicts.map(() => resolution);
 	}
 
 	async onAssetConflict(conflicts: AssetConflictInfo[]): Promise<AssetConflictResolution[]> {
-		// In CLI mode, we default to keeping local version (upload to server)
-		console.log(`⚠️ ${conflicts.length} asset conflicts detected, keeping local versions`);
-		return conflicts.map(() => "keep_local");
+		if (this.conflictResolution === "fail") {
+			console.error(`❌ ${conflicts.length} asset conflicts detected:`);
+			for (const c of conflicts) {
+				console.error(`   - ${c.path}`);
+			}
+			throw new Error(`Asset conflicts detected and --conflict-resolution=fail is set`);
+		}
+
+		const resolution = this.cliToAssetConflictResolution(this.conflictResolution);
+		console.log(`⚠️ ${conflicts.length} asset conflicts detected, resolving with: ${this.conflictResolution}`);
+		return conflicts.map(() => resolution);
+	}
+
+	private cliToConflictResolution(cli: CliConflictResolution): ConflictResolution {
+		switch (cli) {
+			case "local":
+				return "keep_local";
+			case "remote":
+				return "keep_remote";
+			case "skip":
+				return "skip";
+			default:
+				return "keep_local";
+		}
+	}
+
+	private cliToAssetConflictResolution(cli: CliConflictResolution): AssetConflictResolution {
+		switch (cli) {
+			case "local":
+				return "keep_local";
+			case "remote":
+				return "keep_remote";
+			case "skip":
+				return "skip";
+			default:
+				return "keep_local";
+		}
 	}
 
 	async onServerDeleted(paths: string[]): Promise<boolean> {
