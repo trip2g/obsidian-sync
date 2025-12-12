@@ -1,24 +1,30 @@
 import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf, requestUrl } from "obsidian";
 import { GraphQLClient } from "graphql-request";
 import { FolderSuggest } from "./FolderSuggest";
-import { sha256Hash, sha256HashBuffer, classifyAllFiles, updateSyncState, removeFromSyncState } from "./syncOld";
-import { MigrationModal, ServerDeletedModal, PushConfirmModal, AssetConflictModal, type AssetConflict, type AssetConflictResolution } from "./ui/ConflictModal";
+import { sha256Hash, classifyAllFiles } from "./syncOld";
+import { MigrationModal, ServerDeletedModal, PushConfirmModal, AssetConflictModal, type AssetConflict, type AssetConflictResolution as UIAssetConflictResolution } from "./ui/ConflictModal";
 import { ConflictView, CONFLICT_VIEW_TYPE } from "./ui/ConflictView";
 import { t, setLocale, detectLocale } from "./i18n";
-import { getSdk, type Sdk, type PushNotesMutation } from "./graphql";
+import { getSdk, type Sdk } from "./graphql";
+import { classifySync } from "./sync/classify";
+import { filterPlan } from "./sync/filter";
+import { executePlan } from "./sync/execute";
+import { ObsidianSyncEnv } from "./env";
 import type {
 	PluginSettings,
 	SyncDir,
 	SyncState,
-	FileClassification,
 	ConflictResolution,
 	ConflictInfo,
 } from "./types";
+import type {
+	ConflictInfo as SyncConflictInfo,
+	ConflictResolution as SyncConflictResolution,
+	AssetConflictInfo,
+	AssetConflictResolution,
+	Progress,
+} from "./sync/types";
 import { DEFAULT_SETTINGS, DEFAULT_SYNC_STATE } from "./types";
-
-type PushNotesPayload = Extract<PushNotesMutation["pushNotes"], { notes: unknown[] }>;
-type NoteWithAssets = PushNotesPayload["notes"][0];
-type NoteAsset = NoteWithAssets["assets"][0];
 
 const SYNC_STATE_KEY = "sync-state";
 
@@ -261,19 +267,6 @@ export default class Trip2gSyncPlugin extends Plugin {
 		}
 	}
 
-	private async commitNotes(sdk: Sdk): Promise<void> {
-		try {
-			const result = await sdk.CommitNotes();
-			if ("message" in result.commitNotes) {
-				console.error("[Trip2g Sync] Commit failed:", result.commitNotes.message);
-				new Notice(`Commit failed: ${result.commitNotes.message}`);
-			}
-		} catch (error) {
-			console.error("[Trip2g Sync] Commit error:", error);
-			throw error;
-		}
-	}
-
 	/**
 	 * Check if a file has any of the frontmatter fields with a truthy value.
 	 * Supports comma-separated list of field names (e.g., "publish, public").
@@ -346,92 +339,89 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 		const sdk = createSdk(syncDir.apiUrl, syncDir.apiKey, this.manifest.version);
 		const syncState = this.getSyncState(syncDir.apiUrl);
+		const twoWaySync = syncDir.twoWaySync ?? false;
+		const publishField = syncDir.publishField || "";
 
 		try {
-			// Step 1: Get folder and local files
+			// Get folder
 			const folder = this.app.vault.getAbstractFileByPath(syncDir.path);
 			if (!folder || !(folder instanceof TFolder)) {
 				new Notice(`Folder not found: ${syncDir.path}`);
 				return;
 			}
 
-			console.time("[Trip2g Sync] Get file list");
-			const files = this.getAllMarkdownFiles(folder);
-			console.timeEnd("[Trip2g Sync] Get file list");
-			console.log(`[Trip2g Sync] Total files: ${files.length}`);
-			const localFiles = new Map<string, string>();
-			const newMtimes: Record<string, number> = {};
-			const newLocalHashes: Record<string, string> = {};
-			const cachedMtimes = syncState.mtimes || {};
-			const cachedLocalHashes = syncState.localHashes || {};
-			console.log(`[Trip2g Sync] Cache state: mtimes=${Object.keys(cachedMtimes).length}, localHashes=${Object.keys(cachedLocalHashes).length}`);
+			// Create environment adapter
+			const env = new ObsidianSyncEnv({
+				app: this.app,
+				sdk,
+				folder,
+				syncState,
+				apiUrl: syncDir.apiUrl,
+				apiKey: syncDir.apiKey,
+				pluginVersion: this.manifest.version,
+				publishField,
+				onProgressCallback: (progress: Progress) => {
+					const messages: Record<string, string> = {
+						pull: t().progressPulling(progress.current, progress.total),
+						push: t().progressPushing(progress.current, progress.total),
+						upload_asset: t().progressUploadingAssets(progress.current, progress.total),
+						download_asset: t().progressDownloadingAssets(progress.current, progress.total),
+					};
+					this.setProgress(messages[progress.step] || progress.step);
+				},
+				onConflictCallback: (conflicts: SyncConflictInfo[]) => this.showConflictView(conflicts),
+				onAssetConflictCallback: (conflicts: AssetConflictInfo[]) => this.handleAssetConflictsNew(conflicts, twoWaySync),
+				onServerDeletedCallback: (paths: string[]) => this.handleServerDeletedNew(paths),
+				confirmPushCallback: (paths: string[]) => this.confirmPushNew(paths),
+				saveSyncStateCallback: async () => {
+					await this.saveSyncStates();
+				},
+			});
 
-			console.time("[Trip2g Sync] Hash files");
-			let cachedCount = 0;
-			let hashedCount = 0;
-			for (const file of files) {
-				const relativePath = this.getRelativePath(file, folder);
-				const mtime = file.stat.mtime;
-				newMtimes[relativePath] = mtime;
-
-				// Use cached hash if mtime hasn't changed
-				const cachedMtime = cachedMtimes[relativePath];
-				const cachedHash = cachedLocalHashes[relativePath];
-				if (cachedMtime === mtime && cachedHash) {
-					localFiles.set(relativePath, cachedHash);
-					newLocalHashes[relativePath] = cachedHash;
-					cachedCount++;
-				} else {
-					const content = await this.app.vault.read(file);
-					const hash = await sha256Hash(content);
-					localFiles.set(relativePath, hash);
-					newLocalHashes[relativePath] = hash;
-					hashedCount++;
-				}
-			}
-			console.timeEnd("[Trip2g Sync] Hash files");
-			console.log(`[Trip2g Sync] Cached: ${cachedCount}, Hashed: ${hashedCount}`);
-
-			// Update hash cache (separate from sync state)
-			syncState.mtimes = newMtimes;
-			syncState.localHashes = newLocalHashes;
-
-			// Step 2: Get server hashes
-			console.time("[Trip2g Sync] Fetch server hashes");
-			const data = await sdk.FetchServerHashes();
-			console.timeEnd("[Trip2g Sync] Fetch server hashes");
-			const serverHashes = new Map<string, string>();
-			for (const item of data.notePaths) {
-				if (item.path && item.hash) {
-					serverHashes.set(item.path, item.hash);
-				}
-			}
-
-			// Step 3: Classify all files
+			// Step 1: Classify all files
 			console.time("[Trip2g Sync] Classify files");
-			const classifications = classifyAllFiles(localFiles, serverHashes, syncState);
+			const plan = await classifySync(env);
 			console.timeEnd("[Trip2g Sync] Classify files");
 
-			// Step 4: Check if this is first sync (migration scenario)
+			// Step 2: Check if this is first sync (migration scenario)
 			const isFirstSync = Object.keys(syncState.files).length === 0;
-			const conflicts = classifications.filter((c) => c.action === "conflict");
 
-			console.time("[Trip2g Sync] Process sync actions");
-			if (isFirstSync && conflicts.length > 0) {
-				// Show migration modal
-				await this.handleMigration(sdk, syncDir, folder, classifications, syncState);
+			if (isFirstSync && plan.conflicts.length > 0) {
+				// Show migration modal and handle specially
+				await this.handleMigrationNew(env, plan, syncState, twoWaySync, publishField);
 			} else {
-				// Normal sync flow
-				await this.processSyncActions(sdk, syncDir, folder, classifications, syncState);
+				// Normal sync flow: filter and execute
+				const filteredPlan = filterPlan(plan, {
+					twoWaySync,
+					hasPublishFields: publishField
+						? (path: string) => this.hasPublishFieldByPath(path, folder, publishField)
+						: undefined,
+				});
+
+				console.log(`[Trip2g Sync] Plan: pulls=${filteredPlan.pulls.length}, pushes=${filteredPlan.pushes.length}, conflicts=${filteredPlan.conflicts.length}, localOnly=${filteredPlan.localOnly.length}, unchanged=${filteredPlan.unchanged}`);
+
+				const result = await executePlan(env, filteredPlan, { twoWaySync });
+
+				// Show results
+				if (result.pulled > 0) {
+					new Notice(t().pulledFiles(result.pulled));
+				}
+				if (result.pushed > 0) {
+					new Notice(t().pushedFiles(result.pushed));
+				}
+				if (result.assetsUploaded > 0) {
+					new Notice(t().assetUploaded(result.assetsUploaded));
+				}
+				if (result.assetsDownloaded > 0) {
+					new Notice(t().assetDownloaded(result.assetsDownloaded));
+				}
+				if (result.errors.length > 0) {
+					console.error("[Trip2g Sync] Errors:", result.errors);
+				}
+				if (result.pulled === 0 && result.pushed === 0 && result.conflictsResolved === 0 && filteredPlan.unchanged > 0) {
+					new Notice(t().allFilesUpToDate);
+				}
 			}
-			console.timeEnd("[Trip2g Sync] Process sync actions");
-
-			// Commit all changes (pushNotes and uploadAsset use skipCommit: true)
-			console.time("[Trip2g Sync] Commit notes");
-			await this.commitNotes(sdk);
-			console.timeEnd("[Trip2g Sync] Commit notes");
-
-			await this.saveSyncStates();
 		} catch (error) {
 			console.error("Sync error:", error);
 			new Notice(`${t().syncError}: ${(error as Error).message}`);
@@ -440,583 +430,148 @@ export default class Trip2gSyncPlugin extends Plugin {
 		}
 	}
 
-	private async handleMigration(
-		sdk: Sdk,
-		syncDir: SyncDir,
-		folder: TFolder,
-		classifications: FileClassification[],
-		syncState: SyncState
-	) {
-		const conflicts = classifications.filter((c) => c.action === "conflict");
+	/**
+	 * Check if a file has any of the publish fields by path.
+	 */
+	private hasPublishFieldByPath(relativePath: string, folder: TFolder, publishField: string): boolean {
+		const fullPath = folder.path === "/" || folder.path === "" ? relativePath : `${folder.path}/${relativePath}`;
+		const file = this.app.vault.getAbstractFileByPath(fullPath);
+		if (!(file instanceof TFile)) {
+			return true; // Non-existent files are considered publishable (for remote_only)
+		}
+		return this.hasPublishField(file, publishField);
+	}
 
-		return new Promise<void>((resolve) => {
-			new MigrationModal(this.app, conflicts.length, async (trustServer) => {
+	/**
+	 * Handle migration scenario with new sync flow.
+	 */
+	private async handleMigrationNew(
+		env: ObsidianSyncEnv,
+		plan: import("./sync/types").SyncPlan,
+		syncState: SyncState,
+		twoWaySync: boolean,
+		publishField: string
+	): Promise<void> {
+		return new Promise((resolve) => {
+			new MigrationModal(this.app, plan.conflicts.length, async (trustServer) => {
 				if (trustServer) {
 					// Trust server: update lastSyncedHash to remote for all files
-					for (const c of classifications) {
+					for (const c of plan.classifications) {
 						if (c.remoteHash) {
-							updateSyncState(syncState, c.path, c.remoteHash);
+							syncState.files[c.path] = c.remoteHash;
 						}
 					}
-					// Now do a normal pull for files where server is newer
-					const pullActions = classifications.filter(
-						(c) => c.action === "conflict" || c.action === "remote_only"
-					);
-					await this.executePulls(sdk, folder, pullActions, syncState);
-					new Notice(t().pulledFiles(pullActions.length));
+
+					// Create a plan that only pulls (conflicts become pulls)
+					const pullPlan: import("./sync/types").SyncPlan = {
+						classifications: [],
+						pulls: [...plan.conflicts, ...plan.remoteOnly],
+						pushes: [],
+						conflicts: [],
+						localOnly: [],
+						remoteOnly: [],
+						localDeleted: [],
+						serverDeleted: [],
+						unchanged: plan.unchanged,
+					};
+
+					const result = await executePlan(env, pullPlan, { twoWaySync });
+					new Notice(t().pulledFiles(result.pulled));
 				} else {
-					// Review each conflict
-					await this.processSyncActions(sdk, syncDir, folder, classifications, syncState);
+					// Review each conflict - run normal flow
+					const folder = (env as unknown as { folder: TFolder }).folder;
+					const filteredPlan = filterPlan(plan, {
+						twoWaySync,
+						hasPublishFields: publishField
+							? (path: string) => this.hasPublishFieldByPath(path, folder, publishField)
+							: undefined,
+					});
+
+					const result = await executePlan(env, filteredPlan, { twoWaySync });
+
+					if (result.pulled > 0) {
+						new Notice(t().pulledFiles(result.pulled));
+					}
+					if (result.pushed > 0) {
+						new Notice(t().pushedFiles(result.pushed));
+					}
 				}
+
+				await this.saveSyncStates();
 				resolve();
 			}).open();
 		});
 	}
 
-	private async processSyncActions(
-		sdk: Sdk,
-		syncDir: SyncDir,
-		folder: TFolder,
-		classifications: FileClassification[],
-		syncState: SyncState
-	) {
-		const pulls: FileClassification[] = [];
-		const pushes: FileClassification[] = [];
-		const conflicts: FileClassification[] = [];
-		const localOnly: FileClassification[] = [];
-		const localDeleted: FileClassification[] = [];
-		const serverDeleted: FileClassification[] = [];
-		let unchanged = 0;
-
-		const publishField = syncDir.publishField || "";
-		const twoWaySync = syncDir.twoWaySync ?? false;
-
-		for (const c of classifications) {
-			const fullPath = folder.path === "/" ? c.path : `${folder.path}/${c.path}`;
-			const localFile = this.app.vault.getAbstractFileByPath(fullPath);
-			const hasPublish = localFile instanceof TFile ? this.hasPublishField(localFile, publishField) : true;
-
-			switch (c.action) {
-				case "unchanged":
-					unchanged++;
-					break;
-				case "pull":
-					// Skip pull if two-way sync is disabled
-					if (!twoWaySync) {
-						break;
-					}
-					// Don't pull if local file exists and doesn't have publish field (protected)
-					if (publishField && localFile instanceof TFile && !hasPublish) {
-						// Skip - protected local file
-					} else {
-						pulls.push(c);
-					}
-					break;
-				case "push":
-					// Only push if file has publish field (or no filter set)
-					if (hasPublish) {
-						pushes.push(c);
-					}
-					break;
-				case "conflict":
-					// Skip conflict handling if two-way sync is disabled (just push local)
-					if (!twoWaySync) {
-						if (hasPublish) {
-							pushes.push(c);
-						}
-						break;
-					}
-					// Don't show conflict if local file is protected (no publish field)
-					if (publishField && localFile instanceof TFile && !hasPublish) {
-						// Skip - protected local file, server changes are ignored
-					} else {
-						conflicts.push(c);
-					}
-					break;
-				case "local_only":
-					// Only push if file has publish field (or no filter set)
-					if (hasPublish) {
-						localOnly.push(c);
-					}
-					break;
-				case "remote_only":
-					// Skip if two-way sync is disabled
-					if (!twoWaySync) {
-						break;
-					}
-					// Fallback: treat as pull (new file from server)
-					pulls.push(c);
-					break;
-				case "local_deleted":
-					// Only hide on server if file was publishable
-					if (hasPublish) {
-						localDeleted.push(c);
-					}
-					break;
-				case "server_deleted":
-					// Skip if two-way sync is disabled
-					if (!twoWaySync) {
-						break;
-					}
-					serverDeleted.push(c);
-					break;
-			}
+	/**
+	 * Handle asset conflicts with new flow.
+	 */
+	private async handleAssetConflictsNew(conflicts: AssetConflictInfo[], twoWaySync: boolean): Promise<AssetConflictResolution[]> {
+		if (!twoWaySync) {
+			// One-way sync: auto-upload local
+			return conflicts.map(() => "keep_local");
 		}
 
-		console.log(`[Trip2g Sync] Sync actions: pulls=${pulls.length}, pushes=${pushes.length}, conflicts=${conflicts.length}, localOnly=${localOnly.length}, unchanged=${unchanged}`);
-		if (pulls.length > 0) {
-			console.log(`[Trip2g Sync] Pulling: ${pulls.map(p => p.path).join(", ")}`);
-		}
-
-		// Execute pulls first (get updates from server)
-		if (pulls.length > 0) {
-			await this.executePulls(sdk, folder, pulls, syncState);
-			new Notice(t().pulledFiles(pulls.length));
-		}
-
-		// Handle conflicts
-		if (conflicts.length > 0) {
-			await this.handleConflicts(sdk, syncDir, folder, conflicts, syncState);
-		}
-
-		// Push local changes (including local_only files)
-		const toPush = [...pushes, ...localOnly];
-		let pushedNotes: NoteWithAssets[] = [];
-		if (toPush.length > 0) {
-			console.time("[Trip2g Sync] Confirm push");
-			const shouldPush = await this.confirmPush(toPush);
-			console.timeEnd("[Trip2g Sync] Confirm push");
-			if (shouldPush) {
-				console.time("[Trip2g Sync] Execute pushes");
-				pushedNotes = await this.executePushes(sdk, syncDir, folder, toPush, syncState);
-				console.timeEnd("[Trip2g Sync] Execute pushes");
-				new Notice(t().pushedFiles(toPush.length));
-			}
-		}
-
-		// Handle locally deleted files - hide on server
-		if (localDeleted.length > 0) {
-			await this.handleLocalDeleted(sdk, localDeleted, syncState);
-		}
-
-		// Handle server deleted files - ask user what to do
-		if (serverDeleted.length > 0) {
-			await this.handleServerDeleted(folder, serverDeleted, syncState);
-		}
-
-		// Check assets for pushed notes and two-way sync
-		if (pushedNotes.length > 0) {
-			console.time("[Trip2g Sync] Check and sync assets");
-			await this.checkAndSyncAssets(syncDir, pushedNotes);
-			console.timeEnd("[Trip2g Sync] Check and sync assets");
-		} else if (twoWaySync) {
-			// For two-way sync without pushes, fetch all notes to check assets
-			console.time("[Trip2g Sync] Fetch notes for asset sync");
-			const result = await sdk.PushNotes({ input: { skipCommit: true, updates: [] } });
-			console.timeEnd("[Trip2g Sync] Fetch notes for asset sync");
-			if ("notes" in result.pushNotes && result.pushNotes.notes.length > 0) {
-				console.time("[Trip2g Sync] Check and sync assets (two-way)");
-				await this.checkAndSyncAssets(syncDir, result.pushNotes.notes);
-				console.timeEnd("[Trip2g Sync] Check and sync assets (two-way)");
-			}
-		}
-
-		if (unchanged > 0 && pulls.length === 0 && pushes.length === 0 && conflicts.length === 0) {
-			new Notice(t().allFilesUpToDate);
-		}
-	}
-
-	private async checkAndSyncAssets(syncDir: SyncDir, notes: NoteWithAssets[]) {
-		if (notes.length === 0) {
-			return;
-		}
-
-		const conflicts: AssetConflict[] = [];
-		const toDownload: Array<{ asset: NoteAsset }> = [];
-		const toUpload: Array<{ noteId: string; notePath: string; asset: NoteAsset }> = [];
-		const twoWaySync = syncDir.twoWaySync ?? false;
-
-		// Get sync folder for resolving asset paths
-		const folder = this.app.vault.getAbstractFileByPath(syncDir.path);
-		if (!folder || !(folder instanceof TFolder)) {
-			return;
-		}
-
-		const relevantNotes = notes;
-
-		for (const note of relevantNotes) {
-			if (!note.assets || note.assets.length === 0) {
-				continue;
-			}
-
-			const notePathInVault = folder.path === "/" ? note.path : `${folder.path}/${note.path}`;
-			const noteFile = this.app.vault.getAbstractFileByPath(notePathInVault);
-
-			for (const asset of note.assets) {
-				// Asset not yet uploaded to server - need to upload
-				if (!asset.sha256Hash || !asset.absolutePath || !asset.url) {
-					toUpload.push({ noteId: String(note.id), notePath: notePathInVault, asset });
-					continue;
-				}
-
-				// Remove leading slash if present (server may return /path or path)
-				// Then add sync folder prefix to get the actual vault path
-				const relativeAssetPath = asset.absolutePath.replace(/^\//, "");
-				const assetPath = syncDir.path && syncDir.path !== "/"
-					? `${syncDir.path}/${relativeAssetPath}`
-					: relativeAssetPath;
-				const existingFile = this.app.vault.getAbstractFileByPath(assetPath);
-
-				if (existingFile instanceof TFile) {
-					// Asset exists locally - check hash
-					const localBuffer = await this.app.vault.readBinary(existingFile);
-					const localHash = await sha256HashBuffer(localBuffer);
-
-					if (localHash === asset.sha256Hash) {
-						// Hashes match - no action needed
-						continue;
-					}
-
-					// Conflict: local and remote differ
-					console.log(`[Trip2g Sync] Asset conflict ${assetPath}: local=${localHash.slice(0, 8)}... remote=${asset.sha256Hash?.slice(0, 8)}...`);
-					conflicts.push({
-						path: asset.path,
-						absolutePath: assetPath,
-						relativeAbsolutePath: relativeAssetPath,
-						localHash,
-						remoteHash: asset.sha256Hash || "",
-						remoteUrl: asset.url,
-						noteId: String(note.id),
-					});
-				} else if (twoWaySync) {
-					// Asset missing locally - download only if two-way sync is enabled
-					console.log(`[Trip2g Sync] Asset ${assetPath} not found locally, will download`);
-					toDownload.push({ asset });
-				}
-			}
-		}
-
-		// Upload assets that are not yet on server (sequentially)
-		if (toUpload.length > 0) {
-			let uploadedCount = 0;
-			const total = toUpload.length;
-
-			for (let i = 0; i < toUpload.length; i++) {
-				const { noteId, notePath, asset } = toUpload[i];
-				this.setProgress(t().progressUploadingAssets(i + 1, total));
-
-				const noteFile = this.app.vault.getAbstractFileByPath(notePath);
-				if (!(noteFile instanceof TFile)) {
-					continue;
-				}
-
-				const resolvedFile = this.app.metadataCache.getFirstLinkpathDest(asset.path, noteFile.path);
-				if (!(resolvedFile instanceof TFile)) {
-					continue;
-				}
-
-				try {
-					const arrayBuffer = await this.app.vault.readBinary(resolvedFile);
-					const localHash = await sha256HashBuffer(arrayBuffer);
-					const blob = new Blob([arrayBuffer]);
-					const relativeAbsolutePath = this.getRelativePath(resolvedFile, folder);
-					const success = await this.uploadAsset(syncDir, noteId, blob, resolvedFile.name, asset.path, relativeAbsolutePath, localHash);
-					if (success) {
-						uploadedCount++;
-					}
-				} catch (error) {
-					console.error(`Error uploading asset ${asset.path}:`, error);
-				}
-			}
-
-			if (uploadedCount > 0) {
-				new Notice(t().assetUploaded(uploadedCount));
-			}
-		}
-
-		// Download missing assets (no conflict - they don't exist locally)
-		// Only if two-way sync is enabled
-		let downloadedCount = 0;
-		if (twoWaySync && toDownload.length > 0) {
-			const total = toDownload.length;
-			let processed = 0;
-
-			// Process in parallel batches of 10
-			const concurrency = 10;
-			for (let i = 0; i < toDownload.length; i += concurrency) {
-				const batch = toDownload.slice(i, i + concurrency);
-				const results = await Promise.all(
-					batch.map(({ asset }) => this.downloadSingleAsset(asset, syncDir))
-				);
-				downloadedCount += results.filter(Boolean).length;
-				processed += batch.length;
-				this.setProgress(t().progressDownloadingAssets(processed, total));
-			}
-
-			if (downloadedCount > 0) {
-				new Notice(t().assetDownloaded(downloadedCount));
-			}
-		}
-
-		// Handle conflicts - ask user (deduplicate by absolutePath)
-		if (conflicts.length > 0) {
-			const uniqueConflicts = conflicts.filter(
-				(c, i, arr) => arr.findIndex((x) => x.absolutePath === c.absolutePath) === i
-			);
-			console.log(`[Trip2g Sync] Asset conflicts:`, uniqueConflicts.map(c => c.absolutePath));
-
-			if (twoWaySync) {
-				// Two-way sync: ask user what to do
-				await this.handleAssetConflicts(syncDir, uniqueConflicts);
-			} else {
-				// One-way sync: auto-upload local assets to server
-				await this.autoUploadLocalAssets(syncDir, uniqueConflicts);
-			}
-		}
-	}
-
-	private async handleAssetConflicts(syncDir: SyncDir, conflicts: AssetConflict[]): Promise<void> {
+		// Two-way sync: show modal for each conflict
+		const resolutions: AssetConflictResolution[] = [];
 		let remaining = [...conflicts];
-		let uploadedCount = 0;
-		let downloadedCount = 0;
 
 		while (remaining.length > 0) {
-			const current = remaining[0];
+			const uiConflicts: AssetConflict[] = remaining.map((c) => ({
+				path: c.path,
+				absolutePath: c.absolutePath,
+				relativeAbsolutePath: c.absolutePath, // Will be used for upload
+				localHash: c.localHash,
+				remoteHash: c.remoteHash,
+				remoteUrl: c.remoteUrl,
+				noteId: c.noteId,
+			}));
 
-			const { resolution, applyToAll } = await new Promise<{ resolution: AssetConflictResolution; applyToAll: boolean }>((resolve) => {
-				new AssetConflictModal(this.app, remaining, (res, all) => {
+			const { resolution, applyToAll } = await new Promise<{ resolution: UIAssetConflictResolution; applyToAll: boolean }>((resolve) => {
+				new AssetConflictModal(this.app, uiConflicts, (res, all) => {
 					resolve({ resolution: res, applyToAll: all });
 				}).open();
 			});
 
-			const toProcess = applyToAll ? remaining : [current];
-
-			for (const conflict of toProcess) {
-				if (resolution === "keep_local") {
-					// Upload local asset to server
-					const file = this.app.vault.getAbstractFileByPath(conflict.absolutePath);
-					if (file instanceof TFile) {
-						const buffer = await this.app.vault.readBinary(file);
-						const blob = new Blob([buffer]);
-						const success = await this.uploadAsset(
-							syncDir,
-							conflict.noteId,
-							blob,
-							file.name,
-							conflict.path,
-							conflict.relativeAbsolutePath, // Use relative path for server
-							conflict.localHash
-						);
-						if (success) {
-							uploadedCount++;
-						}
-					}
-				} else if (resolution === "keep_remote") {
-					// Download from server
-					const data = await this.downloadAsset(conflict.remoteUrl);
-					if (data) {
-						const file = this.app.vault.getAbstractFileByPath(conflict.absolutePath);
-						if (file instanceof TFile) {
-							await this.app.vault.modifyBinary(file, data);
-							downloadedCount++;
-						}
-					}
-				}
-				// skip - do nothing
+			const count = applyToAll ? remaining.length : 1;
+			for (let i = 0; i < count; i++) {
+				resolutions.push(resolution as AssetConflictResolution);
 			}
 
-			if (applyToAll) {
-				remaining = [];
-			} else {
-				remaining = remaining.slice(1);
-			}
+			remaining = applyToAll ? [] : remaining.slice(1);
 		}
 
-		if (uploadedCount > 0) {
-			new Notice(t().assetUploaded(uploadedCount));
-		}
-		if (downloadedCount > 0) {
-			new Notice(t().assetDownloaded(downloadedCount));
-		}
+		return resolutions;
 	}
 
-	private async autoUploadLocalAssets(syncDir: SyncDir, conflicts: AssetConflict[]): Promise<void> {
-		let uploadedCount = 0;
-		const total = conflicts.length;
-
-		// Upload sequentially
-		for (let i = 0; i < conflicts.length; i++) {
-			const conflict = conflicts[i];
-			this.setProgress(t().progressUploadingAssets(i + 1, total));
-
-			const file = this.app.vault.getAbstractFileByPath(conflict.absolutePath);
-			if (file instanceof TFile) {
-				const buffer = await this.app.vault.readBinary(file);
-				const blob = new Blob([buffer]);
-				const success = await this.uploadAsset(
-					syncDir,
-					conflict.noteId,
-					blob,
-					file.name,
-					conflict.path,
-					conflict.relativeAbsolutePath,
-					conflict.localHash
-				);
-				if (success) {
-					uploadedCount++;
-				}
-			}
-		}
-
-		if (uploadedCount > 0) {
-			new Notice(t().assetUploaded(uploadedCount));
-		}
+	/**
+	 * Handle server deleted files with new flow.
+	 */
+	private async handleServerDeletedNew(paths: string[]): Promise<boolean> {
+		return new Promise((resolve) => {
+			new ServerDeletedModal(this.app, paths, (deleteLocally) => {
+				resolve(deleteLocally);
+			}).open();
+		});
 	}
 
-	private async downloadSingleAsset(asset: NoteAsset, syncDir: SyncDir): Promise<boolean> {
-		try {
-			// Remove leading slash if present (server may return /path or path)
-			// Then add sync folder prefix to get the actual vault path
-			const relativeAssetPath = asset.absolutePath.replace(/^\//, "");
-			const assetPath = syncDir.path && syncDir.path !== "/"
-				? `${syncDir.path}/${relativeAssetPath}`
-				: relativeAssetPath;
-
-			const data = await this.downloadAsset(asset.url);
-			if (!data) {
-				console.log(`[Trip2g Sync] Failed to download asset ${assetPath}`);
-				return false;
-			}
-
-			// Create directories if needed
-			const assetDir = assetPath.substring(0, assetPath.lastIndexOf("/"));
-			if (assetDir && !this.app.vault.getAbstractFileByPath(assetDir)) {
-				await this.app.vault.createFolder(assetDir);
-			}
-
-			// Write asset file
-			const existingFile = this.app.vault.getAbstractFileByPath(assetPath);
-			if (existingFile instanceof TFile) {
-				await this.app.vault.modifyBinary(existingFile, data);
-				console.log(`[Trip2g Sync] Updated asset: ${assetPath}`);
-			} else {
-				await this.app.vault.createBinary(assetPath, data);
-				console.log(`[Trip2g Sync] Created asset: ${assetPath}`);
-			}
+	/**
+	 * Confirm push with new flow.
+	 */
+	private async confirmPushNew(paths: string[]): Promise<boolean> {
+		if (this.settings.skipPushConfirmation) {
 			return true;
-		} catch (error) {
-			console.error(`[Trip2g Sync] Error downloading asset ${asset.absolutePath}:`, error);
-			return false;
 		}
-	}
 
-	private async executePulls(
-		sdk: Sdk,
-		folder: TFolder,
-		pulls: FileClassification[],
-		syncState: SyncState
-	) {
-		const paths = pulls.map((p) => p.path);
-		const total = paths.length;
-		console.log(`[Trip2g Sync] executePulls: fetching ${total} files`);
-
-		// Fetch in batches of 100
-		const batchSize = 100;
-		let processed = 0;
-
-		for (let i = 0; i < paths.length; i += batchSize) {
-			const batch = paths.slice(i, i + batchSize);
-			const data = await sdk.FetchNoteContents({ filter: { paths: batch } });
-
-			for (const noteData of data.notePaths) {
-				processed++;
-				this.setProgress(t().progressPulling(processed, total));
-
-				console.log(`[Trip2g Sync] executePulls: processing ${noteData.path}, content length=${noteData.content?.length}`);
-				const fullPath = folder.path === "/" ? noteData.path : `${folder.path}/${noteData.path}`;
-
-				// Create directories if needed
-				const dirPath = fullPath.substring(0, fullPath.lastIndexOf("/"));
-				if (dirPath && !this.app.vault.getAbstractFileByPath(dirPath)) {
-					await this.app.vault.createFolder(dirPath);
+		return new Promise((resolve) => {
+			new PushConfirmModal(this.app, paths, async (proceed, dontAskAgain) => {
+				if (dontAskAgain) {
+					this.settings.skipPushConfirmation = true;
+					await this.saveSettings();
 				}
-
-				// Write or update file
-				const existingFile = this.app.vault.getAbstractFileByPath(fullPath);
-				if (existingFile instanceof TFile) {
-					await this.app.vault.modify(existingFile, noteData.content);
-				} else {
-					await this.app.vault.create(fullPath, noteData.content);
-				}
-
-				// Update sync state
-				const hash = await sha256Hash(noteData.content);
-				updateSyncState(syncState, noteData.path, hash);
-			}
-		}
-
-		console.log(`[Trip2g Sync] executePulls: received ${processed} files from server`);
-	}
-
-	private async handleConflicts(
-		sdk: Sdk,
-		syncDir: SyncDir,
-		folder: TFolder,
-		conflicts: FileClassification[],
-		syncState: SyncState
-	) {
-		// Prepare all conflict infos
-		const conflictInfos: Array<{ classification: FileClassification; info: ConflictInfo }> = [];
-
-		// Fetch all conflict contents in one batch
-		const paths = conflicts.map((c) => c.path);
-		const data = await sdk.FetchNoteContents({ filter: { paths } });
-		const remoteContents = new Map<string, string>();
-		for (const note of data.notePaths) {
-			remoteContents.set(note.path, note.content);
-		}
-
-		for (const conflict of conflicts) {
-			const fullPath = folder.path === "/" ? conflict.path : `${folder.path}/${conflict.path}`;
-			const file = this.app.vault.getAbstractFileByPath(fullPath);
-
-			if (!(file instanceof TFile)) {
-				continue;
-			}
-
-			const localContent = await this.app.vault.read(file);
-			const remoteContent = remoteContents.get(conflict.path);
-
-			if (remoteContent === undefined) {
-				// Remote no longer exists, skip
-				continue;
-			}
-
-			conflictInfos.push({
-				classification: conflict,
-				info: {
-					path: conflict.path,
-					localContent,
-					remoteContent,
-					localHash: conflict.localHash!,
-					remoteHash: conflict.remoteHash!,
-				},
-			});
-		}
-
-		if (conflictInfos.length === 0) {
-			return;
-		}
-
-		// Open conflict view and wait for all resolutions
-		const resolutions = await this.showConflictView(conflictInfos.map((c) => c.info));
-
-		// Process resolutions
-		for (let i = 0; i < conflictInfos.length; i++) {
-			const { classification, info } = conflictInfos[i];
-			const resolution = resolutions[i];
-			await this.resolveConflict(sdk, syncDir, folder, classification, info, resolution, syncState);
-		}
+				resolve(proceed);
+			}).open();
+		});
 	}
 
 	private async showConflictView(conflicts: ConflictInfo[]): Promise<ConflictResolution[]> {
@@ -1060,211 +615,6 @@ export default class Trip2gSyncPlugin extends Plugin {
 		return resolutions;
 	}
 
-	private async resolveConflict(
-		sdk: Sdk,
-		syncDir: SyncDir,
-		folder: TFolder,
-		classification: FileClassification,
-		conflict: ConflictInfo,
-		resolution: ConflictResolution,
-		syncState: SyncState
-	) {
-		const fullPath = folder.path === "/" ? conflict.path : `${folder.path}/${conflict.path}`;
-		const file = this.app.vault.getAbstractFileByPath(fullPath);
-
-		switch (resolution) {
-			case "keep_local":
-				// Push local to server immediately
-				if (file instanceof TFile) {
-					const result = await sdk.PushNotes({ input: { skipCommit: true, updates: [{ path: conflict.path, content: conflict.localContent }] } });
-					updateSyncState(syncState, conflict.path, conflict.localHash);
-					new Notice(`${t().pushed}: ${conflict.path}`);
-					// Process assets if any
-					if ("notes" in result.pushNotes) {
-						for (const note of result.pushNotes.notes) {
-							await this.processNoteAssets(syncDir, note, folder);
-						}
-					}
-				}
-				break;
-
-			case "keep_remote":
-				if (file instanceof TFile) {
-					await this.app.vault.modify(file, conflict.remoteContent);
-					updateSyncState(syncState, conflict.path, conflict.remoteHash);
-				}
-				break;
-
-			case "keep_both":
-				// Create a copy with server version
-				const ext = conflict.path.substring(conflict.path.lastIndexOf("."));
-				const baseName = conflict.path.substring(0, conflict.path.lastIndexOf("."));
-				const newPath = `${baseName} (server)${ext}`;
-				const newFullPath = folder.path === "/" ? newPath : `${folder.path}/${newPath}`;
-
-				await this.app.vault.create(newFullPath, conflict.remoteContent);
-
-				// Update sync state for both files
-				updateSyncState(syncState, conflict.path, conflict.localHash);
-				const remoteHash = await sha256Hash(conflict.remoteContent);
-				updateSyncState(syncState, newPath, remoteHash);
-				break;
-
-			case "skip":
-				// Do nothing, file will show as conflict again next sync
-				break;
-		}
-	}
-
-	private async executePushes(
-		sdk: Sdk,
-		syncDir: SyncDir,
-		folder: TFolder,
-		pushes: FileClassification[],
-		syncState: SyncState
-	): Promise<NoteWithAssets[]> {
-		const updates: Array<{ path: string; content: string }> = [];
-		const total = pushes.length;
-
-		for (let i = 0; i < pushes.length; i++) {
-			const push = pushes[i];
-			this.setProgress(t().progressPushing(i + 1, total));
-
-			const fullPath = folder.path === "/" ? push.path : `${folder.path}/${push.path}`;
-			const file = this.app.vault.getAbstractFileByPath(fullPath);
-
-			if (file instanceof TFile) {
-				const content = await this.app.vault.read(file);
-				updates.push({ path: push.path, content });
-			}
-		}
-
-		if (updates.length === 0) {
-			return [];
-		}
-
-		const result = await sdk.PushNotes({ input: { skipCommit: true, updates } });
-
-		// Update sync state
-		for (const update of updates) {
-			const hash = await sha256Hash(update.content);
-			updateSyncState(syncState, update.path, hash);
-		}
-
-		// Return only pushed notes for asset processing (server returns ALL notes)
-		if ("notes" in result.pushNotes) {
-			const pushedPaths = new Set(updates.map((u) => u.path));
-			return result.pushNotes.notes.filter((n) => pushedPaths.has(n.path));
-		}
-		return [];
-	}
-
-	private async handleLocalDeleted(sdk: Sdk, localDeleted: FileClassification[], syncState: SyncState) {
-		// Files were deleted locally - hide them on server
-		const paths = localDeleted.map((r) => r.path);
-
-		if (paths.length > 0) {
-			const result = await sdk.HideNotes({ input: { paths } });
-			if ("success" in result.hideNotes && result.hideNotes.success) {
-				for (const path of paths) {
-					removeFromSyncState(syncState, path);
-				}
-				new Notice(t().hiddenNotes(paths.length));
-			}
-		}
-	}
-
-	private async handleServerDeleted(
-		folder: TFolder,
-		serverDeleted: FileClassification[],
-		syncState: SyncState
-	): Promise<void> {
-		const paths = serverDeleted.map((c) => c.path);
-
-		return new Promise((resolve) => {
-			new ServerDeletedModal(this.app, paths, async (deleteLocally) => {
-				if (deleteLocally) {
-					// Delete local files
-					let deletedCount = 0;
-					for (const c of serverDeleted) {
-						const fullPath = folder.path === "/" ? c.path : `${folder.path}/${c.path}`;
-						const file = this.app.vault.getAbstractFileByPath(fullPath);
-						if (file instanceof TFile) {
-							await this.app.vault.delete(file);
-							removeFromSyncState(syncState, c.path);
-							deletedCount++;
-						}
-					}
-					new Notice(t().deletedLocally(deletedCount));
-				} else {
-					// Keep locally - update syncState to current local hash
-					for (const c of serverDeleted) {
-						if (c.localHash) {
-							updateSyncState(syncState, c.path, c.localHash);
-						}
-					}
-					new Notice(t().keptLocally(serverDeleted.length));
-				}
-				resolve();
-			}).open();
-		});
-	}
-
-	private async confirmPush(toPush: FileClassification[]): Promise<boolean> {
-		// Skip confirmation if setting is enabled
-		if (this.settings.skipPushConfirmation) {
-			return true;
-		}
-
-		const paths = toPush.map((c) => c.path);
-
-		return new Promise((resolve) => {
-			new PushConfirmModal(this.app, paths, async (proceed, dontAskAgain) => {
-				if (dontAskAgain) {
-					this.settings.skipPushConfirmation = true;
-					await this.saveSettings();
-				}
-				resolve(proceed);
-			}).open();
-		});
-	}
-
-	private async processNoteAssets(syncDir: SyncDir, note: NoteWithAssets, folder: TFolder) {
-		if (!note.assets || note.assets.length === 0) {
-			return;
-		}
-
-		const notePathInVault = folder.path === "/" ? note.path : `${folder.path}/${note.path}`;
-		const noteFile = this.app.vault.getAbstractFileByPath(notePathInVault);
-
-		if (!(noteFile instanceof TFile)) {
-			return;
-		}
-
-		// Upload sequentially
-		for (const asset of note.assets) {
-			const resolvedFile = this.app.metadataCache.getFirstLinkpathDest(asset.path, noteFile.path);
-
-			if (!(resolvedFile instanceof TFile)) {
-				continue;
-			}
-
-			try {
-				const arrayBuffer = await this.app.vault.readBinary(resolvedFile);
-				const localHash = await sha256HashBuffer(arrayBuffer);
-
-				if (!asset.sha256Hash || asset.sha256Hash !== localHash) {
-					const blob = new Blob([arrayBuffer]);
-					// Use relative path (without sync folder prefix) so other users can pull to their own sync folders
-					const relativeAbsolutePath = this.getRelativePath(resolvedFile, folder);
-					await this.uploadAsset(syncDir, String(note.id), blob, resolvedFile.name, asset.path, relativeAbsolutePath, localHash);
-				}
-			} catch (error) {
-				console.error(`Error processing asset ${asset.path}:`, error);
-			}
-		}
-	}
-
 	private getAllMarkdownFiles(folder: TFolder): TFile[] {
 		const files: TFile[] = [];
 
@@ -1279,118 +629,6 @@ export default class Trip2gSyncPlugin extends Plugin {
 		}
 
 		return files;
-	}
-
-	private async downloadAsset(url: string): Promise<ArrayBuffer | null> {
-		try {
-			const response = await requestUrl({ url });
-			return response.arrayBuffer;
-		} catch (error) {
-			console.error(`Error downloading asset from ${url}:`, error);
-			return null;
-		}
-	}
-
-	private async uploadAsset(
-		syncDir: SyncDir,
-		noteId: string,
-		assetBlob: Blob,
-		fileName: string,
-		relativePath: string,
-		absolutePath: string,
-		sha256Hash: string
-	): Promise<boolean> {
-		const maxRetries = 3;
-
-		for (let attempt = 1; attempt <= maxRetries; attempt++) {
-			const operations = JSON.stringify({
-				variables: {
-					input: {
-						skipCommit: true,
-						file: null,
-						noteId: noteId,
-						sha256Hash: sha256Hash,
-						path: relativePath,
-						absolutePath: absolutePath,
-					},
-				},
-				query: `mutation($input: UploadNoteAssetInput!) {
-					uploadNoteAsset(input: $input) {
-						... on ErrorPayload {
-							__typename
-							message
-						}
-						... on UploadNoteAssetPayload {
-							__typename
-							uploadSkipped
-						}
-					}
-				}`,
-			});
-
-			const map = JSON.stringify({ "0": ["variables.input.file"] });
-
-			const formData = new FormData();
-			formData.append("operations", operations);
-			formData.append("map", map);
-			formData.append("0", assetBlob, fileName);
-
-			try {
-				const response = await fetch(`${normalizeApiUrl(syncDir.apiUrl)}/graphql`, {
-					method: "POST",
-					headers: {
-						"X-API-Key": syncDir.apiKey,
-						"X-Plugin-Version": this.manifest.version,
-					},
-					body: formData,
-				});
-
-				const responseText = await response.text();
-				console.log(`[Trip2g Sync] Upload response for ${relativePath} (attempt ${attempt}):`, response.status, responseText);
-
-				if (!response.ok) {
-					if (response.status === 413) {
-						// File too large - don't retry, show user-friendly message
-						new Notice(t().assetTooLarge(fileName));
-						return false;
-					}
-					throw new Error(`HTTP error! status: ${response.status}, body: ${responseText}`);
-				}
-
-				const result = JSON.parse(responseText);
-				if (result.errors) {
-					console.error(`Asset upload error for ${relativePath}:`, result.errors);
-					// Check for "too large" error - don't retry
-					const errorMessage = JSON.stringify(result.errors);
-					if (errorMessage.includes("too large")) {
-						new Notice(t().assetTooLarge(fileName));
-						return false;
-					}
-					throw new Error(`GraphQL errors: ${errorMessage}`);
-				}
-
-				const payload = result.data?.uploadNoteAsset;
-				if (payload?.__typename === "ErrorPayload") {
-					new Notice(`Asset upload failed: ${payload.message}`);
-					return false;
-				}
-
-				return true;
-			} catch (error) {
-				console.error(`Failed to upload asset ${relativePath} (attempt ${attempt}/${maxRetries}):`, error);
-
-				if (attempt < maxRetries) {
-					// Exponential backoff: 1s, 2s, 4s
-					const delay = Math.pow(2, attempt - 1) * 1000;
-					console.log(`[Trip2g Sync] Retrying in ${delay}ms...`);
-					await new Promise((resolve) => setTimeout(resolve, delay));
-				} else {
-					return false;
-				}
-			}
-		}
-
-		return false;
 	}
 
 	private shouldExcludeFile(filePath: string): boolean {
