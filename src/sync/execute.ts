@@ -213,21 +213,28 @@ async function executePushes(
 		return { count: 0, errors, pushedNotes: [] };
 	}
 
+	// Track which paths we're pushing
+	const updatePaths = new Set(updates.map((u) => u.path));
+
 	// Push to server (skipCommit=true, we'll commit at the end)
 	const pushedNotes = await env.pushNotes(updates, true);
 
-	// Update sync state for successfully pushed files
-	const pushedPaths = new Set(pushedNotes.map((n) => n.path));
+	// Server returns ALL notes, filter to just the ones we pushed
+	const serverPaths = new Set(pushedNotes.map((n) => n.path));
+
+	// Update sync state only for files that are in BOTH our updates AND server response
+	let pushedCount = 0;
 	for (const update of updates) {
-		if (pushedPaths.has(update.path)) {
+		if (serverPaths.has(update.path)) {
 			const hash = await env.computeHash(update.content);
 			syncState.files[update.path] = hash;
+			pushedCount++;
 		}
 	}
 
-	// Return only notes that were actually pushed (filter by paths we sent)
-	const filteredNotes = pushedNotes.filter((n) => pushedPaths.has(n.path));
-	return { count: pushedPaths.size, errors, pushedNotes: filteredNotes };
+	// Return only notes that were in our updates (for asset processing)
+	const filteredNotes = pushedNotes.filter((n) => updatePaths.has(n.path));
+	return { count: pushedCount, errors, pushedNotes: filteredNotes };
 }
 
 /**
