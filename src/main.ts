@@ -141,7 +141,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 	 * Check for pending changes and update badge
 	 */
 	async checkForPendingChanges(): Promise<void> {
-		if (!this.ribbonIcon || this.settings.syncDirs.length === 0) {
+		if (!this.ribbonIcon || this.settings.syncDirs.length === 0 || this.isSyncing) {
 			return;
 		}
 
