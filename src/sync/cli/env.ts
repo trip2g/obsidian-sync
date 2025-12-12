@@ -42,6 +42,8 @@ export class NodeEnv implements SyncEnv {
 	private conflictResolution: CliConflictResolution;
 	private syncState: SyncState;
 	private sdk: Sdk;
+	private apiUrl: string;
+	private apiKey: string;
 
 	constructor(options: NodeEnvOptions) {
 		this.folder = path.resolve(options.folder);
@@ -49,6 +51,8 @@ export class NodeEnv implements SyncEnv {
 		this.verbose = options.verbose ?? false;
 		this.conflictResolution = options.conflictResolution ?? "local";
 		this.syncState = this.loadSyncState();
+		this.apiUrl = options.apiUrl;
+		this.apiKey = options.apiKey;
 		this.sdk = createClient({ apiUrl: options.apiUrl, apiKey: options.apiKey });
 	}
 
@@ -248,21 +252,66 @@ export class NodeEnv implements SyncEnv {
 
 	async uploadAsset(params: UploadAssetParams): Promise<boolean> {
 		try {
-			const result = await this.sdk.UploadNoteAsset({
-				input: {
-					file: params.blob as File,
-					noteId: parseInt(params.noteId),
-					sha256Hash: params.sha256Hash,
-					path: params.relativePath,
-					absolutePath: params.absolutePath,
+			// Use FormData multipart upload (graphql-request doesn't support file uploads)
+			const query = `mutation UploadNoteAsset($input: UploadNoteAssetInput!) {
+	uploadNoteAsset(input: $input) {
+		... on ErrorPayload {
+			__typename
+			message
+		}
+		... on UploadNoteAssetPayload {
+			__typename
+			uploadSkipped
+		}
+	}
+}`;
+
+			const operations = JSON.stringify({
+				query,
+				variables: {
+					input: {
+						file: null, // Will be replaced by multipart map
+						noteId: parseInt(params.noteId),
+						sha256Hash: params.sha256Hash,
+						path: params.relativePath,
+						absolutePath: params.absolutePath,
+					},
 				},
 			});
 
-			if (result.uploadNoteAsset.__typename === "ErrorPayload") {
-				throw new Error(`Upload failed: ${result.uploadNoteAsset.message}`);
+			const map = JSON.stringify({
+				"0": ["variables.input.file"],
+			});
+
+			const formData = new FormData();
+			formData.append("operations", operations);
+			formData.append("map", map);
+			formData.append("0", params.blob, params.fileName);
+
+			const response = await fetch(this.apiUrl, {
+				method: "POST",
+				headers: {
+					"X-API-Key": this.apiKey,
+				},
+				body: formData,
+			});
+
+			if (!response.ok) {
+				throw new Error(`HTTP ${response.status}: ${response.statusText}`);
 			}
 
-			if (result.uploadNoteAsset.uploadSkipped) {
+			const result = await response.json();
+
+			if (result.errors) {
+				throw new Error(result.errors[0]?.message || "Unknown GraphQL error");
+			}
+
+			const payload = result.data?.uploadNoteAsset;
+			if (payload?.__typename === "ErrorPayload") {
+				throw new Error(`Upload failed: ${payload.message}`);
+			}
+
+			if (payload?.uploadSkipped) {
 				this.log(`⏩ Asset skipped (already exists): ${params.relativePath}`);
 			} else {
 				console.log(`✅ Asset uploaded: ${params.relativePath}`);
@@ -314,10 +363,8 @@ export class NodeEnv implements SyncEnv {
 	// ============ Asset Operations ============
 
 	async computeBinaryHash(data: ArrayBuffer): Promise<string> {
-		const hash = crypto.createHash("sha256").update(Buffer.from(data)).digest();
-		// URL-safe base64 with padding (same as Python's urlsafe_b64encode)
-		const b64 = hash.toString("base64");
-		return b64.replace(/\+/g, "-").replace(/\//g, "_");
+		// Return hex format (server expects hex for asset hash validation)
+		return crypto.createHash("sha256").update(Buffer.from(data)).digest("hex");
 	}
 
 	async resolveAssetPath(assetPath: string, notePath: string): Promise<string | null> {
