@@ -193,6 +193,18 @@ export class ObsidianSyncEnv implements SyncEnv {
 			return [];
 		}
 
+		// Defense in depth: verify all notes have publish field if configured
+		if (this.publishField) {
+			for (const update of updates) {
+				if (!this.hasPublishFieldInContent(update.content)) {
+					throw new Error(
+						`[Security] Attempted to push note "${update.path}" without publish field "${this.publishField}". ` +
+							`This is a bug in the sync logic - please report it.`
+					);
+				}
+			}
+		}
+
 		const result = await this.sdk.PushNotes({
 			input: {
 				updates: updates.map((u) => ({ path: u.path, content: u.content })),
@@ -457,6 +469,38 @@ export class ObsidianSyncEnv implements SyncEnv {
 		if (filePath.startsWith("_layouts/") && filePath.includes("/node_modules/")) {
 			return true;
 		}
+		return false;
+	}
+
+	/**
+	 * Check if content has any of the publish fields with a truthy value in frontmatter.
+	 * Parses YAML frontmatter from the content string.
+	 */
+	private hasPublishFieldInContent(content: string): boolean {
+		if (!this.publishField) return true;
+
+		// Extract frontmatter
+		if (!content.startsWith("---")) return false;
+		const endIndex = content.indexOf("\n---", 3);
+		if (endIndex === -1) return false;
+
+		const frontmatterText = content.slice(4, endIndex);
+		const fields = this.publishField.split(",").map((f) => f.trim()).filter((f) => f);
+
+		// Simple YAML parsing: look for "field: true" or "field: yes" patterns
+		for (const field of fields) {
+			// Match: field: true, field: yes, field: 1, field: "true", etc.
+			const regex = new RegExp(`^${field}\\s*:\\s*(.+)$`, "m");
+			const match = frontmatterText.match(regex);
+			if (match) {
+				const value = match[1].trim().toLowerCase();
+				// Check for truthy YAML values
+				if (value === "true" || value === "yes" || value === "1" || value === '"true"' || value === "'true'") {
+					return true;
+				}
+			}
+		}
+
 		return false;
 	}
 }

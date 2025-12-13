@@ -33,6 +33,7 @@ export interface NodeEnvOptions extends ClientOptions {
 	twoWaySync: boolean;
 	verbose?: boolean;
 	conflictResolution?: CliConflictResolution;
+	publishField?: string;
 }
 
 const STATE_FILE = ".sync-state.json";
@@ -42,6 +43,7 @@ export class NodeEnv implements SyncEnv {
 	private twoWaySync: boolean;
 	private verbose: boolean;
 	private conflictResolution: CliConflictResolution;
+	private publishField: string;
 	private syncState: SyncState;
 	private sdk: Sdk;
 	private apiUrl: string;
@@ -54,6 +56,7 @@ export class NodeEnv implements SyncEnv {
 		this.twoWaySync = options.twoWaySync;
 		this.verbose = options.verbose ?? false;
 		this.conflictResolution = options.conflictResolution ?? "local";
+		this.publishField = options.publishField ?? "";
 		this.syncState = this.loadSyncState();
 		this.apiUrl = options.apiUrl;
 		this.apiKey = options.apiKey;
@@ -184,6 +187,18 @@ export class NodeEnv implements SyncEnv {
 	async pushNotes(updates: NoteUpdate[], skipCommit: boolean): Promise<PushedNote[]> {
 		if (updates.length === 0) {
 			return [];
+		}
+
+		// Defense in depth: verify all notes have publish field if configured
+		if (this.publishField) {
+			for (const update of updates) {
+				if (!this.hasPublishFieldInContent(update.content)) {
+					throw new Error(
+						`[Security] Attempted to push note "${update.path}" without publish field "${this.publishField}". ` +
+							`This is a bug in the sync logic - please report it.`
+					);
+				}
+			}
 		}
 
 		try {
@@ -494,5 +509,37 @@ export class NodeEnv implements SyncEnv {
 		// Auto-confirm in CLI mode
 		console.log(`📤 Pushing ${paths.length} files...`);
 		return true;
+	}
+
+	/**
+	 * Check if content has any of the publish fields with a truthy value in frontmatter.
+	 * Parses YAML frontmatter from the content string.
+	 */
+	private hasPublishFieldInContent(content: string): boolean {
+		if (!this.publishField) return true;
+
+		// Extract frontmatter
+		if (!content.startsWith("---")) return false;
+		const endIndex = content.indexOf("\n---", 3);
+		if (endIndex === -1) return false;
+
+		const frontmatterText = content.slice(4, endIndex);
+		const fields = this.publishField.split(",").map((f) => f.trim()).filter((f) => f);
+
+		// Simple YAML parsing: look for "field: true" or "field: yes" patterns
+		for (const field of fields) {
+			// Match: field: true, field: yes, field: 1, field: "true", etc.
+			const regex = new RegExp(`^${field}\\s*:\\s*(.+)$`, "m");
+			const match = frontmatterText.match(regex);
+			if (match) {
+				const value = match[1].trim().toLowerCase();
+				// Check for truthy YAML values
+				if (value === "true" || value === "yes" || value === "1" || value === '"true"' || value === "'true'") {
+					return true;
+				}
+			}
+		}
+
+		return false;
 	}
 }
