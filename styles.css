@@ -6,6 +6,25 @@ img[src*="ce.trip2g.com"] {
 	display: inline;
 }
 
+/* Local custom emoji images (tg_ce assets) */
+.cm-line .internal-embed.image-embed:has(img[src*="tg_ce_"]) {
+	display: inline-block !important;
+	vertical-align: middle;
+	width: auto !important;
+	height: auto !important;
+}
+
+.cm-line .internal-embed.image-embed:has(img[src*="tg_ce_"]) img {
+	width: 20px;
+	height: 20px;
+	vertical-align: middle;
+}
+
+.cm-line .internal-embed.image-embed:has(img[src*="tg_ce_"])::after {
+	display: none !important;
+	content: none !important;
+}
+
 .sync-dir-item {
 	padding: 10px;
 	margin: 10px 0;
