@@ -1,4 +1,3 @@
-#!/usr/bin/env npx ts-node
 /**
  * CLI for obsidian-sync
  *

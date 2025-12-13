@@ -1,8 +1,9 @@
 /**
  * GraphQL client factory for CLI tools.
+ * Uses minimal GraphQL client instead of graphql-request.
  */
 
-import { GraphQLClient } from "graphql-request";
+import { GraphQLClient } from "./graphql-client";
 import { getSdk, type Sdk } from "../../graphql";
 
 export interface ClientOptions {
@@ -16,5 +17,7 @@ export function createClient(options: ClientOptions): Sdk {
 			"X-API-Key": options.apiKey,
 		},
 	});
-	return getSdk(client);
+	// Cast to any - our minimal client implements the same interface
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	return getSdk(client as any);
 }
