@@ -47,6 +47,8 @@ export class NodeEnv implements SyncEnv {
 	private apiUrl: string;
 	private apiKey: string;
 
+	pushBatchSize = 100;
+
 	constructor(options: NodeEnvOptions) {
 		this.folder = path.resolve(options.folder);
 		this.twoWaySync = options.twoWaySync;

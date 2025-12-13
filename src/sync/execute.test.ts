@@ -47,6 +47,7 @@ function createMockEnv(options: {
 	onServerDeleted?: boolean;
 	conflictResolutions?: ConflictResolution[];
 	assetConflictResolutions?: AssetConflictResolution[];
+	pushBatchSize?: number;
 }): SyncEnv {
 	const {
 		syncState = { files: {} },
@@ -57,11 +58,15 @@ function createMockEnv(options: {
 		onServerDeleted = false,
 		conflictResolutions = [],
 		assetConflictResolutions = [],
+		pushBatchSize = 100,
 	} = options;
 
 	let resolutionIndex = 0;
 
 	return {
+		// Configuration
+		pushBatchSize,
+
 		// ClassifyEnv methods
 		getLocalFiles: vi.fn().mockResolvedValue([]),
 		getServerHashes: vi.fn().mockResolvedValue([]),
@@ -266,6 +271,119 @@ describe("executePlan", () => {
 
 			expect(result.pushed).toBe(0);
 			expect(result.errors).toHaveLength(1);
+		});
+
+		it("batches pushNotes calls according to pushBatchSize", async () => {
+			// Create 250 files
+			const fileContents: Record<string, string> = {};
+			const pushes: FileClassification[] = [];
+			for (let i = 0; i < 250; i++) {
+				const path = `note${i}.md`;
+				fileContents[path] = `content ${i}`;
+				pushes.push(makeClassification(path, "push"));
+			}
+
+			const syncState: SyncState = { files: {} };
+			const env = createMockEnv({
+				syncState,
+				fileContents,
+				pushBatchSize: 100,
+			});
+
+			const plan = emptyPlan();
+			plan.pushes = pushes;
+
+			await executePlan(env, plan);
+
+			// Should call pushNotes 3 times: 100 + 100 + 50
+			expect(env.pushNotes).toHaveBeenCalledTimes(3);
+
+			// Verify batch sizes
+			const calls = (env.pushNotes as ReturnType<typeof vi.fn>).mock.calls;
+			expect(calls[0][0]).toHaveLength(100);
+			expect(calls[1][0]).toHaveLength(100);
+			expect(calls[2][0]).toHaveLength(50);
+		});
+
+		it("uses custom pushBatchSize", async () => {
+			// Create 25 files with batch size of 10
+			const fileContents: Record<string, string> = {};
+			const pushes: FileClassification[] = [];
+			for (let i = 0; i < 25; i++) {
+				const path = `note${i}.md`;
+				fileContents[path] = `content ${i}`;
+				pushes.push(makeClassification(path, "push"));
+			}
+
+			const syncState: SyncState = { files: {} };
+			const env = createMockEnv({
+				syncState,
+				fileContents,
+				pushBatchSize: 10,
+			});
+
+			const plan = emptyPlan();
+			plan.pushes = pushes;
+
+			await executePlan(env, plan);
+
+			// Should call pushNotes 3 times: 10 + 10 + 5
+			expect(env.pushNotes).toHaveBeenCalledTimes(3);
+		});
+
+		it("handles exactly one batch size files", async () => {
+			// Create exactly 100 files
+			const fileContents: Record<string, string> = {};
+			const pushes: FileClassification[] = [];
+			for (let i = 0; i < 100; i++) {
+				const path = `note${i}.md`;
+				fileContents[path] = `content ${i}`;
+				pushes.push(makeClassification(path, "push"));
+			}
+
+			const syncState: SyncState = { files: {} };
+			const env = createMockEnv({
+				syncState,
+				fileContents,
+				pushBatchSize: 100,
+			});
+
+			const plan = emptyPlan();
+			plan.pushes = pushes;
+
+			await executePlan(env, plan);
+
+			// Should call pushNotes exactly once
+			expect(env.pushNotes).toHaveBeenCalledTimes(1);
+			const calls = (env.pushNotes as ReturnType<typeof vi.fn>).mock.calls;
+			expect(calls[0][0]).toHaveLength(100);
+		});
+
+		it("collects all pushedNotes from batched calls", async () => {
+			// Create 150 files
+			const fileContents: Record<string, string> = {};
+			const pushes: FileClassification[] = [];
+			for (let i = 0; i < 150; i++) {
+				const path = `note${i}.md`;
+				fileContents[path] = `content ${i}`;
+				pushes.push(makeClassification(path, "push"));
+			}
+
+			const syncState: SyncState = { files: {} };
+			const env = createMockEnv({
+				syncState,
+				fileContents,
+				pushBatchSize: 100,
+			});
+
+			const plan = emptyPlan();
+			plan.pushes = pushes;
+
+			const result = await executePlan(env, plan);
+
+			// All 150 files should be pushed successfully
+			expect(result.pushed).toBe(150);
+			expect(Object.keys(syncState.files)).toHaveLength(150);
 		});
 	});
 

@@ -186,6 +186,10 @@ export interface AssetSyncResult {
 }
 
 export interface SyncEnv extends ClassifyEnv {
+	// Configuration
+	/** Batch size for pushNotes calls (default: 100) */
+	pushBatchSize: number;
+
 	// File operations
 	writeFile(path: string, content: string): Promise<void>;
 	writeBinaryFile(path: string, data: ArrayBuffer): Promise<void>;

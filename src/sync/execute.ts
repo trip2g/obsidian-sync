@@ -226,8 +226,15 @@ async function executePushes(
 	// Track which paths we're pushing
 	const updatePaths = new Set(updates.map((u) => u.path));
 
-	// Push to server (skipCommit=true, we'll commit at the end)
-	const pushedNotes = await env.pushNotes(updates, true);
+	// Push to server in batches (skipCommit=true, we'll commit at the end)
+	const batchSize = env.pushBatchSize || 100;
+	const pushedNotes: PushedNote[] = [];
+
+	for (let i = 0; i < updates.length; i += batchSize) {
+		const batch = updates.slice(i, i + batchSize);
+		const batchNotes = await env.pushNotes(batch, true);
+		pushedNotes.push(...batchNotes);
+	}
 
 	// Server returns ALL notes, filter to just the ones we pushed
 	const serverPaths = new Set(pushedNotes.map((n) => n.path));

@@ -62,6 +62,8 @@ export class ObsidianSyncEnv implements SyncEnv {
 	private confirmPushCallback: (paths: string[]) => Promise<boolean>;
 	private saveSyncStateCallback: (state: SyncState) => Promise<void>;
 
+	pushBatchSize = 100;
+
 	constructor(options: ObsidianEnvOptions) {
 		this.app = options.app;
 		this.sdk = options.sdk;
