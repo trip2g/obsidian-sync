@@ -61,13 +61,16 @@ export async function executePlan(
 	}
 
 	// 1c. Check assets for unchanged files (may have missing assets from interrupted sync)
-	const unchangedServerPaths = plan.classifications
-		.filter((c) => c.action === "unchanged" && c.remoteHash !== null)
-		.map((c) => c.path);
-	if (unchangedServerPaths.length > 0) {
-		const assetResult = await downloadAssetsForNotes(env, unchangedServerPaths);
-		result.assetsDownloaded += assetResult.downloaded;
-		result.errors.push(...assetResult.errors);
+	// Only download assets if two-way sync is enabled
+	if (options.twoWaySync) {
+		const unchangedServerPaths = plan.classifications
+			.filter((c) => c.action === "unchanged" && c.remoteHash !== null)
+			.map((c) => c.path);
+		if (unchangedServerPaths.length > 0) {
+			const assetResult = await downloadAssetsForNotes(env, unchangedServerPaths);
+			result.assetsDownloaded += assetResult.downloaded;
+			result.errors.push(...assetResult.errors);
+		}
 	}
 
 	// Stryker disable next-line ConditionalExpression,EqualityOperator: optimization - handleServerDeleted handles empty array
@@ -456,6 +459,7 @@ async function syncAssets(
 	pushedNotes: PushedNote[],
 	twoWaySync: boolean
 ): Promise<AssetSyncResult> {
+	console.log(`[Trip2g Sync] syncAssets called with ${pushedNotes.length} notes, twoWaySync=${twoWaySync}`);
 	const result: AssetSyncResult = {
 		uploaded: 0,
 		downloaded: 0,
@@ -476,6 +480,7 @@ async function syncAssets(
 
 	// Classify each asset
 	for (const note of pushedNotes) {
+		console.log(`[Trip2g Sync] Processing assets for note: ${note.path}, assets count: ${note.assets?.length ?? 0}`);
 		if (!note.assets || note.assets.length === 0) {
 			continue;
 		}
@@ -483,6 +488,7 @@ async function syncAssets(
 		for (const asset of note.assets) {
 			// Resolve asset path relative to note
 			const localPath = await env.resolveAssetPath(asset.path, note.path);
+			console.log(`[Trip2g Sync] Asset "${asset.path}" -> localPath: ${localPath ?? "NOT FOUND"}, sha256Hash: ${asset.sha256Hash ?? "null"}`);
 			if (!localPath) {
 				// Cannot resolve asset path (e.g., file doesn't exist in Obsidian)
 				continue;
@@ -490,6 +496,7 @@ async function syncAssets(
 
 			// Asset not yet uploaded to server - need to upload
 			if (!asset.sha256Hash || !asset.absolutePath || !asset.url) {
+				console.log(`[Trip2g Sync] Queuing upload: ${asset.path} (no hash on server)`);
 				toUpload.push({ noteId: note.id, notePath: note.path, asset, localPath });
 				continue;
 			}
@@ -527,21 +534,25 @@ async function syncAssets(
 	}
 
 	// Upload new assets (sequentially to avoid overwhelming server)
-	// Deduplicate by localPath to avoid uploading same file multiple times
+	// Deduplicate by (noteId, localPath) - same file may need to be associated with multiple notes
+	console.log(`[Trip2g Sync] Assets to upload: ${toUpload.length}, to download: ${toDownload.length}, conflicts: ${conflicts.length}`);
 	if (toUpload.length > 0) {
 		const uniqueUploads = new Map<string, AssetToUpload>();
 		for (const item of toUpload) {
-			if (!uniqueUploads.has(item.localPath)) {
-				uniqueUploads.set(item.localPath, item);
+			const key = `${item.noteId}:${item.localPath}`;
+			if (!uniqueUploads.has(key)) {
+				uniqueUploads.set(key, item);
 			}
 		}
 
 		const deduped = Array.from(uniqueUploads.values());
 		const uploadTotal = deduped.length;
 		let uploadCurrent = 0;
+		console.log(`[Trip2g Sync] Uploading ${uploadTotal} unique (note, asset) pairs`);
 
 		for (const item of deduped) {
 			uploadCurrent++;
+			console.log(`[Trip2g Sync] Uploading asset ${uploadCurrent}/${uploadTotal}: ${item.localPath}`);
 			env.onProgress({ step: "upload_asset", current: uploadCurrent, total: uploadTotal, path: item.asset.path });
 
 			try {

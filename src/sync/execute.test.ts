@@ -585,6 +585,48 @@ describe("executePlan", () => {
 		});
 	});
 
+	describe("asset downloads with twoWaySync disabled", () => {
+		it("should NOT download assets for unchanged files when twoWaySync is false", async () => {
+			const env = createMockEnv({});
+			const plan = emptyPlan();
+
+			// Add unchanged file with remoteHash (exists on server)
+			const unchangedFile = makeClassification("note.md", "unchanged", "local_hash", "remote_hash");
+			plan.classifications = [unchangedFile];
+			plan.unchanged = 1;
+
+			await executePlan(env, plan, { twoWaySync: false });
+
+			// fetchNoteAssets should NOT be called when twoWaySync is disabled
+			expect(env.fetchNoteAssets).not.toHaveBeenCalled();
+			expect(env.downloadAsset).not.toHaveBeenCalled();
+		});
+
+		it("should download assets for unchanged files when twoWaySync is true", async () => {
+			const env = createMockEnv({});
+			// Mock fetchNoteAssets to return assets
+			(env.fetchNoteAssets as ReturnType<typeof vi.fn>).mockResolvedValue([
+				{
+					path: "note.md",
+					assets: [{ id: "img.png", url: "https://example.com/img.png", hash: "abc", absolutePath: "assets/img.png" }],
+				},
+			]);
+			// Asset doesn't exist locally
+			(env.fileExists as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+
+			const plan = emptyPlan();
+			const unchangedFile = makeClassification("note.md", "unchanged", "local_hash", "remote_hash");
+			plan.classifications = [unchangedFile];
+			plan.unchanged = 1;
+
+			await executePlan(env, plan, { twoWaySync: true });
+
+			// fetchNoteAssets SHOULD be called when twoWaySync is enabled
+			expect(env.fetchNoteAssets).toHaveBeenCalledWith(["note.md"]);
+			expect(env.downloadAsset).toHaveBeenCalled();
+		});
+	});
+
 	describe("edge cases and error handling", () => {
 		it("handles write errors during pull", async () => {
 			const env = createMockEnv({

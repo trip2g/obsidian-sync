@@ -358,6 +358,10 @@ export class ObsidianSyncEnv implements SyncEnv {
 	async downloadAsset(url: string): Promise<ArrayBuffer | null> {
 		try {
 			const response = await requestUrl({ url });
+			if (response.status >= 400) {
+				console.error(`[Trip2g Sync] HTTP ${response.status} downloading asset from ${url}`);
+				return null;
+			}
 			return response.arrayBuffer;
 		} catch (e) {
 			console.error(`[Trip2g Sync] Failed to download asset from ${url}:`, e);
