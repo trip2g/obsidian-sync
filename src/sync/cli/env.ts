@@ -279,19 +279,30 @@ export class NodeEnv implements SyncEnv {
 		}
 
 		try {
-			const result = await this.sdk.FetchNoteAssets({
-				filter: { paths },
+			// Use pushNotes with empty updates to get complete asset list from markdown parsing
+			// This returns assets from note.Assets (parsed from markdown) not just note_version_assets (DB)
+			const result = await this.sdk.PushNotes({
+				input: { updates: [] },
 			});
 
-			return result.notePaths.map((np) => ({
-				path: np.path,
-				assets: np.assetReplaces.map((a) => ({
-					id: a.id,
-					url: a.url,
-					hash: a.hash,
-					absolutePath: a.absolutePath,
-				})),
-			}));
+			if ("message" in result.pushNotes) {
+				console.error(`❌ Failed to fetch note assets: ${result.pushNotes.message}`);
+				return [];
+			}
+
+			const pathSet = new Set(paths);
+			return result.pushNotes.notes
+				.filter((note) => pathSet.has(note.path))
+				.map((note) => ({
+					path: note.path,
+					noteId: String(note.id), // version ID for upload
+					assets: note.assets.map((a) => ({
+						id: a.path, // relative path used as asset identifier
+						url: a.url,
+						hash: a.sha256Hash ?? "", // empty string for null (not uploaded)
+						absolutePath: a.absolutePath,
+					})),
+				}));
 		} catch (e) {
 			console.error(`❌ Failed to fetch note assets: ${e}`);
 			return [];
@@ -299,7 +310,7 @@ export class NodeEnv implements SyncEnv {
 	}
 
 	async uploadAsset(params: UploadAssetParams): Promise<boolean> {
-		const maxRetries = 3;
+		const maxRetries = 10;
 
 		for (let attempt = 1; attempt <= maxRetries; attempt++) {
 			try {
@@ -365,7 +376,8 @@ export class NodeEnv implements SyncEnv {
 		});
 
 		if (!response.ok) {
-			throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+			const body = await response.text();
+			throw new Error(`HTTP ${response.status}: ${response.statusText}\n${body}`);
 		}
 
 		const result = await response.json();

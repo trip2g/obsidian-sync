@@ -818,7 +818,18 @@ async function uploadMissingAssetsForNotes(
 			}
 
 			// Resolve local path
-			const localPath = asset.absolutePath?.replace(/^\//, "");
+			let localPath = asset.absolutePath?.replace(/^\//, "");
+
+			// If no absolutePath, resolve relative to note's folder
+			if (!localPath && asset.id) {
+				const noteDir = note.path.includes("/")
+					? note.path.substring(0, note.path.lastIndexOf("/"))
+					: "";
+				// Handle relative paths like "./image.png" or "image.png"
+				const assetPath = asset.id.replace(/^\.\//, "");
+				localPath = noteDir ? `${noteDir}/${assetPath}` : assetPath;
+			}
+
 			if (!localPath) {
 				continue;
 			}
@@ -829,10 +840,8 @@ async function uploadMissingAssetsForNotes(
 				continue;
 			}
 
-			// Need noteId - we'll use the path as a workaround since we don't have it
-			// The server should be able to find the note by path
 			toUpload.push({
-				noteId: note.path, // Using path as noteId placeholder
+				noteId: note.noteId, // version ID from server
 				notePath: note.path,
 				assetPath: asset.id,
 				localPath,
@@ -844,14 +853,11 @@ async function uploadMissingAssetsForNotes(
 		return result;
 	}
 
-	console.log(`[Trip2g Sync] Uploading ${toUpload.length} missing assets for unchanged notes`);
-
 	const total = toUpload.length;
 	let current = 0;
 
 	for (const item of toUpload) {
 		current++;
-		console.log(`[Trip2g Sync] Uploading missing asset ${current}/${total}: ${item.localPath}`);
 		env.onProgress({ step: "upload_asset", current, total, path: item.assetPath });
 
 		try {

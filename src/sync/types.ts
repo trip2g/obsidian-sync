@@ -112,6 +112,7 @@ export interface NoteContent {
 
 export interface NoteAssetInfo {
 	path: string;
+	noteId: string; // version ID for upload
 	assets: Array<{
 		/** Wikilink id (e.g., "image.png") */
 		id: string;

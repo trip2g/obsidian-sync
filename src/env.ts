@@ -256,20 +256,32 @@ export class ObsidianSyncEnv implements SyncEnv {
 			return [];
 		}
 
-		const result = await this.sdk.FetchNoteAssets({ filter: { paths } });
-		return result.notePaths.map((np) => ({
-			path: np.path,
-			assets: np.assetReplaces.map((a) => ({
-				id: a.id,
-				url: a.url,
-				hash: a.hash,
-				absolutePath: a.absolutePath,
-			})),
-		}));
+		// Use pushNotes with empty updates to get complete asset list from markdown parsing
+		// This returns assets from note.Assets (parsed from markdown) not just note_version_assets (DB)
+		const result = await this.sdk.PushNotes({ input: { updates: [] } });
+
+		if ("message" in result.pushNotes) {
+			console.error(`[Trip2g Sync] Failed to fetch note assets: ${result.pushNotes.message}`);
+			return [];
+		}
+
+		const pathSet = new Set(paths);
+		return result.pushNotes.notes
+			.filter((note) => pathSet.has(note.path))
+			.map((note) => ({
+				path: note.path,
+				noteId: String(note.id), // version ID for upload
+				assets: note.assets.map((a) => ({
+					id: a.path, // relative path used as asset identifier
+					url: a.url,
+					hash: a.sha256Hash ?? "", // empty string for null (not uploaded)
+					absolutePath: a.absolutePath,
+				})),
+			}));
 	}
 
 	async uploadAsset(params: UploadAssetParams): Promise<boolean> {
-		const maxRetries = 3;
+		const maxRetries = 10;
 
 		for (let attempt = 1; attempt <= maxRetries; attempt++) {
 			try {

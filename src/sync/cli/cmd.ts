@@ -247,15 +247,14 @@ async function main(): Promise<void> {
 		filteredPlan.localDeleted.length +
 		filteredPlan.serverDeleted.length;
 
-	if (totalActions === 0) {
-		// Still save sync state to establish baseline for unchanged files
-		await env.saveSyncState(env.getSyncState());
+	// Always execute plan - even when no note changes, we need to check for missing assets
+	console.log("\n🚀 Executing sync...");
+	const result = await executePlan(env, filteredPlan, { twoWaySync: args.twoWaySync });
+
+	if (totalActions === 0 && result.assetsUploaded === 0 && result.assetsDownloaded === 0) {
 		console.log("\n✅ Everything is up to date!");
 		return;
 	}
-
-	console.log("\n🚀 Executing sync...");
-	const result = await executePlan(env, filteredPlan, { twoWaySync: args.twoWaySync });
 
 	// 5. Print results
 	console.log("\n" + "=".repeat(60));
