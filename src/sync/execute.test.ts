@@ -588,6 +588,14 @@ describe("executePlan", () => {
 	describe("asset downloads with twoWaySync disabled", () => {
 		it("should NOT download assets for unchanged files when twoWaySync is false", async () => {
 			const env = createMockEnv({});
+			// Mock fetchNoteAssets to return assets with hash (already uploaded)
+			(env.fetchNoteAssets as ReturnType<typeof vi.fn>).mockResolvedValue([
+				{
+					path: "note.md",
+					assets: [{ id: "img.png", url: "https://example.com/img.png", hash: "abc", absolutePath: "assets/img.png" }],
+				},
+			]);
+
 			const plan = emptyPlan();
 
 			// Add unchanged file with remoteHash (exists on server)
@@ -597,8 +605,8 @@ describe("executePlan", () => {
 
 			await executePlan(env, plan, { twoWaySync: false });
 
-			// fetchNoteAssets should NOT be called when twoWaySync is disabled
-			expect(env.fetchNoteAssets).not.toHaveBeenCalled();
+			// fetchNoteAssets IS called (to check for missing uploads), but downloadAsset should NOT be called
+			expect(env.fetchNoteAssets).toHaveBeenCalled();
 			expect(env.downloadAsset).not.toHaveBeenCalled();
 		});
 
@@ -624,6 +632,72 @@ describe("executePlan", () => {
 			// fetchNoteAssets SHOULD be called when twoWaySync is enabled
 			expect(env.fetchNoteAssets).toHaveBeenCalledWith(["note.md"]);
 			expect(env.downloadAsset).toHaveBeenCalled();
+		});
+	});
+
+	describe("asset upload for unchanged notes with missing assets", () => {
+		it("should upload missing assets for unchanged notes", async () => {
+			const syncState: SyncState = { files: { "note.md": "hash123" } };
+			const env = createMockEnv({ syncState });
+
+			// Note is unchanged (localHash === remoteHash)
+			const plan = emptyPlan();
+			const unchangedFile = makeClassification("note.md", "unchanged", "hash123", "hash123");
+			plan.classifications = [unchangedFile];
+			plan.unchanged = 1;
+
+			// Server returns note with asset that has no sha256Hash (not uploaded yet)
+			(env.fetchNoteAssets as ReturnType<typeof vi.fn>).mockResolvedValue([
+				{
+					path: "note.md",
+					assets: [
+						{
+							id: "image.png",
+							url: null, // no URL means not uploaded
+							hash: null, // no hash means not uploaded
+							absolutePath: "image.png",
+						},
+					],
+				},
+			]);
+
+			// Asset exists locally
+			(env.fileExists as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+
+			await executePlan(env, plan, { twoWaySync: false });
+
+			// Should have called uploadAsset for the missing asset
+			expect(env.uploadAsset).toHaveBeenCalled();
+		});
+
+		it("should NOT upload assets that already have sha256Hash", async () => {
+			const syncState: SyncState = { files: { "note.md": "hash123" } };
+			const env = createMockEnv({ syncState });
+
+			const plan = emptyPlan();
+			const unchangedFile = makeClassification("note.md", "unchanged", "hash123", "hash123");
+			plan.classifications = [unchangedFile];
+			plan.unchanged = 1;
+
+			// Server returns note with asset that HAS sha256Hash (already uploaded)
+			(env.fetchNoteAssets as ReturnType<typeof vi.fn>).mockResolvedValue([
+				{
+					path: "note.md",
+					assets: [
+						{
+							id: "image.png",
+							url: "https://example.com/image.png",
+							hash: "abc123",
+							absolutePath: "image.png",
+						},
+					],
+				},
+			]);
+
+			await executePlan(env, plan, { twoWaySync: false });
+
+			// Should NOT upload - asset already exists on server
+			expect(env.uploadAsset).not.toHaveBeenCalled();
 		});
 	});
 

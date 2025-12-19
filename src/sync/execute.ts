@@ -115,6 +115,17 @@ export async function executePlan(
 		result.errors.push(...assetResult.errors);
 	}
 
+	// 6b. Check and upload missing assets for unchanged notes
+	// This handles the case where asset upload failed on previous sync
+	const unchangedPaths = plan.classifications
+		.filter((c) => c.action === "unchanged" && c.remoteHash !== null)
+		.map((c) => c.path);
+	if (unchangedPaths.length > 0) {
+		const assetResult = await uploadMissingAssetsForNotes(env, unchangedPaths);
+		result.assetsUploaded += assetResult.uploaded;
+		result.errors.push(...assetResult.errors);
+	}
+
 	// 7. Commit all changes
 	if (result.pushed > 0 || result.assetsUploaded > 0) {
 		await env.commitNotes();
@@ -768,6 +779,101 @@ async function downloadAssetsForNotes(
 			result.downloaded++;
 		} catch (e) {
 			result.errors.push(`Failed to download asset ${absolutePath}: ${e}`);
+		}
+	}
+
+	return result;
+}
+
+// ============ Asset Upload for Unchanged Notes ============
+
+/**
+ * Upload missing assets for unchanged notes.
+ * This handles the case where asset upload failed on a previous sync.
+ */
+async function uploadMissingAssetsForNotes(
+	env: SyncEnv,
+	notePaths: string[]
+): Promise<{ uploaded: number; errors: string[] }> {
+	const result = { uploaded: 0, errors: [] as string[] };
+
+	if (notePaths.length === 0) {
+		return result;
+	}
+
+	// Fetch asset info for notes
+	const noteAssets = await env.fetchNoteAssets(notePaths);
+	if (noteAssets.length === 0) {
+		return result;
+	}
+
+	// Collect assets that need to be uploaded (hash is null = not uploaded yet)
+	const toUpload: Array<{ noteId: string; notePath: string; assetPath: string; localPath: string }> = [];
+
+	for (const note of noteAssets) {
+		for (const asset of note.assets) {
+			// Skip assets that are already uploaded (have hash)
+			if (asset.hash) {
+				continue;
+			}
+
+			// Resolve local path
+			const localPath = asset.absolutePath?.replace(/^\//, "");
+			if (!localPath) {
+				continue;
+			}
+
+			// Check if file exists locally
+			const exists = await env.fileExists(localPath);
+			if (!exists) {
+				continue;
+			}
+
+			// Need noteId - we'll use the path as a workaround since we don't have it
+			// The server should be able to find the note by path
+			toUpload.push({
+				noteId: note.path, // Using path as noteId placeholder
+				notePath: note.path,
+				assetPath: asset.id,
+				localPath,
+			});
+		}
+	}
+
+	if (toUpload.length === 0) {
+		return result;
+	}
+
+	console.log(`[Trip2g Sync] Uploading ${toUpload.length} missing assets for unchanged notes`);
+
+	const total = toUpload.length;
+	let current = 0;
+
+	for (const item of toUpload) {
+		current++;
+		console.log(`[Trip2g Sync] Uploading missing asset ${current}/${total}: ${item.localPath}`);
+		env.onProgress({ step: "upload_asset", current, total, path: item.assetPath });
+
+		try {
+			const localData = await env.readBinaryFile(item.localPath);
+			const localHash = await env.computeBinaryHash(localData);
+			const blob = new Blob([localData]);
+			const fileName = item.localPath.substring(item.localPath.lastIndexOf("/") + 1);
+
+			const success = await env.uploadAsset({
+				noteId: item.noteId,
+				blob,
+				fileName,
+				relativePath: item.assetPath,
+				absolutePath: item.localPath,
+				sha256Hash: localHash,
+			});
+
+			if (success) {
+				result.uploaded++;
+			}
+		} catch (e) {
+			result.errors.push(`Failed to upload missing asset ${item.assetPath}: ${e}`);
 		}
 	}
 
