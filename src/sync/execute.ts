@@ -807,16 +807,13 @@ async function uploadMissingAssetsForNotes(
 		return result;
 	}
 
-	// Collect assets that need to be uploaded (hash is null = not uploaded yet)
-	const toUpload: Array<{ noteId: string; notePath: string; assetPath: string; localPath: string }> = [];
+	// Collect assets that need to be uploaded:
+	// - hash is null = not uploaded yet
+	// - hash differs from local = local file was changed
+	const toUpload: Array<{ noteId: string; notePath: string; assetPath: string; localPath: string; localHash: string }> = [];
 
 	for (const note of noteAssets) {
 		for (const asset of note.assets) {
-			// Skip assets that are already uploaded (have hash)
-			if (asset.hash) {
-				continue;
-			}
-
 			// Resolve local path
 			let localPath = asset.absolutePath?.replace(/^\//, "");
 
@@ -840,12 +837,27 @@ async function uploadMissingAssetsForNotes(
 				continue;
 			}
 
-			toUpload.push({
-				noteId: note.noteId, // version ID from server
-				notePath: note.path,
-				assetPath: asset.id,
-				localPath,
-			});
+			// Compute local hash to compare with server hash
+			try {
+				const localData = await env.readBinaryFile(localPath);
+				const localHash = await env.computeBinaryHash(localData);
+
+				// Skip if hashes match (asset is already synced)
+				if (localHash === asset.hash) {
+					continue;
+				}
+
+				// Asset needs upload: either not uploaded (hash null) or changed (hash differs)
+				toUpload.push({
+					noteId: note.noteId, // version ID from server
+					notePath: note.path,
+					assetPath: asset.id,
+					localPath,
+					localHash,
+				});
+			} catch (e) {
+				result.errors.push(`Failed to read local asset ${localPath}: ${e}`);
+			}
 		}
 	}
 
@@ -862,7 +874,6 @@ async function uploadMissingAssetsForNotes(
 
 		try {
 			const localData = await env.readBinaryFile(item.localPath);
-			const localHash = await env.computeBinaryHash(localData);
 			const blob = new Blob([localData]);
 			const fileName = item.localPath.substring(item.localPath.lastIndexOf("/") + 1);
 
@@ -872,14 +883,14 @@ async function uploadMissingAssetsForNotes(
 				fileName,
 				relativePath: item.assetPath,
 				absolutePath: item.localPath,
-				sha256Hash: localHash,
+				sha256Hash: item.localHash, // Use pre-computed hash
 			});
 
 			if (success) {
 				result.uploaded++;
 			}
 		} catch (e) {
-			result.errors.push(`Failed to upload missing asset ${item.assetPath}: ${e}`);
+			result.errors.push(`Failed to upload asset ${item.assetPath}: ${e}`);
 		}
 	}
 

@@ -670,7 +670,7 @@ describe("executePlan", () => {
 			expect(env.uploadAsset).toHaveBeenCalled();
 		});
 
-		it("should NOT upload assets that already have sha256Hash", async () => {
+		it("should NOT upload assets that already have sha256Hash and match local", async () => {
 			const syncState: SyncState = { files: { "note.md": "hash123" } };
 			const env = createMockEnv({ syncState });
 
@@ -683,6 +683,7 @@ describe("executePlan", () => {
 			(env.fetchNoteAssets as ReturnType<typeof vi.fn>).mockResolvedValue([
 				{
 					path: "note.md",
+					noteId: "note_version_1",
 					assets: [
 						{
 							id: "image.png",
@@ -694,10 +695,63 @@ describe("executePlan", () => {
 				},
 			]);
 
+			// Asset exists locally with SAME hash
+			(env.fileExists as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+			(env.computeBinaryHash as ReturnType<typeof vi.fn>).mockResolvedValue("abc123");
+
 			await executePlan(env, plan, { twoWaySync: false });
 
-			// Should NOT upload - asset already exists on server
+			// Should NOT upload - asset already exists on server with same hash
 			expect(env.uploadAsset).not.toHaveBeenCalled();
+		});
+
+		it("should upload assets when local file changed but note unchanged", async () => {
+			// This is the bug: when only asset changes (e.g., CSS file), but the note
+			// referencing it (e.g., HTML page) stays the same, the asset change is not detected.
+			const syncState: SyncState = { files: { "_layouts/custom/page.html": "note_hash" } };
+			const binaryContents: Record<string, ArrayBuffer> = {
+				"_layouts/custom/styles.css": new TextEncoder().encode("/* updated CSS */").buffer,
+			};
+			const env = createMockEnv({ syncState, binaryContents });
+
+			const plan = emptyPlan();
+			const unchangedFile = makeClassification("_layouts/custom/page.html", "unchanged", "note_hash", "note_hash");
+			plan.classifications = [unchangedFile];
+			plan.unchanged = 1;
+
+			// Server returns note with asset that HAS sha256Hash (was uploaded before)
+			(env.fetchNoteAssets as ReturnType<typeof vi.fn>).mockResolvedValue([
+				{
+					path: "_layouts/custom/page.html",
+					noteId: "note_version_123",
+					assets: [
+						{
+							id: "styles.css",
+							url: "https://example.com/old-styles.css",
+							hash: "old_css_hash", // <-- OLD hash on server
+							absolutePath: "_layouts/custom/styles.css",
+						},
+					],
+				},
+			]);
+
+			// Asset exists locally
+			(env.fileExists as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+			// Local file has DIFFERENT hash (user edited the CSS)
+			(env.computeBinaryHash as ReturnType<typeof vi.fn>).mockResolvedValue("new_css_hash");
+
+			await executePlan(env, plan, { twoWaySync: false });
+
+			// BUG: Currently this fails because uploadMissingAssetsForNotes
+			// only checks if hash exists, not if it differs from local
+			expect(env.uploadAsset).toHaveBeenCalled();
+			expect(env.uploadAsset).toHaveBeenCalledWith(
+				expect.objectContaining({
+					noteId: "note_version_123",
+					relativePath: "styles.css",
+					sha256Hash: "new_css_hash",
+				})
+			);
 		});
 	});
 
