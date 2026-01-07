@@ -5,6 +5,7 @@
 
 import { App, TFile, TFolder, requestUrl } from "obsidian";
 import type { Sdk } from "./graphql";
+import { isAlwaysPublishable } from "./sync/utils";
 import type {
 	SyncEnv,
 	SyncState,
@@ -196,7 +197,7 @@ export class ObsidianSyncEnv implements SyncEnv {
 		// Defense in depth: verify all notes have publish field if configured
 		if (this.publishField) {
 			for (const update of updates) {
-				if (!this.hasPublishFieldInContent(update.content)) {
+				if (!this.hasPublishFieldInContent(update.content, update.path)) {
 					throw new Error(
 						`[Security] Attempted to push note "${update.path}" without publish field "${this.publishField}". ` +
 							`This is a bug in the sync logic - please report it.`
@@ -491,9 +492,15 @@ export class ObsidianSyncEnv implements SyncEnv {
 	/**
 	 * Check if content has any of the publish fields with a truthy value in frontmatter.
 	 * Parses YAML frontmatter from the content string.
+	 * 
+	 * Special case: Files in special directories (e.g., _layouts/*.html) are always
+	 * considered publishable because they are system files.
 	 */
-	private hasPublishFieldInContent(content: string): boolean {
+	private hasPublishFieldInContent(content: string, path: string): boolean {
 		if (!this.publishField) return true;
+
+		// Check if file is always publishable (e.g., _layouts/*.html)
+		if (isAlwaysPublishable(path)) return true;
 
 		// Extract frontmatter
 		if (!content.startsWith("---")) return false;

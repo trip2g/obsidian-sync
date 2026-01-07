@@ -9,6 +9,7 @@ import { classifySync } from "./sync/classify";
 import { filterPlan } from "./sync/filter";
 import { executePlan } from "./sync/execute";
 import { ObsidianSyncEnv } from "./env";
+import { isAlwaysPublishable } from "./sync/utils";
 import type {
 	PluginSettings,
 	SyncDir,
@@ -238,14 +239,14 @@ export default class Trip2gSyncPlugin extends Plugin {
 	 * Check if a file has any of the frontmatter fields with a truthy value.
 	 * Supports comma-separated list of field names (e.g., "publish, public").
 	 * 
-	 * Special case: HTML files are always considered publishable because they
-	 * don't have frontmatter (e.g., _layouts/*.html templates).
+	 * Special case: Files in special directories (e.g., _layouts/*.html) are always
+	 * considered publishable because they are system files.
 	 */
 	private hasPublishField(file: TFile, publishFields: string): boolean {
 		if (!publishFields) return true; // No filter = all files are publishable
 
-		// HTML files don't have frontmatter, always consider them publishable
-		if (file.extension === "html") return true;
+		// Check if file is always publishable (e.g., _layouts/*.html)
+		if (isAlwaysPublishable(file.path)) return true;
 
 		const cache = this.app.metadataCache.getFileCache(file);
 		const frontmatter = cache?.frontmatter;

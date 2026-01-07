@@ -4,6 +4,7 @@
  */
 
 import { directoryOpen, fileSave } from "browser-fs-access";
+import { isAlwaysPublishable } from "../utils";
 import type {
 	SyncEnv,
 	SyncState,
@@ -368,7 +369,7 @@ export class BrowserEnv implements SyncEnv {
 		// Defense in depth: verify all notes have publish field if configured
 		if (this.options.publishField) {
 			for (const update of updates) {
-				if (!this.hasPublishFieldInContent(update.content)) {
+				if (!this.hasPublishFieldInContent(update.content, update.path)) {
 					throw new Error(
 						`[Security] Attempted to push note "${update.path}" without publish field "${this.options.publishField}". ` +
 							`This is a bug in the sync logic - please report it.`
@@ -902,8 +903,11 @@ export class BrowserEnv implements SyncEnv {
 		return true;
 	}
 
-	private hasPublishFieldInContent(content: string): boolean {
+	private hasPublishFieldInContent(content: string, path: string): boolean {
 		if (!this.options.publishField) return true;
+
+		// Check if file is always publishable (e.g., _layouts/*.html)
+		if (isAlwaysPublishable(path)) return true;
 
 		if (!content.startsWith("---")) return false;
 		const endIndex = content.indexOf("\n---", 3);

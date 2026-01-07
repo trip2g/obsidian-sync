@@ -1,12 +1,11 @@
 /**
- * Node.js implementation of SyncEnv for CLI usage.
- * Uses generated GraphQL SDK from src/graphql.ts
+ * CLI implementation of SyncEnv using Node.js fs APIs.
  */
 
-/* eslint-disable import/no-nodejs-modules */
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
+import { isAlwaysPublishable } from "../utils";
 import type {
 	SyncEnv,
 	SyncState,
@@ -192,7 +191,7 @@ export class NodeEnv implements SyncEnv {
 		// Defense in depth: verify all notes have publish field if configured
 		if (this.publishField) {
 			for (const update of updates) {
-				if (!this.hasPublishFieldInContent(update.content)) {
+				if (!this.hasPublishFieldInContent(update.content, update.path)) {
 					throw new Error(
 						`[Security] Attempted to push note "${update.path}" without publish field "${this.publishField}". ` +
 							`This is a bug in the sync logic - please report it.`
@@ -527,8 +526,11 @@ export class NodeEnv implements SyncEnv {
 	 * Check if content has any of the publish fields with a truthy value in frontmatter.
 	 * Parses YAML frontmatter from the content string.
 	 */
-	private hasPublishFieldInContent(content: string): boolean {
+	private hasPublishFieldInContent(content: string, path: string): boolean {
 		if (!this.publishField) return true;
+
+		// Check if file is always publishable (e.g., _layouts/*.html)
+		if (isAlwaysPublishable(path)) return true;
 
 		// Extract frontmatter
 		if (!content.startsWith("---")) return false;
