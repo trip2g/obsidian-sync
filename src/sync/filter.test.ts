@@ -274,4 +274,48 @@ describe("filterPlan", () => {
 			expect(filtered.localOnly).toHaveLength(1);
 		});
 	});
+
+	describe("HTML files without frontmatter", () => {
+		// Simulate hasPublishFields that returns false for HTML files
+		// because they don't have frontmatter
+		const hasPublishFields = (path: string) => {
+			// HTML files like _layouts/*.html don't have frontmatter
+			if (path.endsWith(".html")) return false;
+			// MD files with publish field
+			return path.startsWith("public/");
+		};
+
+		it("filters out HTML files from push when hasPublishFields returns false", () => {
+			const plan = makePlan([
+				makeClassification("public/note.md", "push"),
+				makeClassification("_layouts/base.html", "push"),
+			]);
+			const filtered = filterPlan(plan, { twoWaySync: true, hasPublishFields });
+
+			expect(filtered.pushes).toHaveLength(1);
+			expect(filtered.pushes[0].path).toBe("public/note.md");
+		});
+
+		it("filters out HTML files from local_only when hasPublishFields returns false", () => {
+			const plan = makePlan([
+				makeClassification("public/new.md", "local_only"),
+				makeClassification("_layouts/new.html", "local_only"),
+			]);
+			const filtered = filterPlan(plan, { twoWaySync: true, hasPublishFields });
+
+			expect(filtered.localOnly).toHaveLength(1);
+			expect(filtered.localOnly[0].path).toBe("public/new.md");
+		});
+
+		it("allows HTML files to be unchanged even without publish fields", () => {
+			const plan = makePlan([
+				makeClassification("public/note.md", "unchanged"),
+				makeClassification("_layouts/base.html", "unchanged"),
+			]);
+			const filtered = filterPlan(plan, { twoWaySync: true, hasPublishFields });
+
+			// unchanged files are not filtered by publishFields
+			expect(filtered.unchanged).toBe(2);
+		});
+	});
 });
