@@ -9,7 +9,8 @@
  */
 export function isAlwaysPublishable(path: string): boolean {
 	// HTML files from _layouts/ are always publishable (templates/layouts)
-	if (path.startsWith("_layouts/") && path.endsWith(".html")) {
+	// Includes both .html and .html.json (JSON layout format)
+	if (path.startsWith("_layouts/") && (path.endsWith(".html") || path.endsWith(".html.json"))) {
 		return true;
 	}
 

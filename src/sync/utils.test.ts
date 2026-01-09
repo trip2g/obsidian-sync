@@ -13,6 +13,12 @@ describe("isAlwaysPublishable", () => {
 		expect(isAlwaysPublishable("_layouts/nested/deep/template.html")).toBe(true);
 	});
 
+	it("returns true for JSON layout files (.html.json) in _layouts/", () => {
+		expect(isAlwaysPublishable("_layouts/page.html.json")).toBe(true);
+		expect(isAlwaysPublishable("_layouts/custom/landing.html.json")).toBe(true);
+		expect(isAlwaysPublishable("_layouts/nested/deep/template.html.json")).toBe(true);
+	});
+
 	it("returns false for non-HTML files in _layouts/", () => {
 		expect(isAlwaysPublishable("_layouts/README.md")).toBe(false);
 		expect(isAlwaysPublishable("_layouts/style.css")).toBe(false);

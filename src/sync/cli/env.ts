@@ -97,7 +97,7 @@ export class NodeEnv implements SyncEnv {
 					walk(fullPath);
 				} else if (entry.isFile()) {
 					const ext = path.extname(entry.name).toLowerCase();
-					if (ext === ".md" || ext === ".html") {
+					if (ext === ".md" || ext === ".html" || entry.name.endsWith(".html.json")) {
 						const stat = fs.statSync(fullPath);
 						const relPath = path.relative(this.folder, fullPath);
 						files.push({
