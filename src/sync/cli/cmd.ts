@@ -17,6 +17,7 @@ import { executePlan } from "../execute";
 
 interface CliArgs {
 	folder: string;
+	prefix: string;
 	apiUrl: string;
 	apiKey: string;
 	twoWaySync: boolean;
@@ -30,6 +31,7 @@ function parseArgs(): CliArgs {
 	const args = process.argv.slice(2);
 	const result: CliArgs = {
 		folder: "",
+		prefix: "",
 		apiUrl: process.env.ENDPOINT || "http://localhost:8081/graphql",
 		apiKey: process.env.API_KEY || "",
 		twoWaySync: false,
@@ -39,22 +41,20 @@ function parseArgs(): CliArgs {
 		meta: {},
 	};
 
+	const positionalArgs: string[] = [];
+
 	for (let i = 0; i < args.length; i++) {
 		let arg = args[i];
 		let value: string | undefined;
 
 		// Handle --arg=value syntax
-		if (arg.includes("=")) {
+		if (arg.includes("=") && arg.startsWith("-")) {
 			const eqIndex = arg.indexOf("=");
 			value = arg.substring(eqIndex + 1);
 			arg = arg.substring(0, eqIndex);
 		}
 
 		switch (arg) {
-			case "--folder":
-			case "-f":
-				result.folder = value ?? args[++i];
-				break;
 			case "--api-url":
 			case "-u":
 				result.apiUrl = value ?? args[++i];
@@ -106,11 +106,19 @@ function parseArgs(): CliArgs {
 				process.exit(0);
 				break;
 			default:
-				// First positional arg is folder
-				if (!result.folder && !arg.startsWith("-")) {
-					result.folder = arg;
+				// Collect positional args
+				if (!arg.startsWith("-")) {
+					positionalArgs.push(arg);
 				}
 		}
+	}
+
+	// Assign positional args: folder [prefix]
+	if (positionalArgs.length >= 1) {
+		result.folder = positionalArgs[0];
+	}
+	if (positionalArgs.length >= 2) {
+		result.prefix = positionalArgs[1];
 	}
 
 	return result;
@@ -121,10 +129,13 @@ function printHelp(): void {
 obsidian-sync CLI
 
 Usage:
-  npx ts-node src/sync/cli/cmd.ts [options] [folder]
+  npx ts-node src/sync/cli/cmd.ts [options] <folder> [prefix]
+
+Arguments:
+  folder                   Local folder to sync (required)
+  prefix                   Remote path prefix (optional, for multi-repo setups)
 
 Options:
-  -f, --folder <path>      Folder to sync (required)
   -u, --api-url <url>      GraphQL endpoint (default: $ENDPOINT or http://localhost:8081/graphql)
   -k, --api-key <key>      API key (default: $API_KEY)
   -2, --two-way            Enable two-way sync (pull changes from server)
@@ -135,7 +146,6 @@ Options:
                            - skip:   Skip conflicting files
                            - fail:   Exit with error on first conflict
   -m, --meta <key=value>   Add/override frontmatter field for all files (can be repeated)
-                           Useful for multi-repo setups with different subgraphs
   -v, --verbose            Verbose output
   -n, --dry-run            Show what would be done without making changes
   -h, --help               Show this help
@@ -145,21 +155,16 @@ Environment Variables:
   API_KEY     API key for authentication
 
 Examples:
-  # Push-only sync (like push_notes.py)
-  npx ts-node src/sync/cli/cmd.ts --folder ./vault --api-key xxx
+  # Push-only sync
+  trip2g-sync ./vault --api-key xxx
 
   # Two-way sync
-  npx ts-node src/sync/cli/cmd.ts --folder ./vault --api-key xxx --two-way
+  trip2g-sync ./vault --api-key xxx --two-way
 
-  # Two-way sync, fail on conflicts (for CI)
-  npx ts-node src/sync/cli/cmd.ts --folder ./vault --api-key xxx --two-way -c fail
-
-  # Dry run to see what would happen
-  npx ts-node src/sync/cli/cmd.ts --folder ./vault --api-key xxx --dry-run
-
-  # Multi-repo setup: each repo pushes with different subgraph
-  npx ts-node src/sync/cli/cmd.ts --folder ./docs --meta subgraph=docs
-  npx ts-node src/sync/cli/cmd.ts --folder ./blog --meta subgraph=blog --meta source=repo2
+  # Multi-repo setup: each repo pushes to different folder with different meta
+  trip2g-sync ./docs docs --meta subgraph=docs
+  trip2g-sync ./blog blog --meta subgraph=blog
+  trip2g-sync ./wiki wiki --meta subgraph=team-wiki
 `);
 }
 
@@ -178,10 +183,18 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 
+	if (args.prefix && args.twoWaySync) {
+		console.error("❌ Error: prefix is not supported with --two-way sync");
+		process.exit(1);
+	}
+
 	console.log("=".repeat(60));
 	console.log("obsidian-sync CLI");
 	console.log("=".repeat(60));
 	console.log(`Folder:     ${args.folder}`);
+	if (args.prefix) {
+		console.log(`Prefix:     ${args.prefix}`);
+	}
 	console.log(`API URL:    ${args.apiUrl}`);
 	console.log(`Two-way:    ${args.twoWaySync}`);
 	console.log(`Conflicts:  ${args.conflictResolution}`);
@@ -194,6 +207,7 @@ async function main(): Promise<void> {
 	// Create env
 	const env = new NodeEnv({
 		folder: args.folder,
+		prefix: args.prefix,
 		apiUrl: args.apiUrl,
 		apiKey: args.apiKey,
 		twoWaySync: args.twoWaySync,

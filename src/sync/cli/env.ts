@@ -29,6 +29,8 @@ export type CliConflictResolution = "local" | "remote" | "skip" | "fail";
 
 export interface NodeEnvOptions extends ClientOptions {
 	folder: string;
+	/** Remote path prefix for multi-repo setups (e.g., "docs" -> files uploaded as docs/file.md) */
+	prefix?: string;
 	twoWaySync: boolean;
 	verbose?: boolean;
 	conflictResolution?: CliConflictResolution;
@@ -41,6 +43,7 @@ const STATE_FILE = ".sync-state.json";
 
 export class NodeEnv implements SyncEnv {
 	private folder: string;
+	private prefix: string;
 	private twoWaySync: boolean;
 	private verbose: boolean;
 	private conflictResolution: CliConflictResolution;
@@ -55,6 +58,7 @@ export class NodeEnv implements SyncEnv {
 
 	constructor(options: NodeEnvOptions) {
 		this.folder = path.resolve(options.folder);
+		this.prefix = options.prefix ? options.prefix.replace(/\/$/, "") : "";
 		this.twoWaySync = options.twoWaySync;
 		this.verbose = options.verbose ?? false;
 		this.conflictResolution = options.conflictResolution ?? "local";
@@ -64,6 +68,25 @@ export class NodeEnv implements SyncEnv {
 		this.apiUrl = options.apiUrl;
 		this.apiKey = options.apiKey;
 		this.sdk = createClient({ apiUrl: options.apiUrl, apiKey: options.apiKey });
+	}
+
+	/** Add prefix to local path for remote path */
+	private toRemotePath(localPath: string): string {
+		return this.prefix ? `${this.prefix}/${localPath}` : localPath;
+	}
+
+	/** Remove prefix from remote path to get local path */
+	private toLocalPath(remotePath: string): string {
+		if (this.prefix && remotePath.startsWith(this.prefix + "/")) {
+			return remotePath.substring(this.prefix.length + 1);
+		}
+		return remotePath;
+	}
+
+	/** Check if remote path belongs to this prefix */
+	private matchesPrefix(remotePath: string): boolean {
+		if (!this.prefix) return true;
+		return remotePath.startsWith(this.prefix + "/");
 	}
 
 	private loadSyncState(): SyncState {
@@ -105,7 +128,8 @@ export class NodeEnv implements SyncEnv {
 						const stat = fs.statSync(fullPath);
 						const relPath = path.relative(this.folder, fullPath);
 						files.push({
-							path: relPath,
+							// Use remote path with prefix for sync comparison
+							path: this.toRemotePath(relPath),
 							mtime: stat.mtimeMs,
 						});
 					}
@@ -119,10 +143,13 @@ export class NodeEnv implements SyncEnv {
 	async getServerHashes(): Promise<ServerHash[]> {
 		try {
 			const result = await this.sdk.FetchServerHashes();
-			return result.notePaths.map((np) => ({
-				path: np.path,
-				hash: np.hash,
-			}));
+			// Filter by prefix if set
+			return result.notePaths
+				.filter((np) => this.matchesPrefix(np.path))
+				.map((np) => ({
+					path: np.path,
+					hash: np.hash,
+				}));
 		} catch (e) {
 			console.error(`❌ Failed to fetch server hashes: ${e}`);
 			return [];
@@ -142,7 +169,9 @@ export class NodeEnv implements SyncEnv {
 	}
 
 	async readFileContent(filePath: string): Promise<string> {
-		const fullPath = path.join(this.folder, filePath);
+		// filePath is remote path, convert to local
+		const localPath = this.toLocalPath(filePath);
+		const fullPath = path.join(this.folder, localPath);
 		return fs.readFileSync(fullPath, "utf-8");
 	}
 
