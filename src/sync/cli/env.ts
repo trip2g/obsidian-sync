@@ -33,6 +33,8 @@ export interface NodeEnvOptions extends ClientOptions {
 	verbose?: boolean;
 	conflictResolution?: CliConflictResolution;
 	publishField?: string;
+	/** Additional frontmatter fields to add/override on all pushed files */
+	meta?: Record<string, string>;
 }
 
 const STATE_FILE = ".sync-state.json";
@@ -43,6 +45,7 @@ export class NodeEnv implements SyncEnv {
 	private verbose: boolean;
 	private conflictResolution: CliConflictResolution;
 	private publishField: string;
+	private meta: Record<string, string>;
 	private syncState: SyncState;
 	private sdk: Sdk;
 	private apiUrl: string;
@@ -56,6 +59,7 @@ export class NodeEnv implements SyncEnv {
 		this.verbose = options.verbose ?? false;
 		this.conflictResolution = options.conflictResolution ?? "local";
 		this.publishField = options.publishField ?? "";
+		this.meta = options.meta ?? {};
 		this.syncState = this.loadSyncState();
 		this.apiUrl = options.apiUrl;
 		this.apiKey = options.apiKey;
@@ -188,9 +192,15 @@ export class NodeEnv implements SyncEnv {
 			return [];
 		}
 
+		// Apply meta injection if configured
+		const processedUpdates = updates.map((u) => ({
+			path: u.path,
+			content: this.injectMeta(u.content),
+		}));
+
 		// Defense in depth: verify all notes have publish field if configured
 		if (this.publishField) {
-			for (const update of updates) {
+			for (const update of processedUpdates) {
 				if (!this.hasPublishFieldInContent(update.content, update.path)) {
 					throw new Error(
 						`[Security] Attempted to push note "${update.path}" without publish field "${this.publishField}". ` +
@@ -203,7 +213,7 @@ export class NodeEnv implements SyncEnv {
 		try {
 			const result = await this.sdk.PushNotes({
 				input: {
-					updates: updates.map((u) => ({
+					updates: processedUpdates.map((u) => ({
 						path: u.path,
 						content: u.content,
 					})),
@@ -520,6 +530,49 @@ export class NodeEnv implements SyncEnv {
 		// Auto-confirm in CLI mode
 		console.log(`📤 Pushing ${paths.length} files...`);
 		return true;
+	}
+
+	/**
+	 * Inject meta fields into frontmatter.
+	 * - If no meta configured, returns content unchanged.
+	 * - If frontmatter exists, adds/updates fields.
+	 * - If no frontmatter, creates one with meta fields.
+	 */
+	private injectMeta(content: string): string {
+		// No meta to inject
+		if (Object.keys(this.meta).length === 0) {
+			return content;
+		}
+
+		// Check if file has frontmatter
+		if (content.startsWith("---")) {
+			const endIndex = content.indexOf("\n---", 3);
+			if (endIndex !== -1) {
+				// Has frontmatter - inject/update fields
+				let frontmatter = content.slice(4, endIndex);
+				const afterFrontmatter = content.slice(endIndex + 4);
+
+				for (const [key, value] of Object.entries(this.meta)) {
+					// Check if field exists (key: anything)
+					const regex = new RegExp(`^${key}\\s*:.*$`, "m");
+					if (regex.test(frontmatter)) {
+						// Replace existing field
+						frontmatter = frontmatter.replace(regex, `${key}: ${value}`);
+					} else {
+						// Add new field at the end
+						frontmatter = frontmatter.trimEnd() + `\n${key}: ${value}`;
+					}
+				}
+
+				return `---\n${frontmatter}\n---${afterFrontmatter}`;
+			}
+		}
+
+		// No frontmatter - create one with meta fields
+		const metaLines = Object.entries(this.meta)
+			.map(([key, value]) => `${key}: ${value}`)
+			.join("\n");
+		return `---\n${metaLines}\n---\n${content}`;
 	}
 
 	/**

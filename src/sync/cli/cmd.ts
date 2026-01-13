@@ -23,6 +23,7 @@ interface CliArgs {
 	verbose: boolean;
 	dryRun: boolean;
 	conflictResolution: CliConflictResolution;
+	meta: Record<string, string>;
 }
 
 function parseArgs(): CliArgs {
@@ -35,6 +36,7 @@ function parseArgs(): CliArgs {
 		verbose: false,
 		dryRun: false,
 		conflictResolution: "local",
+		meta: {},
 	};
 
 	for (let i = 0; i < args.length; i++) {
@@ -84,6 +86,20 @@ function parseArgs(): CliArgs {
 				}
 				break;
 			}
+			case "--meta":
+			case "-m": {
+				const metaValue = value ?? args[++i];
+				if (metaValue && metaValue.includes("=")) {
+					const eqIndex = metaValue.indexOf("=");
+					const metaKey = metaValue.substring(0, eqIndex);
+					const metaVal = metaValue.substring(eqIndex + 1);
+					result.meta[metaKey] = metaVal;
+				} else {
+					console.error(`❌ Invalid --meta format: ${metaValue}. Use: --meta key=value`);
+					process.exit(1);
+				}
+				break;
+			}
 			case "--help":
 			case "-h":
 				printHelp();
@@ -118,6 +134,8 @@ Options:
                            - remote: Keep remote version, overwrite local
                            - skip:   Skip conflicting files
                            - fail:   Exit with error on first conflict
+  -m, --meta <key=value>   Add/override frontmatter field for all files (can be repeated)
+                           Useful for multi-repo setups with different subgraphs
   -v, --verbose            Verbose output
   -n, --dry-run            Show what would be done without making changes
   -h, --help               Show this help
@@ -138,6 +156,10 @@ Examples:
 
   # Dry run to see what would happen
   npx ts-node src/sync/cli/cmd.ts --folder ./vault --api-key xxx --dry-run
+
+  # Multi-repo setup: each repo pushes with different subgraph
+  npx ts-node src/sync/cli/cmd.ts --folder ./docs --meta subgraph=docs
+  npx ts-node src/sync/cli/cmd.ts --folder ./blog --meta subgraph=blog --meta source=repo2
 `);
 }
 
@@ -164,6 +186,9 @@ async function main(): Promise<void> {
 	console.log(`Two-way:    ${args.twoWaySync}`);
 	console.log(`Conflicts:  ${args.conflictResolution}`);
 	console.log(`Dry run:    ${args.dryRun}`);
+	if (Object.keys(args.meta).length > 0) {
+		console.log(`Meta:       ${JSON.stringify(args.meta)}`);
+	}
 	console.log("=".repeat(60));
 
 	// Create env
@@ -174,6 +199,7 @@ async function main(): Promise<void> {
 		twoWaySync: args.twoWaySync,
 		verbose: args.verbose,
 		conflictResolution: args.conflictResolution,
+		meta: args.meta,
 	});
 
 	// 1. Classify files
