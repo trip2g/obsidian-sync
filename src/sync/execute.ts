@@ -38,6 +38,7 @@ export async function executePlan(
 		assetsUploaded: 0,
 		assetsDownloaded: 0,
 		errors: [],
+		updatedUrls: [],
 	};
 
 	const syncState = env.getSyncState();
@@ -98,6 +99,7 @@ export async function executePlan(
 			result.pushed = pushResult.count;
 			result.errors.push(...pushResult.errors);
 			pushedNotes = pushResult.pushedNotes;
+			result.updatedUrls = pushResult.urls;
 		}
 	}
 
@@ -204,11 +206,11 @@ async function executePushes(
 	env: SyncEnv,
 	pushes: FileClassification[],
 	syncState: SyncState
-): Promise<{ count: number; errors: string[]; pushedNotes: PushedNote[] }> {
+): Promise<{ count: number; errors: string[]; pushedNotes: PushedNote[]; urls: Array<{ path: string; url: string }> }> {
 	// Stryker disable all
 	// optimization - caller already filters empty
 	if (pushes.length === 0) {
-		return { count: 0, errors: [], pushedNotes: [] };
+		return { count: 0, errors: [], pushedNotes: [], urls: [] };
 	}
 	// Stryker restore all
 
@@ -234,7 +236,7 @@ async function executePushes(
 
 	// Stryker disable next-line ConditionalExpression,BlockStatement: optimization when all reads fail
 	if (updates.length === 0) {
-		return { count: 0, errors, pushedNotes: [] };
+		return { count: 0, errors, pushedNotes: [], urls: [] };
 	}
 
 	// Track which paths we're pushing
@@ -265,7 +267,10 @@ async function executePushes(
 
 	// Return only notes that were in our updates (for asset processing)
 	const filteredNotes = pushedNotes.filter((n) => updatePaths.has(n.path));
-	return { count: pushedCount, errors, pushedNotes: filteredNotes };
+	const urls = filteredNotes
+		.filter((n): n is PushedNote & { url: string } => typeof n.url === "string")
+		.map((n) => ({ path: n.path, url: n.url }));
+	return { count: pushedCount, errors, pushedNotes: filteredNotes, urls };
 }
 
 /**

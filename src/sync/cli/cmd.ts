@@ -10,6 +10,7 @@
  *   ENDPOINT    - GraphQL endpoint (alternative to --api-url)
  */
 
+import * as fs from "fs";
 import { NodeEnv, type CliConflictResolution } from "./env";
 import { classifySync } from "../classify";
 import { filterPlan } from "../filter";
@@ -25,6 +26,7 @@ interface CliArgs {
 	dryRun: boolean;
 	conflictResolution: CliConflictResolution;
 	meta: Record<string, string>;
+	updatedOutput: string;
 }
 
 function parseArgs(): CliArgs {
@@ -39,6 +41,7 @@ function parseArgs(): CliArgs {
 		dryRun: false,
 		conflictResolution: "local",
 		meta: {},
+		updatedOutput: "",
 	};
 
 	const positionalArgs: string[] = [];
@@ -100,6 +103,10 @@ function parseArgs(): CliArgs {
 				}
 				break;
 			}
+			case "--updated-output":
+			case "-o":
+				result.updatedOutput = value ?? args[++i];
+				break;
 			case "--help":
 			case "-h":
 				printHelp();
@@ -146,6 +153,8 @@ Options:
                            - skip:   Skip conflicting files
                            - fail:   Exit with error on first conflict
   -m, --meta <key=value>   Add/override frontmatter field for all files (can be repeated)
+  -o, --updated-output <file>
+                           Write pushed notes as JSON [{path, url}] to file after sync
   -v, --verbose            Verbose output
   -n, --dry-run            Show what would be done without making changes
   -h, --help               Show this help
@@ -312,6 +321,23 @@ async function main(): Promise<void> {
 		}
 	}
 	console.log("=".repeat(60));
+
+	// 6. Print updated URLs
+	const updatedUrls = result.updatedUrls ?? [];
+	if (updatedUrls.length > 0) {
+		console.log("\n📎 Published:");
+		if (updatedUrls.length <= 20) {
+			for (const { path, url } of updatedUrls) {
+				console.log(`  ${path} → ${url}`);
+			}
+		}
+		if (args.updatedOutput) {
+			fs.writeFileSync(args.updatedOutput, JSON.stringify(updatedUrls, null, 2));
+			console.log(`💾 Saved to ${args.updatedOutput}`);
+		} else {
+			console.log(`💡 --updated-output $(mktemp /tmp/updated-XXXXXX.json)`);
+		}
+	}
 }
 
 main().catch((err) => {

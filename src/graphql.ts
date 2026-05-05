@@ -24,6 +24,17 @@ export type ActiveOffers = {
   nodes: Array<Offer>;
 };
 
+export type AddFederationSecretSubgraphInput = {
+  kid: Scalars['String']['input'];
+  subgraphID: Scalars['Int64']['input'];
+};
+
+export type AddFederationSecretSubgraphOrErrorPayload = AddFederationSecretSubgraphPayload | ErrorPayload;
+
+export type AddFederationSecretSubgraphPayload = {
+  success: Scalars['Boolean']['output'];
+};
+
 export type Admin = {
   grantedAt: Scalars['Time']['output'];
   grantedBy?: Maybe<AdminUser>;
@@ -161,6 +172,55 @@ export type AdminCancelTelegramAccountAuthPayload = {
   success: Scalars['Boolean']['output'];
 };
 
+export type AdminChangeWebhook = {
+  createdAt: Scalars['Time']['output'];
+  createdBy: AdminUser;
+  description: Scalars['String']['output'];
+  enabled: Scalars['Boolean']['output'];
+  excludePatterns: Array<Scalars['String']['output']>;
+  hasSecret: Scalars['Boolean']['output'];
+  id: Scalars['Int64']['output'];
+  includeContent: Scalars['Boolean']['output'];
+  includePatterns: Array<Scalars['String']['output']>;
+  instruction: Scalars['String']['output'];
+  lastDeliveryAt?: Maybe<Scalars['Time']['output']>;
+  lastDeliveryStatus?: Maybe<Scalars['String']['output']>;
+  maxDepth: Scalars['Int64']['output'];
+  maxRetries: Scalars['Int64']['output'];
+  onCreate: Scalars['Boolean']['output'];
+  onRemove: Scalars['Boolean']['output'];
+  onUpdate: Scalars['Boolean']['output'];
+  passApiKey: Scalars['Boolean']['output'];
+  readPatterns: Array<Scalars['String']['output']>;
+  timeoutSeconds: Scalars['Int64']['output'];
+  url: Scalars['String']['output'];
+  writePatterns: Array<Scalars['String']['output']>;
+};
+
+export type AdminChangeWebhookDeliveriesConnection = {
+  nodes: Array<AdminChangeWebhookDelivery>;
+};
+
+export type AdminChangeWebhookDeliveriesFilterInput = {
+  limit?: InputMaybe<Scalars['Int64']['input']>;
+  webhookId: Scalars['Int64']['input'];
+};
+
+export type AdminChangeWebhookDelivery = {
+  attempt: Scalars['Int64']['output'];
+  completedAt?: Maybe<Scalars['Time']['output']>;
+  createdAt: Scalars['Time']['output'];
+  durationMs?: Maybe<Scalars['Int64']['output']>;
+  id: Scalars['Int64']['output'];
+  responseStatus?: Maybe<Scalars['Int64']['output']>;
+  status: Scalars['String']['output'];
+  webhookId: Scalars['Int64']['output'];
+};
+
+export type AdminChangeWebhooksConnection = {
+  nodes: Array<AdminChangeWebhook>;
+};
+
 export type AdminCompleteTelegramAccountAuthInput = {
   code: Scalars['String']['input'];
   password?: InputMaybe<Scalars['String']['input']>;
@@ -173,18 +233,59 @@ export type AdminCompleteTelegramAccountAuthPayload = {
   account: AdminTelegramAccount;
 };
 
-export type AdminConfigVersion = {
+export type AdminConfigBoolEntry = {
   createdAt: Scalars['Time']['output'];
   createdBy: AdminUser;
-  defaultLayout: Scalars['String']['output'];
   id: Scalars['Int64']['output'];
-  robotsTxt: Scalars['String']['output'];
-  showDraftVersions: Scalars['Boolean']['output'];
-  timezone: Scalars['String']['output'];
+  value: Scalars['Boolean']['output'];
 };
 
-export type AdminConfigVersionsConnection = {
-  nodes: Array<AdminConfigVersion>;
+export type AdminConfigBoolValue = AdminConfigValue & {
+  description?: Maybe<Scalars['String']['output']>;
+  history: Array<AdminConfigBoolEntry>;
+  id: Scalars['String']['output'];
+  updatedAt?: Maybe<Scalars['Time']['output']>;
+  updatedBy?: Maybe<AdminUser>;
+  value: Scalars['Boolean']['output'];
+};
+
+export type AdminConfigIntEntry = {
+  createdAt: Scalars['Time']['output'];
+  createdBy: AdminUser;
+  id: Scalars['Int64']['output'];
+  value: Scalars['Int']['output'];
+};
+
+export type AdminConfigIntValue = AdminConfigValue & {
+  description?: Maybe<Scalars['String']['output']>;
+  history: Array<AdminConfigIntEntry>;
+  id: Scalars['String']['output'];
+  updatedAt?: Maybe<Scalars['Time']['output']>;
+  updatedBy?: Maybe<AdminUser>;
+  value: Scalars['Int']['output'];
+};
+
+export type AdminConfigStringEntry = {
+  createdAt: Scalars['Time']['output'];
+  createdBy: AdminUser;
+  id: Scalars['Int64']['output'];
+  value: Scalars['String']['output'];
+};
+
+export type AdminConfigStringValue = AdminConfigValue & {
+  description?: Maybe<Scalars['String']['output']>;
+  history: Array<AdminConfigStringEntry>;
+  id: Scalars['String']['output'];
+  updatedAt?: Maybe<Scalars['Time']['output']>;
+  updatedBy?: Maybe<AdminUser>;
+  value: Scalars['String']['output'];
+};
+
+export type AdminConfigValue = {
+  description?: Maybe<Scalars['String']['output']>;
+  id: Scalars['String']['output'];
+  updatedAt?: Maybe<Scalars['Time']['output']>;
+  updatedBy?: Maybe<AdminUser>;
 };
 
 export type AdminCronJob = {
@@ -211,6 +312,92 @@ export type AdminCronJobsConnection = {
   nodes: Array<AdminCronJob>;
 };
 
+export type AdminCronWebhook = {
+  createdAt: Scalars['Time']['output'];
+  createdBy: AdminUser;
+  cronSchedule: Scalars['String']['output'];
+  description: Scalars['String']['output'];
+  enabled: Scalars['Boolean']['output'];
+  hasSecret: Scalars['Boolean']['output'];
+  id: Scalars['Int64']['output'];
+  instruction: Scalars['String']['output'];
+  lastDeliveryAt?: Maybe<Scalars['Time']['output']>;
+  lastDeliveryStatus?: Maybe<Scalars['String']['output']>;
+  maxDepth: Scalars['Int64']['output'];
+  maxRetries: Scalars['Int64']['output'];
+  nextRunAt?: Maybe<Scalars['Time']['output']>;
+  passApiKey: Scalars['Boolean']['output'];
+  readPatterns: Array<Scalars['String']['output']>;
+  timeoutSeconds: Scalars['Int64']['output'];
+  url: Scalars['String']['output'];
+  writePatterns: Array<Scalars['String']['output']>;
+};
+
+export type AdminCronWebhookDeliveriesConnection = {
+  nodes: Array<AdminCronWebhookDelivery>;
+};
+
+export type AdminCronWebhookDeliveriesFilterInput = {
+  cronWebhookId: Scalars['Int64']['input'];
+  limit?: InputMaybe<Scalars['Int64']['input']>;
+};
+
+export type AdminCronWebhookDelivery = {
+  attempt: Scalars['Int64']['output'];
+  completedAt?: Maybe<Scalars['Time']['output']>;
+  createdAt: Scalars['Time']['output'];
+  cronWebhookId: Scalars['Int64']['output'];
+  durationMs?: Maybe<Scalars['Int64']['output']>;
+  id: Scalars['Int64']['output'];
+  responseStatus?: Maybe<Scalars['Int64']['output']>;
+  status: Scalars['String']['output'];
+};
+
+export type AdminCronWebhooksConnection = {
+  nodes: Array<AdminCronWebhook>;
+};
+
+export type AdminFederationSecret = {
+  createdAt: Scalars['Time']['output'];
+  createdBy: Scalars['Int64']['output'];
+  description?: Maybe<Scalars['String']['output']>;
+  id: Scalars['Int64']['output'];
+  kbUrl?: Maybe<Scalars['String']['output']>;
+  kid: Scalars['String']['output'];
+  revokedAt?: Maybe<Scalars['Time']['output']>;
+  subgraphCount: Scalars['Int64']['output'];
+};
+
+export type AdminFrontmatterPatch = {
+  createdAt: Scalars['Time']['output'];
+  createdBy: AdminUser;
+  description: Scalars['String']['output'];
+  enabled: Scalars['Boolean']['output'];
+  excludePatterns: Array<Scalars['String']['output']>;
+  id: Scalars['Int64']['output'];
+  includePatterns: Array<Scalars['String']['output']>;
+  jsonnet: Scalars['String']['output'];
+  priority: Scalars['Int']['output'];
+  updatedAt: Scalars['Time']['output'];
+};
+
+export type AdminFrontmatterPatchesConnection = {
+  nodes: Array<AdminFrontmatterPatch>;
+};
+
+export type AdminGitHubOAuthCredentials = {
+  active: Scalars['Boolean']['output'];
+  clientId: Scalars['String']['output'];
+  createdAt: Scalars['Time']['output'];
+  createdBy: AdminUser;
+  id: Scalars['Int64']['output'];
+  name: Scalars['String']['output'];
+};
+
+export type AdminGitHubOAuthCredentialsConnection = {
+  nodes: Array<AdminGitHubOAuthCredentials>;
+};
+
 export type AdminGitToken = {
   canPull: Scalars['Boolean']['output'];
   canPush: Scalars['Boolean']['output'];
@@ -224,6 +411,19 @@ export type AdminGitToken = {
 
 export type AdminGitTokensConnection = {
   nodes: Array<AdminGitToken>;
+};
+
+export type AdminGoogleOAuthCredentials = {
+  active: Scalars['Boolean']['output'];
+  clientId: Scalars['String']['output'];
+  createdAt: Scalars['Time']['output'];
+  createdBy: AdminUser;
+  id: Scalars['Int64']['output'];
+  name: Scalars['String']['output'];
+};
+
+export type AdminGoogleOAuthCredentialsConnection = {
+  nodes: Array<AdminGoogleOAuthCredentials>;
 };
 
 export type AdminHtmlInjection = {
@@ -268,23 +468,42 @@ export type AdminLatestNoteViewsFilter = {
 };
 
 export type AdminMutation = {
+  addFederationSecretSubgraph: AddFederationSecretSubgraphOrErrorPayload;
   banUser: BanUserOrErrorPayload;
   cancelTelegramAccountAuth: AdminCancelTelegramAccountAuthOrErrorPayload;
+  changeWebhookCreate: ChangeWebhookCreateOrErrorPayload;
+  changeWebhookDelete: ChangeWebhookDeleteOrErrorPayload;
+  changeWebhookRegenerateSecret: ChangeWebhookRegenerateSecretOrErrorPayload;
+  changeWebhookUpdate: ChangeWebhookUpdateOrErrorPayload;
   clearBackgroundQueue: ClearBackgroundQueueOrErrorPayload;
   completeTelegramAccountAuth: AdminCompleteTelegramAccountAuthOrErrorPayload;
+  createAdmin: CreateAdminOrErrorPayload;
   createApiKey: CreateApiKeyOrErrorPayload;
   createBoostyCredentials: CreateBoostyCredentialsOrErrorPayload;
-  createConfigVersion: CreateConfigVersionOrErrorPayload;
+  createCronWebhook: CreateCronWebhookOrErrorPayload;
+  createFrontmatterPatch: CreateFrontmatterPatchOrErrorPayload;
+  createGitHubOAuthCredentials: CreateGitHubOAuthCredentialsOrErrorPayload;
   createGitToken: CreateGitTokenOrErrorPayload;
+  createGoogleOAuthCredentials: CreateGoogleOAuthCredentialsOrErrorPayload;
   createHtmlInjection: CreateHtmlInjectionOrErrorPayload;
+  createInboundFederationSecret: CreateInboundFederationSecretOrErrorPayload;
   createNotFoundIgnoredPattern: CreateNotFoundIgnoredPatternOrErrorPayload;
   createOffer: CreateOfferOrErrorPayload;
+  createOutboundFederationSecret: CreateOutboundFederationSecretOrErrorPayload;
   createPatreonCredentials: CreatePatreonCredentialsOrErrorPayload;
   createRedirect: CreateRedirectOrErrorPayload;
   createRelease: CreateReleaseOrErrorPayload;
   createTgBot: CreateTgBotOrErrorPayload;
   createUser: CreateUserOrErrorPayload;
+  createUserSubgraphAccess: CreateUserSubgraphAccessOrErrorPayload;
+  deactivateGitHubOAuth: DeactivateGitHubOAuthOrErrorPayload;
+  deactivateGoogleOAuth: DeactivateGoogleOAuthOrErrorPayload;
+  deleteAdmin: DeleteAdminOrErrorPayload;
   deleteBoostyCredentials: DeleteBoostyCredentialsOrErrorPayload;
+  deleteCronWebhook: DeleteCronWebhookOrErrorPayload;
+  deleteFrontmatterPatch: DeleteFrontmatterPatchOrErrorPayload;
+  deleteGitHubOAuthCredentials: DeleteGitHubOAuthCredentialsOrErrorPayload;
+  deleteGoogleOAuthCredentials: DeleteGoogleOAuthCredentialsOrErrorPayload;
   deleteHtmlInjection: DeleteHtmlInjectionOrErrorPayload;
   deleteNotFoundIgnoredPattern: DeleteNotFoundIgnoredPatternOrErrorPayload;
   deletePatreonCredentials: DeletePatreonCredentialsOrErrorPayload;
@@ -295,14 +514,22 @@ export type AdminMutation = {
   makeReleaseLive: MakeReleaseLiveOrErrorPayload;
   refreshBoostyData: RefreshBoostyDataOrErrorPayload;
   refreshPatreonData: RefreshPatreonDataOrErrorPayload;
+  regenerateCronWebhookSecret: RegenerateCronWebhookSecretOrErrorPayload;
   removeExpiredTgChatMembers: RemoveExpiredTgChatMembersOrErrorPayload;
+  removeFederationSecretSubgraph: RemoveFederationSecretSubgraphOrErrorPayload;
   resetNotFoundPath: ResetNotFoundPathOrErrorPayload;
   resetTelegramPublishNote: ResetTelegramPublishNoteOrErrorPayload;
   restoreBoostyCredentials: RestoreBoostyCredentialsOrErrorPayload;
   restorePatreonCredentials: RestorePatreonCredentialsOrErrorPayload;
+  revokeFederationSecret: RevokeFederationSecretOrErrorPayload;
   runCronJob: RunCronJobOrErrorPayload;
   sendTelegramPublishNoteNow: SendTelegramPublishNoteNowOrErrorPayload;
+  setActiveGitHubOAuthCredentials: SetActiveGitHubOAuthCredentialsOrErrorPayload;
+  setActiveGoogleOAuthCredentials: SetActiveGoogleOAuthCredentialsOrErrorPayload;
   setBoostyTierSubgraphs: SetBoostyTierSubgraphsOrErrorPayload;
+  setConfigBoolValue: SetConfigBoolValuePayload;
+  setConfigIntValue: SetConfigIntValuePayload;
+  setConfigStringValue: SetConfigStringValuePayload;
   setPatreonTierSubgraphs: SetPatreonTierSubgraphsOrErrorPayload;
   setTelegramAccountChatPublishInstantTags: AdminSetTelegramAccountChatPublishInstantTagsOrErrorPayload;
   setTelegramAccountChatPublishTags: AdminSetTelegramAccountChatPublishTagsOrErrorPayload;
@@ -314,9 +541,13 @@ export type AdminMutation = {
   startBackgroundQueue: StartBackgroundQueueOrErrorPayload;
   startTelegramAccountAuth: AdminStartTelegramAccountAuthOrErrorPayload;
   stopBackgroundQueue: StopBackgroundQueueOrErrorPayload;
+  triggerChangeWebhook: TriggerChangeWebhookOrErrorPayload;
+  triggerCronWebhook: TriggerCronWebhookOrErrorPayload;
   unbanUser: UnbanUserOrErrorPayload;
   updateBoostyCredentials: UpdateBoostyCredentialsOrErrorPayload;
   updateCronJob: UpdateCronJobOrErrorPayload;
+  updateCronWebhook: UpdateCronWebhookOrErrorPayload;
+  updateFrontmatterPatch: UpdateFrontmatterPatchOrErrorPayload;
   updateHtmlInjection: UpdateHtmlInjectionOrErrorPayload;
   updateNotFoundIgnoredPattern: UpdateNotFoundIgnoredPatternOrErrorPayload;
   updateNoteGraphPositions: UpdateNoteGraphPositionsOrErrorPayload;
@@ -330,6 +561,11 @@ export type AdminMutation = {
 };
 
 
+export type AdminMutationAddFederationSecretSubgraphArgs = {
+  input: AddFederationSecretSubgraphInput;
+};
+
+
 export type AdminMutationBanUserArgs = {
   input: BanUserInput;
 };
@@ -337,6 +573,26 @@ export type AdminMutationBanUserArgs = {
 
 export type AdminMutationCancelTelegramAccountAuthArgs = {
   input: AdminCancelTelegramAccountAuthInput;
+};
+
+
+export type AdminMutationChangeWebhookCreateArgs = {
+  input: ChangeWebhookCreateInput;
+};
+
+
+export type AdminMutationChangeWebhookDeleteArgs = {
+  input: ChangeWebhookDeleteInput;
+};
+
+
+export type AdminMutationChangeWebhookRegenerateSecretArgs = {
+  input: ChangeWebhookRegenerateSecretInput;
+};
+
+
+export type AdminMutationChangeWebhookUpdateArgs = {
+  input: ChangeWebhookUpdateInput;
 };
 
 
@@ -350,6 +606,11 @@ export type AdminMutationCompleteTelegramAccountAuthArgs = {
 };
 
 
+export type AdminMutationCreateAdminArgs = {
+  input: CreateAdminInput;
+};
+
+
 export type AdminMutationCreateApiKeyArgs = {
   input: CreateApiKeyInput;
 };
@@ -360,8 +621,18 @@ export type AdminMutationCreateBoostyCredentialsArgs = {
 };
 
 
-export type AdminMutationCreateConfigVersionArgs = {
-  input: CreateConfigVersionInput;
+export type AdminMutationCreateCronWebhookArgs = {
+  input: CreateCronWebhookInput;
+};
+
+
+export type AdminMutationCreateFrontmatterPatchArgs = {
+  input: CreateFrontmatterPatchInput;
+};
+
+
+export type AdminMutationCreateGitHubOAuthCredentialsArgs = {
+  input: CreateGitHubOAuthCredentialsInput;
 };
 
 
@@ -370,8 +641,18 @@ export type AdminMutationCreateGitTokenArgs = {
 };
 
 
+export type AdminMutationCreateGoogleOAuthCredentialsArgs = {
+  input: CreateGoogleOAuthCredentialsInput;
+};
+
+
 export type AdminMutationCreateHtmlInjectionArgs = {
   input: CreateHtmlInjectionInput;
+};
+
+
+export type AdminMutationCreateInboundFederationSecretArgs = {
+  input: CreateInboundFederationSecretInput;
 };
 
 
@@ -382,6 +663,11 @@ export type AdminMutationCreateNotFoundIgnoredPatternArgs = {
 
 export type AdminMutationCreateOfferArgs = {
   input: CreateOfferInput;
+};
+
+
+export type AdminMutationCreateOutboundFederationSecretArgs = {
+  input: CreateOutboundFederationSecretInput;
 };
 
 
@@ -410,8 +696,38 @@ export type AdminMutationCreateUserArgs = {
 };
 
 
+export type AdminMutationCreateUserSubgraphAccessArgs = {
+  input: CreateUserSubgraphAccessInput;
+};
+
+
+export type AdminMutationDeleteAdminArgs = {
+  input: DeleteAdminInput;
+};
+
+
 export type AdminMutationDeleteBoostyCredentialsArgs = {
   input: DeleteBoostyCredentialsInput;
+};
+
+
+export type AdminMutationDeleteCronWebhookArgs = {
+  input: DeleteCronWebhookInput;
+};
+
+
+export type AdminMutationDeleteFrontmatterPatchArgs = {
+  input: DeleteFrontmatterPatchInput;
+};
+
+
+export type AdminMutationDeleteGitHubOAuthCredentialsArgs = {
+  input: DeleteGitHubOAuthCredentialsInput;
+};
+
+
+export type AdminMutationDeleteGoogleOAuthCredentialsArgs = {
+  input: DeleteGoogleOAuthCredentialsInput;
 };
 
 
@@ -465,8 +781,18 @@ export type AdminMutationRefreshPatreonDataArgs = {
 };
 
 
+export type AdminMutationRegenerateCronWebhookSecretArgs = {
+  input: RegenerateCronWebhookSecretInput;
+};
+
+
 export type AdminMutationRemoveExpiredTgChatMembersArgs = {
   input: RemoveExpiredTgChatMembersInput;
+};
+
+
+export type AdminMutationRemoveFederationSecretSubgraphArgs = {
+  input: RemoveFederationSecretSubgraphInput;
 };
 
 
@@ -490,6 +816,11 @@ export type AdminMutationRestorePatreonCredentialsArgs = {
 };
 
 
+export type AdminMutationRevokeFederationSecretArgs = {
+  id: Scalars['Int64']['input'];
+};
+
+
 export type AdminMutationRunCronJobArgs = {
   input: RunCronJobInput;
 };
@@ -500,8 +831,33 @@ export type AdminMutationSendTelegramPublishNoteNowArgs = {
 };
 
 
+export type AdminMutationSetActiveGitHubOAuthCredentialsArgs = {
+  input: SetActiveGitHubOAuthCredentialsInput;
+};
+
+
+export type AdminMutationSetActiveGoogleOAuthCredentialsArgs = {
+  input: SetActiveGoogleOAuthCredentialsInput;
+};
+
+
 export type AdminMutationSetBoostyTierSubgraphsArgs = {
   input: SetBoostyTierSubgraphsInput;
+};
+
+
+export type AdminMutationSetConfigBoolValueArgs = {
+  input: SetConfigBoolValueInput;
+};
+
+
+export type AdminMutationSetConfigIntValueArgs = {
+  input: SetConfigIntValueInput;
+};
+
+
+export type AdminMutationSetConfigStringValueArgs = {
+  input: SetConfigStringValueInput;
 };
 
 
@@ -560,6 +916,16 @@ export type AdminMutationStopBackgroundQueueArgs = {
 };
 
 
+export type AdminMutationTriggerChangeWebhookArgs = {
+  input: TriggerChangeWebhookInput;
+};
+
+
+export type AdminMutationTriggerCronWebhookArgs = {
+  input: TriggerCronWebhookInput;
+};
+
+
 export type AdminMutationUnbanUserArgs = {
   input: UnbanUserInput;
 };
@@ -572,6 +938,16 @@ export type AdminMutationUpdateBoostyCredentialsArgs = {
 
 export type AdminMutationUpdateCronJobArgs = {
   input: UpdateCronJobInput;
+};
+
+
+export type AdminMutationUpdateCronWebhookArgs = {
+  input: UpdateCronWebhookInput;
+};
+
+
+export type AdminMutationUpdateFrontmatterPatchArgs = {
+  input: UpdateFrontmatterPatchInput;
 };
 
 
@@ -754,9 +1130,13 @@ export type AdminQuery = {
   allApiKeys: AdminApiKeysConnection;
   allBackgroundQueues: AdminBackgroundQueuesConnection;
   allBoostyCredentials: AdminBoostyCredentialsConnection;
-  allConfigVersions: AdminConfigVersionsConnection;
+  allChangeWebhooks: AdminChangeWebhooksConnection;
   allCronJobs: AdminCronJobsConnection;
+  allCronWebhooks: AdminCronWebhooksConnection;
+  allFrontmatterPatches: AdminFrontmatterPatchesConnection;
+  allGitHubOAuthCredentials: AdminGitHubOAuthCredentialsConnection;
   allGitTokens: AdminGitTokensConnection;
+  allGoogleOAuthCredentials: AdminGoogleOAuthCredentialsConnection;
   allHtmlInjections: AdminHtmlInjectionsConnection;
   allLatestNoteAssets: AdminLatestNoteAssetsConnection;
   allLatestNoteViews: AdminLatestNoteViewsConnection;
@@ -782,10 +1162,20 @@ export type AdminQuery = {
   backgroundQueue?: Maybe<AdminBackgroundQueue>;
   boostyCredentials?: Maybe<AdminBoostyCredentials>;
   buildGitCommit: Scalars['String']['output'];
+  changeWebhook?: Maybe<AdminChangeWebhook>;
+  changeWebhookDeliveries: AdminChangeWebhookDeliveriesConnection;
+  configValue?: Maybe<AdminConfigValue>;
+  configValues: Array<AdminConfigValue>;
   cronJob?: Maybe<AdminCronJob>;
+  cronWebhook?: Maybe<AdminCronWebhook>;
+  cronWebhookDeliveries: AdminCronWebhookDeliveriesConnection;
+  federationSecrets: Array<AdminFederationSecret>;
+  frontmatterPatch?: Maybe<AdminFrontmatterPatch>;
+  gitHubOAuthCredentials?: Maybe<AdminGitHubOAuthCredentials>;
+  googleOAuthCredentials?: Maybe<AdminGoogleOAuthCredentials>;
   healthChecks: Array<HealchCheck>;
   htmlInjection?: Maybe<AdminHtmlInjection>;
-  latestConfig: AdminConfigVersion;
+  layoutBlocks: Array<LayoutBlock>;
   noteAsset?: Maybe<AdminNoteAsset>;
   noteView?: Maybe<NoteView>;
   offer?: Maybe<AdminOffer>;
@@ -793,6 +1183,7 @@ export type AdminQuery = {
   purchase?: Maybe<AdminPurchase>;
   recentlyModifiedNoteViews: Array<NoteView>;
   redirect?: Maybe<AdminRedirect>;
+  storageUsage: AdminStorageUsage;
   subgraph?: Maybe<AdminSubgraph>;
   telegramAccount?: Maybe<AdminTelegramAccount>;
   telegramPublishNote?: Maybe<AdminTelegramPublishNote>;
@@ -850,8 +1241,48 @@ export type AdminQueryBoostyCredentialsArgs = {
 };
 
 
+export type AdminQueryChangeWebhookArgs = {
+  id: Scalars['Int64']['input'];
+};
+
+
+export type AdminQueryChangeWebhookDeliveriesArgs = {
+  filter: AdminChangeWebhookDeliveriesFilterInput;
+};
+
+
+export type AdminQueryConfigValueArgs = {
+  id: Scalars['String']['input'];
+};
+
+
 export type AdminQueryCronJobArgs = {
   id: Scalars['Int64']['input'];
+};
+
+
+export type AdminQueryCronWebhookArgs = {
+  id: Scalars['Int64']['input'];
+};
+
+
+export type AdminQueryCronWebhookDeliveriesArgs = {
+  filter: AdminCronWebhookDeliveriesFilterInput;
+};
+
+
+export type AdminQueryFrontmatterPatchArgs = {
+  id: Scalars['Int64']['input'];
+};
+
+
+export type AdminQueryGitHubOAuthCredentialsArgs = {
+  id: Scalars['Int']['input'];
+};
+
+
+export type AdminQueryGoogleOAuthCredentialsArgs = {
+  id: Scalars['Int']['input'];
 };
 
 
@@ -1008,12 +1439,33 @@ export type AdminStartTelegramAccountAuthPayload = {
   authState: AdminTelegramAccountAuthState;
 };
 
+export type AdminStorageEntry = {
+  current: Scalars['Float']['output'];
+  limit: Scalars['Float']['output'];
+};
+
+
+export type AdminStorageEntryCurrentArgs = {
+  format?: InputMaybe<StorageSizeFormat>;
+};
+
+
+export type AdminStorageEntryLimitArgs = {
+  format?: InputMaybe<StorageSizeFormat>;
+};
+
+export type AdminStorageUsage = {
+  assets: AdminStorageEntry;
+  db: AdminStorageEntry;
+};
+
 export type AdminSubgraph = {
   color?: Maybe<Scalars['String']['output']>;
   createdAt: Scalars['Time']['output'];
   hidden: Scalars['Boolean']['output'];
   id: Scalars['Int64']['output'];
   name: Scalars['String']['output'];
+  requireSignin: Scalars['Boolean']['output'];
 };
 
 export type AdminSubgraphsConnection = {
@@ -1029,6 +1481,11 @@ export type AdminTelegramAccount = {
   id: Scalars['Int64']['output'];
   isPremium: Scalars['Boolean']['output'];
   phone: Scalars['String']['output'];
+};
+
+
+export type AdminTelegramAccountDialogsArgs = {
+  limit?: InputMaybe<Scalars['Int']['input']>;
 };
 
 export type AdminTelegramAccountAuthState = {
@@ -1066,6 +1523,7 @@ export type AdminTelegramPublishNote = {
   createdAt: Scalars['Time']['output'];
   errorCount: Scalars['Int64']['output'];
   id: Scalars['Int64']['output'];
+  lastError?: Maybe<Scalars['String']['output']>;
   /** latest or published NoteView depending on the status */
   noteView: NoteView;
   post: TelegramPost;
@@ -1199,6 +1657,7 @@ export type AdminUpdateTelegramAccountPayload = {
 };
 
 export type AdminUser = {
+  admin?: Maybe<Admin>;
   ban?: Maybe<UserBan>;
   createdAt: Scalars['Time']['output'];
   email?: Maybe<Scalars['String']['output']>;
@@ -1254,6 +1713,11 @@ export type ApiKeyLogsFilterInput = {
   apiKeyId?: InputMaybe<Scalars['Int64']['input']>;
 };
 
+export type AppliedFrontmatterPatchInfo = {
+  description: Scalars['String']['output'];
+  patchId: Scalars['Int']['output'];
+};
+
 export type AuditLogLevelEnum =
   | 'DEBUG'
   | 'ERROR'
@@ -1273,9 +1737,86 @@ export type BanUserPayload = {
   userId: Scalars['Int64']['output'];
 };
 
+export type BoolParamValue = {
+  defaultValue?: Maybe<Scalars['Boolean']['output']>;
+};
+
 export type BoostyCredentialsStateEnum =
   | 'ACTIVE'
   | 'DELETED';
+
+export type ChangeWebhookCreateInput = {
+  description?: InputMaybe<Scalars['String']['input']>;
+  excludePatterns?: InputMaybe<Array<Scalars['String']['input']>>;
+  includeContent?: InputMaybe<Scalars['Boolean']['input']>;
+  includePatterns: Array<Scalars['String']['input']>;
+  instruction?: InputMaybe<Scalars['String']['input']>;
+  maxDepth?: InputMaybe<Scalars['Int64']['input']>;
+  maxRetries?: InputMaybe<Scalars['Int64']['input']>;
+  onCreate?: InputMaybe<Scalars['Boolean']['input']>;
+  onRemove?: InputMaybe<Scalars['Boolean']['input']>;
+  onUpdate?: InputMaybe<Scalars['Boolean']['input']>;
+  passApiKey?: InputMaybe<Scalars['Boolean']['input']>;
+  readPatterns?: InputMaybe<Array<Scalars['String']['input']>>;
+  secret?: InputMaybe<Scalars['String']['input']>;
+  timeoutSeconds?: InputMaybe<Scalars['Int64']['input']>;
+  url: Scalars['String']['input'];
+  writePatterns?: InputMaybe<Array<Scalars['String']['input']>>;
+};
+
+export type ChangeWebhookCreateOrErrorPayload = ChangeWebhookCreatePayload | ErrorPayload;
+
+export type ChangeWebhookCreatePayload = {
+  secret: Scalars['String']['output'];
+  webhook: AdminChangeWebhook;
+};
+
+export type ChangeWebhookDeleteInput = {
+  id: Scalars['Int64']['input'];
+};
+
+export type ChangeWebhookDeleteOrErrorPayload = ChangeWebhookDeletePayload | ErrorPayload;
+
+export type ChangeWebhookDeletePayload = {
+  deletedId: Scalars['Int64']['output'];
+};
+
+export type ChangeWebhookRegenerateSecretInput = {
+  id: Scalars['Int64']['input'];
+};
+
+export type ChangeWebhookRegenerateSecretOrErrorPayload = ChangeWebhookRegenerateSecretPayload | ErrorPayload;
+
+export type ChangeWebhookRegenerateSecretPayload = {
+  secret: Scalars['String']['output'];
+  webhook: AdminChangeWebhook;
+};
+
+export type ChangeWebhookUpdateInput = {
+  description?: InputMaybe<Scalars['String']['input']>;
+  enabled?: InputMaybe<Scalars['Boolean']['input']>;
+  excludePatterns?: InputMaybe<Array<Scalars['String']['input']>>;
+  id: Scalars['Int64']['input'];
+  includeContent?: InputMaybe<Scalars['Boolean']['input']>;
+  includePatterns?: InputMaybe<Array<Scalars['String']['input']>>;
+  instruction?: InputMaybe<Scalars['String']['input']>;
+  maxDepth?: InputMaybe<Scalars['Int64']['input']>;
+  maxRetries?: InputMaybe<Scalars['Int64']['input']>;
+  onCreate?: InputMaybe<Scalars['Boolean']['input']>;
+  onRemove?: InputMaybe<Scalars['Boolean']['input']>;
+  onUpdate?: InputMaybe<Scalars['Boolean']['input']>;
+  passApiKey?: InputMaybe<Scalars['Boolean']['input']>;
+  readPatterns?: InputMaybe<Array<Scalars['String']['input']>>;
+  timeoutSeconds?: InputMaybe<Scalars['Int64']['input']>;
+  url?: InputMaybe<Scalars['String']['input']>;
+  writePatterns?: InputMaybe<Array<Scalars['String']['input']>>;
+};
+
+export type ChangeWebhookUpdateOrErrorPayload = ChangeWebhookUpdatePayload | ErrorPayload;
+
+export type ChangeWebhookUpdatePayload = {
+  webhook: AdminChangeWebhook;
+};
 
 export type ClearBackgroundQueueInput = {
   id: Scalars['String']['input'];
@@ -1292,6 +1833,17 @@ export type CommitNotesOrErrorPayload = CommitNotesPayload | ErrorPayload;
 
 export type CommitNotesPayload = {
   success: Scalars['Boolean']['output'];
+  updated: Array<PushedNote>;
+};
+
+export type CreateAdminInput = {
+  userId: Scalars['Int64']['input'];
+};
+
+export type CreateAdminOrErrorPayload = CreateAdminPayload | ErrorPayload;
+
+export type CreateAdminPayload = {
+  admin: Admin;
 };
 
 export type CreateApiKeyInput = {
@@ -1317,17 +1869,26 @@ export type CreateBoostyCredentialsPayload = {
   boostyCredentials: AdminBoostyCredentials;
 };
 
-export type CreateConfigVersionInput = {
-  defaultLayout: Scalars['String']['input'];
-  robotsTxt: Scalars['String']['input'];
-  showDraftVersions: Scalars['Boolean']['input'];
-  timezone: Scalars['String']['input'];
+export type CreateCronWebhookInput = {
+  cronSchedule: Scalars['String']['input'];
+  description?: InputMaybe<Scalars['String']['input']>;
+  enabled?: InputMaybe<Scalars['Boolean']['input']>;
+  instruction?: InputMaybe<Scalars['String']['input']>;
+  maxDepth?: InputMaybe<Scalars['Int64']['input']>;
+  maxRetries?: InputMaybe<Scalars['Int64']['input']>;
+  passApiKey?: InputMaybe<Scalars['Boolean']['input']>;
+  readPatterns?: InputMaybe<Array<Scalars['String']['input']>>;
+  secret?: InputMaybe<Scalars['String']['input']>;
+  timeoutSeconds?: InputMaybe<Scalars['Int64']['input']>;
+  url: Scalars['String']['input'];
+  writePatterns?: InputMaybe<Array<Scalars['String']['input']>>;
 };
 
-export type CreateConfigVersionOrErrorPayload = CreateConfigVersionPayload | ErrorPayload;
+export type CreateCronWebhookOrErrorPayload = CreateCronWebhookPayload | ErrorPayload;
 
-export type CreateConfigVersionPayload = {
-  configVersion: AdminConfigVersion;
+export type CreateCronWebhookPayload = {
+  cronWebhook: AdminCronWebhook;
+  secret: Scalars['String']['output'];
 };
 
 export type CreateEmailWaitListRequestInput = {
@@ -1339,6 +1900,33 @@ export type CreateEmailWaitListRequestOrErrorPayload = CreateEmailWaitListReques
 
 export type CreateEmailWaitListRequestPayload = {
   success: Scalars['Boolean']['output'];
+};
+
+export type CreateFrontmatterPatchInput = {
+  description: Scalars['String']['input'];
+  enabled: Scalars['Boolean']['input'];
+  excludePatterns?: InputMaybe<Array<Scalars['String']['input']>>;
+  includePatterns: Array<Scalars['String']['input']>;
+  jsonnet: Scalars['String']['input'];
+  priority: Scalars['Int']['input'];
+};
+
+export type CreateFrontmatterPatchOrErrorPayload = CreateFrontmatterPatchPayload | ErrorPayload;
+
+export type CreateFrontmatterPatchPayload = {
+  frontmatterPatch: AdminFrontmatterPatch;
+};
+
+export type CreateGitHubOAuthCredentialsInput = {
+  clientId: Scalars['String']['input'];
+  clientSecret: Scalars['String']['input'];
+  name: Scalars['String']['input'];
+};
+
+export type CreateGitHubOAuthCredentialsOrErrorPayload = CreateGitHubOAuthCredentialsPayload | ErrorPayload;
+
+export type CreateGitHubOAuthCredentialsPayload = {
+  credentials: AdminGitHubOAuthCredentials;
 };
 
 export type CreateGitTokenInput = {
@@ -1354,6 +1942,18 @@ export type CreateGitTokenPayload = {
   value: Scalars['String']['output'];
 };
 
+export type CreateGoogleOAuthCredentialsInput = {
+  clientId: Scalars['String']['input'];
+  clientSecret: Scalars['String']['input'];
+  name: Scalars['String']['input'];
+};
+
+export type CreateGoogleOAuthCredentialsOrErrorPayload = CreateGoogleOAuthCredentialsPayload | ErrorPayload;
+
+export type CreateGoogleOAuthCredentialsPayload = {
+  credentials: AdminGoogleOAuthCredentials;
+};
+
 export type CreateHtmlInjectionInput = {
   activeFrom?: InputMaybe<Scalars['Time']['input']>;
   activeTo?: InputMaybe<Scalars['Time']['input']>;
@@ -1367,6 +1967,20 @@ export type CreateHtmlInjectionOrErrorPayload = CreateHtmlInjectionPayload | Err
 
 export type CreateHtmlInjectionPayload = {
   htmlInjection: AdminHtmlInjection;
+};
+
+export type CreateInboundFederationSecretInput = {
+  description?: InputMaybe<Scalars['String']['input']>;
+  kid: Scalars['String']['input'];
+  secretHex?: InputMaybe<Scalars['String']['input']>;
+};
+
+export type CreateInboundFederationSecretOrErrorPayload = CreateInboundFederationSecretPayload | ErrorPayload;
+
+export type CreateInboundFederationSecretPayload = {
+  id: Scalars['Int64']['output'];
+  kid: Scalars['String']['output'];
+  secretHex: Scalars['String']['output'];
 };
 
 export type CreateNotFoundIgnoredPatternInput = {
@@ -1391,6 +2005,20 @@ export type CreateOfferOrErrorPayload = CreateOfferPayload | ErrorPayload;
 
 export type CreateOfferPayload = {
   offer: AdminOffer;
+};
+
+export type CreateOutboundFederationSecretInput = {
+  description?: InputMaybe<Scalars['String']['input']>;
+  kbURL: Scalars['String']['input'];
+  kid: Scalars['String']['input'];
+  secretHex: Scalars['String']['input'];
+};
+
+export type CreateOutboundFederationSecretOrErrorPayload = CreateOutboundFederationSecretPayload | ErrorPayload;
+
+export type CreateOutboundFederationSecretPayload = {
+  id: Scalars['Int64']['output'];
+  kid: Scalars['String']['output'];
 };
 
 export type CreatePatreonCredentialsInput = {
@@ -1462,11 +2090,57 @@ export type CreateUserPayload = {
   user: AdminUser;
 };
 
+export type CreateUserSubgraphAccessInput = {
+  expiresAt?: InputMaybe<Scalars['Time']['input']>;
+  subgraphIds: Array<Scalars['Int64']['input']>;
+  userId: Scalars['Int64']['input'];
+};
+
+export type CreateUserSubgraphAccessOrErrorPayload = CreateUserSubgraphAccessPayload | ErrorPayload;
+
+export type CreateUserSubgraphAccessPayload = {
+  accesses: Array<AdminUserSubgraphAccess>;
+};
+
+export type CreateUserTokenInput = {
+  expiresInDays?: InputMaybe<Scalars['Int']['input']>;
+  name: Scalars['String']['input'];
+};
+
+export type CreateUserTokenOrErrorPayload = CreateUserTokenPayload | ErrorPayload;
+
+export type CreateUserTokenPayload = {
+  plaintextToken: Scalars['String']['output'];
+  token: UserToken;
+};
+
 export type CronJobExecutionStatus =
   | 'COMPLETED'
   | 'FAILED'
   | 'PENDING'
   | 'RUNNING';
+
+export type DeactivateGitHubOAuthOrErrorPayload = DeactivateGitHubOAuthPayload | ErrorPayload;
+
+export type DeactivateGitHubOAuthPayload = {
+  success: Scalars['Boolean']['output'];
+};
+
+export type DeactivateGoogleOAuthOrErrorPayload = DeactivateGoogleOAuthPayload | ErrorPayload;
+
+export type DeactivateGoogleOAuthPayload = {
+  success: Scalars['Boolean']['output'];
+};
+
+export type DeleteAdminInput = {
+  userId: Scalars['Int64']['input'];
+};
+
+export type DeleteAdminOrErrorPayload = DeleteAdminPayload | ErrorPayload;
+
+export type DeleteAdminPayload = {
+  success: Scalars['Boolean']['output'];
+};
 
 export type DeleteBoostyCredentialsInput = {
   id: Scalars['Int64']['input'];
@@ -1476,6 +2150,46 @@ export type DeleteBoostyCredentialsOrErrorPayload = DeleteBoostyCredentialsPaylo
 
 export type DeleteBoostyCredentialsPayload = {
   boostyCredentials: AdminBoostyCredentials;
+  deletedId: Scalars['Int64']['output'];
+};
+
+export type DeleteCronWebhookInput = {
+  id: Scalars['Int64']['input'];
+};
+
+export type DeleteCronWebhookOrErrorPayload = DeleteCronWebhookPayload | ErrorPayload;
+
+export type DeleteCronWebhookPayload = {
+  deletedId: Scalars['Int64']['output'];
+};
+
+export type DeleteFrontmatterPatchInput = {
+  id: Scalars['Int64']['input'];
+};
+
+export type DeleteFrontmatterPatchOrErrorPayload = DeleteFrontmatterPatchPayload | ErrorPayload;
+
+export type DeleteFrontmatterPatchPayload = {
+  deletedId: Scalars['Int64']['output'];
+};
+
+export type DeleteGitHubOAuthCredentialsInput = {
+  id: Scalars['Int64']['input'];
+};
+
+export type DeleteGitHubOAuthCredentialsOrErrorPayload = DeleteGitHubOAuthCredentialsPayload | ErrorPayload;
+
+export type DeleteGitHubOAuthCredentialsPayload = {
+  deletedId: Scalars['Int64']['output'];
+};
+
+export type DeleteGoogleOAuthCredentialsInput = {
+  id: Scalars['Int64']['input'];
+};
+
+export type DeleteGoogleOAuthCredentialsOrErrorPayload = DeleteGoogleOAuthCredentialsPayload | ErrorPayload;
+
+export type DeleteGoogleOAuthCredentialsPayload = {
   deletedId: Scalars['Int64']['output'];
 };
 
@@ -1550,6 +2264,10 @@ export type FieldMessage = {
   value: Scalars['String']['output'];
 };
 
+export type FloatParamValue = {
+  defaultValue?: Maybe<Scalars['Float']['output']>;
+};
+
 export type GenerateTgAttachCodeInput = {
   botId: Scalars['Int64']['input'];
 };
@@ -1582,9 +2300,29 @@ export type HideNotesPayload = {
   success: Scalars['Boolean']['output'];
 };
 
+export type IntParamValue = {
+  defaultValue?: Maybe<Scalars['Int']['output']>;
+};
+
 export type LastNoteReadAtInput = {
   pathId: Scalars['Int64']['input'];
 };
+
+export type LayoutBlock = {
+  fullName: Scalars['String']['output'];
+  hasContent: Scalars['Boolean']['output'];
+  name: Scalars['String']['output'];
+  params: Array<LayoutBlockParam>;
+  sourceId: Scalars['String']['output'];
+};
+
+export type LayoutBlockParam = {
+  comment?: Maybe<Scalars['String']['output']>;
+  name: Scalars['String']['output'];
+  value?: Maybe<LayoutBlockParamValue>;
+};
+
+export type LayoutBlockParamValue = BoolParamValue | FloatParamValue | IntParamValue | StringParamValue;
 
 export type MakeReleaseLiveInput = {
   id: Scalars['Int64']['input'];
@@ -1602,12 +2340,14 @@ export type Mutation = {
   commitNotes: CommitNotesOrErrorPayload;
   createEmailWaitListRequest: CreateEmailWaitListRequestOrErrorPayload;
   createPaymentLink: CreatePaymentLinkOrErrorPayload;
+  createUserToken: CreateUserTokenOrErrorPayload;
   generateTgAttachCode: GenerateTgAttachCodeOrErrorPayload;
   /** X-Api-Key header must be set. */
   hideNotes: HideNotesOrErrorPayload;
   /** X-Api-Key header must be set. */
   pushNotes: PushNotesOrErrorPayload;
   requestEmailSignInCode: RequestEmailSignInCodeOrErrorPayload;
+  revokeUserToken: RevokeUserTokenOrErrorPayload;
   signInByEmail: SignInOrErrorPayload;
   signOut: SignOutOrErrorPayload;
   toggleFavoriteNote: ToggleFavoriteNoteOrErrorPayload;
@@ -1623,6 +2363,11 @@ export type MutationCreateEmailWaitListRequestArgs = {
 
 export type MutationCreatePaymentLinkArgs = {
   input: CreatePaymentLinkInput;
+};
+
+
+export type MutationCreateUserTokenArgs = {
+  input: CreateUserTokenInput;
 };
 
 
@@ -1643,6 +2388,11 @@ export type MutationPushNotesArgs = {
 
 export type MutationRequestEmailSignInCodeArgs = {
   input: RequestEmailSignInCodeInput;
+};
+
+
+export type MutationRevokeUserTokenArgs = {
+  input: RevokeUserTokenInput;
 };
 
 
@@ -1676,6 +2426,7 @@ export type NoteInput = {
 export type NotePath = {
   assetReplaces: Array<NoteAssetReplaceT>;
   content: Scalars['String']['output'];
+  id: Scalars['Int64']['output'];
   latestContentHash: Scalars['String']['output'];
   latestNoteView?: Maybe<NoteView>;
   value: Scalars['String']['output'];
@@ -1700,6 +2451,7 @@ export type NoteTocItem = {
 };
 
 export type NoteView = {
+  appliedFrontmatterPatches: Array<AppliedFrontmatterPatchInfo>;
   assetReplaces: Array<NoteAssetReplaceT>;
   content: Scalars['String']['output'];
   description?: Maybe<Scalars['String']['output']>;
@@ -1716,6 +2468,7 @@ export type NoteView = {
   subgraphNames: Array<Scalars['String']['output']>;
   title: Scalars['String']['output'];
   toc: Array<NoteTocItem>;
+  url: Scalars['String']['output'];
   versionId: Scalars['Int64']['output'];
   warnings: Array<NoteWarning>;
 };
@@ -1735,6 +2488,23 @@ export type NoteWarningLevelEnum =
   | 'INFO'
   | 'WARNING';
 
+export type OAuthUrlInput = {
+  /**
+   * If true, returns callbackUrl even if OAuth is not configured.
+   * Useful for admin UI to display the callback URL before configuration.
+   */
+  dry?: InputMaybe<Scalars['Boolean']['input']>;
+  /** URL to redirect to after authentication. */
+  redirectUrl: Scalars['String']['input'];
+};
+
+export type OAuthUrlPayload = {
+  /** Full OAuth URL to redirect user to. Null if OAuth is not configured (and dry is false). */
+  authUrl?: Maybe<Scalars['String']['output']>;
+  /** Callback URL that should be configured in OAuth provider settings. */
+  callbackUrl: Scalars['String']['output'];
+};
+
 export type Offer = {
   id: Scalars['String']['output'];
   priceUSD: Scalars['Float']['output'];
@@ -1750,9 +2520,11 @@ export type PaymentType =
 
 export type PublicNote = {
   html: Scalars['String']['output'];
+  path: Scalars['String']['output'];
   pathId: Scalars['Int64']['output'];
   title: Scalars['String']['output'];
   toc: Array<NoteTocItem>;
+  url: Scalars['String']['output'];
 };
 
 export type Purchase = {
@@ -1775,12 +2547,15 @@ export type PushNotesOrErrorPayload = ErrorPayload | PushNotesPayload;
 
 export type PushNotesPayload = {
   notes: Array<PushedNote>;
+  updated: Array<PushedNote>;
 };
 
 export type PushedNote = {
   assets: Array<PushedNoteAsset>;
   id: Scalars['Int64']['output'];
   path: Scalars['String']['output'];
+  url?: Maybe<Scalars['String']['output']>;
+  warnings: Array<NoteWarning>;
 };
 
 export type PushedNoteAsset = {
@@ -1794,11 +2569,32 @@ export type PushedNoteAsset = {
 
 export type Query = {
   admin: AdminQuery;
+  /** Returns GitHub OAuth URLs for authentication. */
+  githubAuthUrl: OAuthUrlPayload;
+  /** Returns Google OAuth URLs for authentication. */
+  googleAuthUrl: OAuthUrlPayload;
   note?: Maybe<PublicNote>;
   /** X-Api-Key header must be set. */
   notePaths: Array<NotePath>;
+  /** Public URL of the application. Used for OAuth provider Homepage URL and other integrations. */
+  publicUrl: Scalars['String']['output'];
   search: SearchConnection;
+  /**
+   * Find notes semantically similar to the given note using vector embeddings.
+   * Returns empty list if vector search is disabled or note has no embedding.
+   */
+  similarNotes: Array<SimilarNote>;
   viewer: Viewer;
+};
+
+
+export type QueryGithubAuthUrlArgs = {
+  input: OAuthUrlInput;
+};
+
+
+export type QueryGoogleAuthUrlArgs = {
+  input: OAuthUrlInput;
 };
 
 
@@ -1814,6 +2610,11 @@ export type QueryNotePathsArgs = {
 
 export type QuerySearchArgs = {
   input: SearchInput;
+};
+
+
+export type QuerySimilarNotesArgs = {
+  input: SimilarNotesInput;
 };
 
 export type RefreshBoostyDataInput = {
@@ -1840,6 +2641,17 @@ export type RefreshPatreonDataPayload = {
   success: Scalars['Boolean']['output'];
 };
 
+export type RegenerateCronWebhookSecretInput = {
+  id: Scalars['Int64']['input'];
+};
+
+export type RegenerateCronWebhookSecretOrErrorPayload = ErrorPayload | RegenerateCronWebhookSecretPayload;
+
+export type RegenerateCronWebhookSecretPayload = {
+  cronWebhook: AdminCronWebhook;
+  secret: Scalars['String']['output'];
+};
+
 export type RemoveExpiredTgChatMembersInput = {
   chatId?: InputMaybe<Scalars['Int64']['input']>;
   userId?: InputMaybe<Scalars['Int64']['input']>;
@@ -1852,11 +2664,27 @@ export type RemoveExpiredTgChatMembersPayload = {
   removedCount: Scalars['Int']['output'];
 };
 
+export type RemoveFederationSecretSubgraphInput = {
+  kid: Scalars['String']['input'];
+  subgraphID: Scalars['Int64']['input'];
+};
+
+export type RemoveFederationSecretSubgraphOrErrorPayload = ErrorPayload | RemoveFederationSecretSubgraphPayload;
+
+export type RemoveFederationSecretSubgraphPayload = {
+  success: Scalars['Boolean']['output'];
+};
+
+export type RequestCaptchaPayload = {
+  siteKey: Scalars['String']['output'];
+};
+
 export type RequestEmailSignInCodeInput = {
+  captchaToken?: InputMaybe<Scalars['String']['input']>;
   email: Scalars['String']['input'];
 };
 
-export type RequestEmailSignInCodeOrErrorPayload = ErrorPayload | RequestEmailSignInCodePayload;
+export type RequestEmailSignInCodeOrErrorPayload = ErrorPayload | RequestCaptchaPayload | RequestEmailSignInCodePayload;
 
 export type RequestEmailSignInCodePayload = {
   success: Scalars['Boolean']['output'];
@@ -1902,6 +2730,22 @@ export type RestorePatreonCredentialsPayload = {
   patreonCredentials: AdminPatreonCredentials;
 };
 
+export type RevokeFederationSecretOrErrorPayload = ErrorPayload | RevokeFederationSecretPayload;
+
+export type RevokeFederationSecretPayload = {
+  revokedId: Scalars['Int64']['output'];
+};
+
+export type RevokeUserTokenInput = {
+  id: Scalars['ID']['input'];
+};
+
+export type RevokeUserTokenOrErrorPayload = ErrorPayload | RevokeUserTokenPayload;
+
+export type RevokeUserTokenPayload = {
+  token: UserToken;
+};
+
 export type Role =
   | 'ADMIN'
   | 'GUEST'
@@ -1926,10 +2770,17 @@ export type SearchInput = {
   query: Scalars['String']['input'];
 };
 
+export type SearchMatchOrigin =
+  | 'HYBRID'
+  | 'TEXT'
+  | 'VECTOR';
+
 export type SearchResult = {
   document?: Maybe<SearchResultDocument>;
   highlightedContent: Array<Scalars['String']['output']>;
   highlightedTitle?: Maybe<Scalars['String']['output']>;
+  matchOrigin: SearchMatchOrigin;
+  score: Scalars['Float']['output'];
   url: Scalars['String']['output'];
 };
 
@@ -1945,6 +2796,26 @@ export type SendTelegramPublishNoteNowPayload = {
   publishNote: AdminTelegramPublishNote;
 };
 
+export type SetActiveGitHubOAuthCredentialsInput = {
+  id: Scalars['Int64']['input'];
+};
+
+export type SetActiveGitHubOAuthCredentialsOrErrorPayload = ErrorPayload | SetActiveGitHubOAuthCredentialsPayload;
+
+export type SetActiveGitHubOAuthCredentialsPayload = {
+  credentials: AdminGitHubOAuthCredentials;
+};
+
+export type SetActiveGoogleOAuthCredentialsInput = {
+  id: Scalars['Int64']['input'];
+};
+
+export type SetActiveGoogleOAuthCredentialsOrErrorPayload = ErrorPayload | SetActiveGoogleOAuthCredentialsPayload;
+
+export type SetActiveGoogleOAuthCredentialsPayload = {
+  credentials: AdminGoogleOAuthCredentials;
+};
+
 export type SetBoostyTierSubgraphsInput = {
   subgraphIds: Array<Scalars['Int64']['input']>;
   tierId: Scalars['Int64']['input'];
@@ -1955,6 +2826,39 @@ export type SetBoostyTierSubgraphsOrErrorPayload = ErrorPayload | SetBoostyTierS
 export type SetBoostyTierSubgraphsPayload = {
   success: Scalars['Boolean']['output'];
   tier: AdminBoostyTier;
+};
+
+export type SetConfigBoolValueInput = {
+  id: Scalars['String']['input'];
+  value: Scalars['Boolean']['input'];
+};
+
+export type SetConfigBoolValuePayload = ErrorPayload | SetConfigBoolValueSuccess;
+
+export type SetConfigBoolValueSuccess = {
+  configValue: AdminConfigBoolValue;
+};
+
+export type SetConfigIntValueInput = {
+  id: Scalars['String']['input'];
+  value: Scalars['Int']['input'];
+};
+
+export type SetConfigIntValuePayload = ErrorPayload | SetConfigIntValueSuccess;
+
+export type SetConfigIntValueSuccess = {
+  configValue: AdminConfigIntValue;
+};
+
+export type SetConfigStringValueInput = {
+  id: Scalars['String']['input'];
+  value: Scalars['String']['input'];
+};
+
+export type SetConfigStringValuePayload = ErrorPayload | SetConfigStringValueSuccess;
+
+export type SetConfigStringValueSuccess = {
+  configValue: AdminConfigStringValue;
 };
 
 export type SetPatreonTierSubgraphsInput = {
@@ -2035,6 +2939,19 @@ export type SignOutPayload = {
   viewer: Viewer;
 };
 
+export type SimilarNote = {
+  note: PublicNote;
+  /** Similarity score (0-1, higher is more similar). */
+  score: Scalars['Float']['output'];
+};
+
+export type SimilarNotesInput = {
+  /** Maximum number of similar notes to return (default: 5, max: 20). */
+  limit?: InputMaybe<Scalars['Int']['input']>;
+  /** Note path (permalink) to find similar notes for. */
+  path: Scalars['String']['input'];
+};
+
 export type StartBackgroundQueueInput = {
   id: Scalars['String']['input'];
 };
@@ -2055,6 +2972,15 @@ export type StopBackgroundQueuePayload = {
   queues: Array<AdminBackgroundQueue>;
 };
 
+export type StorageSizeFormat =
+  | 'BYTES'
+  | 'KB'
+  | 'MB';
+
+export type StringParamValue = {
+  defaultValue?: Maybe<Scalars['String']['output']>;
+};
+
 export type Subgraph = {
   homePath: Scalars['String']['output'];
   name: Scalars['String']['output'];
@@ -2064,6 +2990,15 @@ export type Subgraph = {
 export type SubgraphWaitList = {
   emailAllowed: Scalars['Boolean']['output'];
   tgBotUrl?: Maybe<Scalars['String']['output']>;
+};
+
+export type Subscription = {
+  currentTime: Scalars['String']['output'];
+};
+
+
+export type SubscriptionCurrentTimeArgs = {
+  format?: InputMaybe<Scalars['String']['input']>;
 };
 
 export type TelegramPost = {
@@ -2086,6 +3021,29 @@ export type ToggleFavoriteNoteOrErrorPayload = ErrorPayload | ToggleFavoriteNote
 export type ToggleFavoriteNotePayload = {
   favoriteNotes: Array<PublicNote>;
   success: Scalars['Boolean']['output'];
+};
+
+export type TriggerChangeWebhookInput = {
+  pathIds: Array<Scalars['Int64']['input']>;
+  webhookId: Scalars['Int64']['input'];
+};
+
+export type TriggerChangeWebhookOrErrorPayload = ErrorPayload | TriggerChangeWebhookPayload;
+
+export type TriggerChangeWebhookPayload = {
+  deliveryId?: Maybe<Scalars['Int64']['output']>;
+  ignoredCount: Scalars['Int64']['output'];
+  matchedCount: Scalars['Int64']['output'];
+};
+
+export type TriggerCronWebhookInput = {
+  cronWebhookId: Scalars['Int64']['input'];
+};
+
+export type TriggerCronWebhookOrErrorPayload = ErrorPayload | TriggerCronWebhookPayload;
+
+export type TriggerCronWebhookPayload = {
+  deliveryId: Scalars['Int64']['output'];
 };
 
 export type UnbanUserInput = {
@@ -2122,6 +3080,43 @@ export type UpdateCronJobOrErrorPayload = ErrorPayload | UpdateCronJobPayload;
 
 export type UpdateCronJobPayload = {
   cronJob: AdminCronJob;
+};
+
+export type UpdateCronWebhookInput = {
+  cronSchedule?: InputMaybe<Scalars['String']['input']>;
+  description?: InputMaybe<Scalars['String']['input']>;
+  enabled?: InputMaybe<Scalars['Boolean']['input']>;
+  id: Scalars['Int64']['input'];
+  instruction?: InputMaybe<Scalars['String']['input']>;
+  maxDepth?: InputMaybe<Scalars['Int64']['input']>;
+  maxRetries?: InputMaybe<Scalars['Int64']['input']>;
+  passApiKey?: InputMaybe<Scalars['Boolean']['input']>;
+  readPatterns?: InputMaybe<Array<Scalars['String']['input']>>;
+  timeoutSeconds?: InputMaybe<Scalars['Int64']['input']>;
+  url?: InputMaybe<Scalars['String']['input']>;
+  writePatterns?: InputMaybe<Array<Scalars['String']['input']>>;
+};
+
+export type UpdateCronWebhookOrErrorPayload = ErrorPayload | UpdateCronWebhookPayload;
+
+export type UpdateCronWebhookPayload = {
+  cronWebhook: AdminCronWebhook;
+};
+
+export type UpdateFrontmatterPatchInput = {
+  description: Scalars['String']['input'];
+  enabled: Scalars['Boolean']['input'];
+  excludePatterns?: InputMaybe<Array<Scalars['String']['input']>>;
+  id: Scalars['Int64']['input'];
+  includePatterns: Array<Scalars['String']['input']>;
+  jsonnet: Scalars['String']['input'];
+  priority: Scalars['Int']['input'];
+};
+
+export type UpdateFrontmatterPatchOrErrorPayload = ErrorPayload | UpdateFrontmatterPatchPayload;
+
+export type UpdateFrontmatterPatchPayload = {
+  frontmatterPatch: AdminFrontmatterPatch;
 };
 
 export type UpdateHtmlInjectionInput = {
@@ -2201,6 +3196,7 @@ export type UpdateSubgraphInput = {
   color: Scalars['String']['input'];
   hidden: Scalars['Boolean']['input'];
   id: Scalars['Int64']['input'];
+  requireSignin: Scalars['Boolean']['input'];
 };
 
 export type UpdateSubgraphOrErrorPayload = ErrorPayload | UpdateSubgraphPayload;
@@ -2263,6 +3259,7 @@ export type User = {
   email?: Maybe<Scalars['String']['output']>;
   favoriteNotes: Array<PublicNote>;
   subgraphAccesses: Array<UserSubgraphAccess>;
+  tokens: Array<UserToken>;
 };
 
 export type UserBan = {
@@ -2278,6 +3275,17 @@ export type UserSubgraphAccess = {
   expiresAt?: Maybe<Scalars['Time']['output']>;
   id: Scalars['ID']['output'];
   subgraph: Subgraph;
+};
+
+export type UserToken = {
+  createdAt: Scalars['Time']['output'];
+  expiresAt?: Maybe<Scalars['Time']['output']>;
+  id: Scalars['ID']['output'];
+  lastUsedAt?: Maybe<Scalars['Time']['output']>;
+  name: Scalars['String']['output'];
+  revokedAt?: Maybe<Scalars['Time']['output']>;
+  scope: Scalars['String']['output'];
+  tokenPrefix: Scalars['String']['output'];
 };
 
 export type Vector2 = {
@@ -2337,7 +3345,7 @@ export type PushNotesMutationVariables = Exact<{
 
 export type PushNotesMutation = { pushNotes:
     | { message: string }
-    | { notes: Array<{ id: number, path: string, assets: Array<{ path: string, sha256Hash?: string | null, absolutePath: string, url: string }> }> }
+    | { notes: Array<{ id: number, path: string, assets: Array<{ path: string, sha256Hash?: string | null, absolutePath: string, url: string }> }>, updated: Array<{ path: string, url?: string | null }> }
    };
 
 export type HideNotesMutationVariables = Exact<{
@@ -2364,7 +3372,7 @@ export type CommitNotesMutationVariables = Exact<{ [key: string]: never; }>;
 
 
 export type CommitNotesMutation = { commitNotes:
-    | { success: boolean }
+    | { success: boolean, updated: Array<{ path: string, url?: string | null }> }
     | { message: string }
    };
 
@@ -2415,6 +3423,10 @@ export const PushNotesDocument = gql`
           url
         }
       }
+      updated {
+        path
+        url
+      }
     }
   }
 }
@@ -2450,6 +3462,10 @@ export const CommitNotesDocument = gql`
   commitNotes {
     ... on CommitNotesPayload {
       success
+      updated {
+        path
+        url
+      }
     }
     ... on ErrorPayload {
       message

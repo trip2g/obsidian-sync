@@ -40,6 +40,10 @@ mutation PushNotes($input: PushNotesInput!) {
 					url
 				}
 			}
+			updated {
+				path
+				url
+			}
 		}
 	}
 }
@@ -72,6 +76,10 @@ mutation CommitNotes {
 	commitNotes {
 		... on CommitNotesPayload {
 			success
+			updated {
+				path
+				url
+			}
 		}
 		... on ErrorPayload {
 			message

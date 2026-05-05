@@ -255,6 +255,9 @@ export class NodeEnv implements SyncEnv {
 			}
 
 			console.log(`✅ Pushed ${updates.length} notes`);
+			const urlMap = new Map(
+				(result.pushNotes.updated ?? []).map((u) => [u.path, u.url ?? null])
+			);
 			return result.pushNotes.notes.map((n) => ({
 				id: String(n.id),
 				path: n.path,
@@ -264,6 +267,7 @@ export class NodeEnv implements SyncEnv {
 					absolutePath: a.absolutePath ?? null,
 					url: a.url ?? null,
 				})),
+				url: urlMap.get(n.path) ?? null,
 			}));
 		} catch (e) {
 			console.error(`❌ Failed to push notes: ${e}`);

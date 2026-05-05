@@ -63,6 +63,7 @@ export interface SyncResult {
 	assetsUploaded: number;
 	assetsDownloaded: number;
 	errors: string[];
+	updatedUrls: Array<{ path: string; url: string }>;
 }
 
 // ============ Filter Options ============
@@ -96,6 +97,7 @@ export interface PushedNote {
 	id: string;
 	path: string;
 	assets: NoteAsset[];
+	url?: string | null;
 }
 
 export interface NoteAsset {
