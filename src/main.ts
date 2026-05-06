@@ -88,6 +88,25 @@ export default class Trip2gSyncPlugin extends Plugin {
 			const url = this.publishedUrls.get(file.path);
 			if (url) window.open(url, "_blank");
 		});
+		this.statusBarItem.addEventListener("contextmenu", (e) => {
+			e.preventDefault();
+			const file = this.app.workspace.getActiveFile();
+			if (!file) return;
+			const url = this.publishedUrls.get(file.path);
+			if (url) navigator.clipboard.writeText(url).then(() => new Notice("URL copied"));
+		});
+
+		this.addCommand({
+			id: "copy-published-url",
+			name: "Copy published URL of current file",
+			callback: () => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file) { new Notice("No file open"); return; }
+				const url = this.publishedUrls.get(file.path);
+				if (!url) { new Notice("File not published yet"); return; }
+				navigator.clipboard.writeText(url).then(() => new Notice("URL copied"));
+			},
+		});
 		this.registerEvent(
 			this.app.workspace.on("file-open", (file) => this.updateStatusBar(file ?? null))
 		);
