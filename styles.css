@@ -466,7 +466,6 @@ img[src*="ce.trip2g.com"] {
 .trip2g-warnings-hint {
 	color: var(--text-faint);
 	font-size: 12px;
-	margin-bottom: 16px;
 }
 
 .trip2g-warnings-table {
