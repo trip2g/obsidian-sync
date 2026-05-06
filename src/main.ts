@@ -839,7 +839,7 @@ class SyncWarningsView extends ItemView {
 		const table = contentEl.createEl("table", { cls: "trip2g-warnings-table" });
 		const thead = table.createEl("thead");
 		const hr = thead.createEl("tr");
-		["Path", "Level", "Warning", "URL", "Open", "Copy"].forEach((h) =>
+		["Path", "Level", "Warning", "Actions"].forEach((h) =>
 			hr.createEl("th", { text: h })
 		);
 
@@ -849,17 +849,33 @@ class SyncWarningsView extends ItemView {
 			tr.createEl("td", { text: w.path, cls: "trip2g-warnings-path" });
 			tr.createEl("td", { text: w.level });
 			tr.createEl("td", { text: w.message });
-			const urlTd = tr.createEl("td");
+
+			const actionsTd = tr.createEl("td", { cls: "trip2g-warnings-actions" });
+
+			// Open file in Obsidian tab
+			const openFileBtn = actionsTd.createEl("button", { text: "Open in tab" });
+			openFileBtn.addEventListener("click", async () => {
+				const syncDir = this.plugin.settings.syncDirs[0];
+				if (!syncDir) return;
+				const base = syncDir.path && syncDir.path !== "/" ? syncDir.path + "/" : "";
+				const fullPath = base + w.path;
+				const file = this.plugin.app.vault.getAbstractFileByPath(fullPath);
+				if (file instanceof TFile) {
+					const leaf = this.plugin.app.workspace.getLeaf("tab");
+					await leaf.openFile(file);
+				} else {
+					new Notice(`File not found: ${w.path}`);
+				}
+			});
+
+			// Open in browser
 			if (w.url) {
-				urlTd.createEl("a", { text: new URL(w.url).hostname, href: w.url, cls: "external-link" });
+				const openWebBtn = actionsTd.createEl("button", { text: "Open in browser" });
+				openWebBtn.addEventListener("click", () => window.open(w.url, "_blank"));
 			}
-			const openTd = tr.createEl("td");
-			if (w.url) {
-				const btn = openTd.createEl("button", { text: "Open" });
-				btn.addEventListener("click", () => window.open(w.url, "_blank"));
-			}
-			const copyTd = tr.createEl("td");
-			const copyBtn = copyTd.createEl("button", { text: "Copy" });
+
+			// Copy warning for agent
+			const copyBtn = actionsTd.createEl("button", { text: "Copy warning" });
 			copyBtn.addEventListener("click", () => {
 				const text = `[${w.level}] ${w.path}: ${w.message}${w.url ? `\n${w.url}` : ""}`;
 				navigator.clipboard.writeText(text).then(() => new Notice("Copied"));
