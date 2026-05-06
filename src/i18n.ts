@@ -39,6 +39,8 @@ export interface Translations {
 	globalSettingsHeading: string;
 	skipPushConfirmationLabel: string;
 	skipPushConfirmationDesc: string;
+	hideSyncStatusLabel: string;
+	hideSyncStatusDesc: string;
 	onboardingLink: string;
 
 	// Sync actions
@@ -158,6 +160,8 @@ const en: Translations = {
 	globalSettingsHeading: "Global settings",
 	skipPushConfirmationLabel: "Skip push confirmation",
 	skipPushConfirmationDesc: "Don't show confirmation dialog before uploading files to server",
+	hideSyncStatusLabel: "Hide sync badge",
+	hideSyncStatusDesc: "Don't show the pending-changes indicator on the ribbon icon",
 	onboardingLink: "Onboarding guide",
 
 	// Sync actions
@@ -280,6 +284,8 @@ const ru: Translations = {
 	globalSettingsHeading: "Общие настройки",
 	skipPushConfirmationLabel: "Не спрашивать подтверждение",
 	skipPushConfirmationDesc: "Не показывать диалог подтверждения перед загрузкой файлов на сервер",
+	hideSyncStatusLabel: "Скрыть бейдж синка",
+	hideSyncStatusDesc: "Не показывать индикатор ожидающих изменений на иконке",
 	onboardingLink: "Руководство по настройке",
 
 	// Sync actions

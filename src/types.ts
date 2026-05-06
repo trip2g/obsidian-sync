@@ -14,6 +14,8 @@ export interface PluginSettings {
 	syncDirs: SyncDir[];
 	/** Skip push confirmation dialog */
 	skipPushConfirmation?: boolean;
+	/** Hide badge/indicator on ribbon icon */
+	hideSyncStatus?: boolean;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {

@@ -243,7 +243,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 	 * Check for pending changes and update badge
 	 */
 	async checkForPendingChanges(): Promise<void> {
-		if (!this.ribbonIcon || this.settings.syncDirs.length === 0 || this.isSyncing) {
+		if (!this.ribbonIcon || this.settings.syncDirs.length === 0 || this.isSyncing || this.settings.hideSyncStatus) {
 			return;
 		}
 
@@ -971,6 +971,19 @@ class SyncSettingTab extends PluginSettingTab {
 				toggle.setValue(this.plugin.settings.skipPushConfirmation ?? false).onChange(async (value) => {
 					this.plugin.settings.skipPushConfirmation = value;
 					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName(i18n.hideSyncStatusLabel)
+			.setDesc(i18n.hideSyncStatusDesc)
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.hideSyncStatus ?? false).onChange(async (value) => {
+					this.plugin.settings.hideSyncStatus = value;
+					await this.plugin.saveSettings();
+					if (value && this.plugin.ribbonIcon) {
+						this.plugin.ribbonIcon.removeClass("has-pending", "has-pull", "has-push", "has-conflict");
+					}
 				})
 			);
 	}
