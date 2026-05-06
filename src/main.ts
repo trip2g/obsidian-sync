@@ -833,23 +833,21 @@ class SyncWarningsView extends ItemView {
 			cls: "trip2g-warnings-desc",
 		});
 
-		const hintRow = contentEl.createDiv({ cls: "trip2g-warnings-meta" });
+		const metaRow = contentEl.createDiv({ cls: "trip2g-warnings-meta" });
+		const statusSpan = metaRow.createEl("span", { cls: "trip2g-warnings-hint" });
+		statusSpan.setText(this.allWarningsLoaded ? "All warnings from server." : "Last sync only.");
+
 		if (!this.allWarningsLoaded) {
-			hintRow.createEl("span", {
-				text: "Showing warnings from last sync only. ",
-				cls: "trip2g-warnings-hint",
-			});
-			const loadBtn = hintRow.createEl("button", { text: "Load All Warnings", cls: "trip2g-warnings-load-btn" });
+			const loadBtn = metaRow.createEl("button", { text: "Load All Warnings", cls: "trip2g-warnings-action-btn" });
 			loadBtn.addEventListener("click", () => this.loadAllWarnings());
-		} else {
-			hintRow.createEl("span", { text: "Showing all warnings from server.", cls: "trip2g-warnings-hint" });
 		}
-		const copyAllBtn = hintRow.createEl("button", { text: "Copy All Warnings (JSON)", cls: "trip2g-warnings-load-btn" });
+		const copyAllBtn = metaRow.createEl("button", { text: "Copy All (JSON)", cls: "trip2g-warnings-action-btn" });
 		copyAllBtn.addEventListener("click", () => {
-			navigator.clipboard.writeText(JSON.stringify(data, null, 2)).then(() => new Notice("Copied all warnings"));
+			navigator.clipboard.writeText(JSON.stringify(data, null, 2)).then(() => new Notice("Copied"));
 		});
-		hintRow.createEl("span", {
-			text: '  💡 "Show last sync warnings" in command palette',
+
+		contentEl.createEl("p", {
+			text: '💡 Reopen anytime: "Show last sync warnings" in command palette',
 			cls: "trip2g-warnings-hint",
 		});
 

@@ -518,15 +518,15 @@ img[src*="ce.trip2g.com"] {
 }
 
 .trip2g-warnings-meta {
-	margin-bottom: 14px;
 	display: flex;
 	align-items: center;
-	gap: 10px;
-	flex-wrap: wrap;
+	gap: 8px;
+	margin-bottom: 6px;
 }
 
-.trip2g-warnings-load-btn {
+.trip2g-warnings-action-btn {
 	font-size: 12px;
-	padding: 3px 10px;
+	padding: 2px 10px;
 	cursor: pointer;
+	border-radius: 4px;
 }
