@@ -827,27 +827,29 @@ class SyncWarningsView extends ItemView {
 		contentEl.empty();
 		const data = warnings ?? this.plugin.lastWarnings;
 
-		contentEl.createEl("h2", { text: "⚠️ Sync warnings" });
+		contentEl.createEl("h2", { text: "⚠️ Sync Warnings" });
 		contentEl.createEl("p", {
-			text: "The system noticed anomalies during the last sync. Review and fix the issues below.",
+			text: "Sync completed — your notes are safe. The items below may need a quick review.",
 			cls: "trip2g-warnings-desc",
 		});
 
-		const metaRow = contentEl.createDiv({ cls: "trip2g-warnings-meta" });
-		const statusSpan = metaRow.createEl("span", { cls: "trip2g-warnings-hint" });
-		statusSpan.setText(this.allWarningsLoaded ? "All warnings from server." : "Last sync only.");
-
+		const toolbar = contentEl.createDiv({ cls: "trip2g-warnings-toolbar" });
+		toolbar.createEl("span", {
+			text: `${data.length} item${data.length === 1 ? "" : "s"} · ${this.allWarningsLoaded ? "all notes" : "last sync"}`,
+			cls: "trip2g-warnings-count",
+		});
 		if (!this.allWarningsLoaded) {
-			const loadBtn = metaRow.createEl("button", { text: "Load All Warnings", cls: "trip2g-warnings-action-btn" });
+			const loadBtn = toolbar.createEl("button", { text: "Load All", cls: "trip2g-warnings-action-btn" });
 			loadBtn.addEventListener("click", () => this.loadAllWarnings());
 		}
-		const copyAllBtn = metaRow.createEl("button", { text: "Copy All (JSON)", cls: "trip2g-warnings-action-btn" });
-		copyAllBtn.addEventListener("click", () => {
-			navigator.clipboard.writeText(JSON.stringify(data, null, 2)).then(() => new Notice("Copied"));
-		});
-
-		contentEl.createEl("p", {
-			text: '💡 Reopen anytime: "Show last sync warnings" in command palette',
+		if (data.length > 0) {
+			const copyAllBtn = toolbar.createEl("button", { text: "Copy All (JSON)", cls: "trip2g-warnings-action-btn" });
+			copyAllBtn.addEventListener("click", () => {
+				navigator.clipboard.writeText(JSON.stringify(data, null, 2)).then(() => new Notice("Copied"));
+			});
+		}
+		toolbar.createEl("span", {
+			text: '· Reopen: "Show last sync warnings" in command palette',
 			cls: "trip2g-warnings-hint",
 		});
 
