@@ -39,6 +39,7 @@ export async function executePlan(
 		assetsDownloaded: 0,
 		errors: [],
 		updatedUrls: [],
+		warnings: [],
 	};
 
 	const syncState = env.getSyncState();
@@ -130,7 +131,12 @@ export async function executePlan(
 	// 7. Commit all changes
 	if (result.pushed > 0 || result.assetsUploaded > 0) {
 		const commitResult = await env.commitNotes();
-		result.updatedUrls = commitResult.updated;
+		result.updatedUrls = commitResult.updated.map(({ path, url }) => ({ path, url }));
+		for (const note of commitResult.updated) {
+			for (const w of note.warnings) {
+				result.warnings.push({ path: note.path, level: w.level, message: w.message });
+			}
+		}
 	}
 
 	// 8. Save sync state

@@ -637,7 +637,7 @@ export class BrowserEnv implements SyncEnv {
 		}
 	}
 
-	async commitNotes(): Promise<{ updated: Array<{ path: string; url: string }> }> {
+	async commitNotes(): Promise<{ updated: Array<{ path: string; url: string; warnings: Array<{ level: string; message: string }> }> }> {
 		const query = `mutation CommitNotes {
 			commitNotes {
 				... on ErrorPayload {
@@ -650,6 +650,10 @@ export class BrowserEnv implements SyncEnv {
 					updated {
 						path
 						url
+						warnings {
+							level
+							message
+						}
 					}
 				}
 			}
@@ -658,7 +662,7 @@ export class BrowserEnv implements SyncEnv {
 		const result = await this.graphqlRequest<{
 			commitNotes:
 				| { __typename: "ErrorPayload"; message: string }
-				| { __typename: "CommitNotesPayload"; success: boolean; updated: Array<{ path: string; url: string | null }> };
+				| { __typename: "CommitNotesPayload"; success: boolean; updated: Array<{ path: string; url: string | null; warnings: Array<{ level: string; message: string }> }> };
 		}>(query);
 
 		if (result.commitNotes.__typename === "ErrorPayload") {
@@ -667,7 +671,11 @@ export class BrowserEnv implements SyncEnv {
 
 		this.log("Notes committed");
 		return {
-			updated: (result.commitNotes.updated ?? []).map((n) => ({ path: n.path, url: n.url ?? "" })),
+			updated: (result.commitNotes.updated ?? []).map((n) => ({
+				path: n.path,
+				url: n.url ?? "",
+				warnings: (n.warnings ?? []).map((w) => ({ level: w.level, message: w.message })),
+			})),
 		};
 	}
 

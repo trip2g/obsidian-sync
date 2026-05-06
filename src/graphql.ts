@@ -3377,7 +3377,7 @@ export type CommitNotesMutationVariables = Exact<{ [key: string]: never; }>;
 
 
 export type CommitNotesMutation = { commitNotes:
-    | { success: boolean, updated: Array<{ path: string, url?: string | null }> }
+    | { success: boolean, updated: Array<{ path: string, url?: string | null, warnings: Array<{ level: NoteWarningLevelEnum, message: string }> }> }
     | { message: string }
    };
 
@@ -3480,6 +3480,10 @@ export const CommitNotesDocument = gql`
       updated {
         path
         url
+        warnings {
+          level
+          message
+        }
       }
     }
     ... on ErrorPayload {

@@ -64,6 +64,7 @@ export interface SyncResult {
 	assetsDownloaded: number;
 	errors: string[];
 	updatedUrls: Array<{ path: string; url: string }>;
+	warnings: Array<{ path: string; level: string; message: string }>;
 }
 
 // ============ Filter Options ============
@@ -188,8 +189,13 @@ export interface AssetSyncResult {
 	errors: string[];
 }
 
+export interface NoteWarning {
+	level: string;
+	message: string;
+}
+
 export interface CommitNotesResult {
-	updated: Array<{ path: string; url: string }>;
+	updated: Array<{ path: string; url: string; warnings: NoteWarning[] }>;
 }
 
 export interface SyncEnv extends ClassifyEnv {

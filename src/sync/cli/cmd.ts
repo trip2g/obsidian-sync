@@ -312,6 +312,12 @@ async function main(): Promise<void> {
 			console.log(`    ❌ ${err}`);
 		}
 	}
+	if (result.warnings.length > 0) {
+		console.log(`  Warnings:           ${result.warnings.length}`);
+		for (const w of result.warnings) {
+			console.log(`    ⚠️  [${w.level}] ${w.path}: ${w.message}`);
+		}
+	}
 	console.log("=".repeat(60));
 
 	// 6. Print updated URLs

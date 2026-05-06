@@ -504,6 +504,9 @@ export default class Trip2gSyncPlugin extends Plugin {
 				if (result.errors.length > 0) {
 					console.error("[Trip2g Sync] Errors:", result.errors);
 				}
+				if (result.warnings.length > 0) {
+					new SyncWarningsModal(this.app, result.warnings).open();
+				}
 				if (result.pulled === 0 && result.pushed === 0 && result.conflictsResolved === 0 && filteredPlan.unchanged > 0) {
 					new Notice(t().allFilesUpToDate);
 				}
@@ -761,6 +764,29 @@ class SyncDirectoryModal extends Modal {
 				await this.plugin.syncDirectory(dir);
 			});
 		});
+	}
+
+	onClose() {
+		this.contentEl.empty();
+	}
+}
+
+class SyncWarningsModal extends Modal {
+	constructor(app: App, private warnings: Array<{ path: string; level: string; message: string }>) {
+		super(app);
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.createEl("h2", { text: `⚠️ Sync warnings (${this.warnings.length})` });
+		const list = contentEl.createEl("ul");
+		list.style.maxHeight = "400px";
+		list.style.overflowY = "auto";
+		for (const w of this.warnings) {
+			const item = list.createEl("li");
+			item.createEl("strong", { text: w.path });
+			item.createEl("span", { text: `: [${w.level}] ${w.message}` });
+		}
 	}
 
 	onClose() {

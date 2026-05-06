@@ -382,13 +382,17 @@ export class ObsidianSyncEnv implements SyncEnv {
 		}
 	}
 
-	async commitNotes(): Promise<{ updated: Array<{ path: string; url: string }> }> {
+	async commitNotes(): Promise<{ updated: Array<{ path: string; url: string; warnings: Array<{ level: string; message: string }> }> }> {
 		const result = await this.sdk.CommitNotes();
 		if ("message" in result.commitNotes) {
 			throw new Error(`Commit failed: ${result.commitNotes.message}`);
 		}
 		return {
-			updated: (result.commitNotes.updated ?? []).map((n) => ({ path: n.path, url: n.url ?? "" })),
+			updated: (result.commitNotes.updated ?? []).map((n) => ({
+				path: n.path,
+				url: n.url ?? "",
+				warnings: (n.warnings ?? []).map((w) => ({ level: w.level, message: w.message })),
+			})),
 		};
 	}
 

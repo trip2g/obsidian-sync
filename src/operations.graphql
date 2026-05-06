@@ -88,6 +88,10 @@ mutation CommitNotes {
 			updated {
 				path
 				url
+				warnings {
+					level
+					message
+				}
 			}
 		}
 		... on ErrorPayload {
