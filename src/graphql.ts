@@ -3324,6 +3324,11 @@ export type FetchServerHashesQueryVariables = Exact<{ [key: string]: never; }>;
 
 export type FetchServerHashesQuery = { notePaths: Array<{ path: string, hash: string }> };
 
+export type FetchPublishedUrlsQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type FetchPublishedUrlsQuery = { notePaths: Array<{ path: string, latestNoteView?: { url: string } | null }> };
+
 export type FetchNoteContentsQueryVariables = Exact<{
   filter?: InputMaybe<NotePathsFilter>;
 }>;
@@ -3382,6 +3387,16 @@ export const FetchServerHashesDocument = gql`
   notePaths {
     path: value
     hash: latestContentHash
+  }
+}
+    `;
+export const FetchPublishedUrlsDocument = gql`
+    query FetchPublishedUrls {
+  notePaths {
+    path: value
+    latestNoteView {
+      url
+    }
   }
 }
     `;
@@ -3483,6 +3498,9 @@ export function getSdk(client: GraphQLClient, withWrapper: SdkFunctionWrapper = 
   return {
     FetchServerHashes(variables?: FetchServerHashesQueryVariables, requestHeaders?: GraphQLClientRequestHeaders, signal?: RequestInit['signal']): Promise<FetchServerHashesQuery> {
       return withWrapper((wrappedRequestHeaders) => client.request<FetchServerHashesQuery>({ document: FetchServerHashesDocument, variables, requestHeaders: { ...requestHeaders, ...wrappedRequestHeaders }, signal }), 'FetchServerHashes', 'query', variables);
+    },
+    FetchPublishedUrls(variables?: FetchPublishedUrlsQueryVariables, requestHeaders?: GraphQLClientRequestHeaders, signal?: RequestInit['signal']): Promise<FetchPublishedUrlsQuery> {
+      return withWrapper((wrappedRequestHeaders) => client.request<FetchPublishedUrlsQuery>({ document: FetchPublishedUrlsDocument, variables, requestHeaders: { ...requestHeaders, ...wrappedRequestHeaders }, signal }), 'FetchPublishedUrls', 'query', variables);
     },
     FetchNoteContents(variables?: FetchNoteContentsQueryVariables, requestHeaders?: GraphQLClientRequestHeaders, signal?: RequestInit['signal']): Promise<FetchNoteContentsQuery> {
       return withWrapper((wrappedRequestHeaders) => client.request<FetchNoteContentsQuery>({ document: FetchNoteContentsDocument, variables, requestHeaders: { ...requestHeaders, ...wrappedRequestHeaders }, signal }), 'FetchNoteContents', 'query', variables);

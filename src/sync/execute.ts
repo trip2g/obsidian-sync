@@ -99,7 +99,6 @@ export async function executePlan(
 			result.pushed = pushResult.count;
 			result.errors.push(...pushResult.errors);
 			pushedNotes = pushResult.pushedNotes;
-			result.updatedUrls = pushResult.urls;
 		}
 	}
 
@@ -130,7 +129,8 @@ export async function executePlan(
 
 	// 7. Commit all changes
 	if (result.pushed > 0 || result.assetsUploaded > 0) {
-		await env.commitNotes();
+		const commitResult = await env.commitNotes();
+		result.updatedUrls = commitResult.updated;
 	}
 
 	// 8. Save sync state

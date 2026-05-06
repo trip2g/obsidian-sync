@@ -5,6 +5,15 @@ query FetchServerHashes {
 	}
 }
 
+query FetchPublishedUrls {
+	notePaths {
+		path: value
+		latestNoteView {
+			url
+		}
+	}
+}
+
 query FetchNoteContents($filter: NotePathsFilter) {
 	notePaths(filter: $filter) {
 		path: value

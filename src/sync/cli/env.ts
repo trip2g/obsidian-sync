@@ -455,7 +455,7 @@ export class NodeEnv implements SyncEnv {
 		}
 	}
 
-	async commitNotes(): Promise<void> {
+	async commitNotes(): Promise<{ updated: Array<{ path: string; url: string }> }> {
 		try {
 			const result = await this.sdk.CommitNotes();
 
@@ -464,8 +464,12 @@ export class NodeEnv implements SyncEnv {
 			}
 
 			console.log("✅ Notes committed");
+			return {
+				updated: (result.commitNotes.updated ?? []).map((n) => ({ path: n.path, url: n.url ?? "" })),
+			};
 		} catch (e) {
 			console.error(`❌ Failed to commit notes: ${e}`);
+			return { updated: [] };
 		}
 	}
 

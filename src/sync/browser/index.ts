@@ -637,7 +637,7 @@ export class BrowserEnv implements SyncEnv {
 		}
 	}
 
-	async commitNotes(): Promise<void> {
+	async commitNotes(): Promise<{ updated: Array<{ path: string; url: string }> }> {
 		const query = `mutation CommitNotes {
 			commitNotes {
 				... on ErrorPayload {
@@ -647,6 +647,10 @@ export class BrowserEnv implements SyncEnv {
 				... on CommitNotesPayload {
 					__typename
 					success
+					updated {
+						path
+						url
+					}
 				}
 			}
 		}`;
@@ -654,7 +658,7 @@ export class BrowserEnv implements SyncEnv {
 		const result = await this.graphqlRequest<{
 			commitNotes:
 				| { __typename: "ErrorPayload"; message: string }
-				| { __typename: "CommitNotesPayload"; success: boolean };
+				| { __typename: "CommitNotesPayload"; success: boolean; updated: Array<{ path: string; url: string | null }> };
 		}>(query);
 
 		if (result.commitNotes.__typename === "ErrorPayload") {
@@ -662,6 +666,9 @@ export class BrowserEnv implements SyncEnv {
 		}
 
 		this.log("Notes committed");
+		return {
+			updated: (result.commitNotes.updated ?? []).map((n) => ({ path: n.path, url: n.url ?? "" })),
+		};
 	}
 
 	// ============ Asset Operations ============

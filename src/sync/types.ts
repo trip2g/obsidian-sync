@@ -188,6 +188,10 @@ export interface AssetSyncResult {
 	errors: string[];
 }
 
+export interface CommitNotesResult {
+	updated: Array<{ path: string; url: string }>;
+}
+
 export interface SyncEnv extends ClassifyEnv {
 	// Configuration
 	/** Batch size for pushNotes calls (default: 100) */
@@ -208,7 +212,7 @@ export interface SyncEnv extends ClassifyEnv {
 	fetchNoteAssets(paths: string[]): Promise<NoteAssetInfo[]>;
 	uploadAsset(params: UploadAssetParams): Promise<boolean>;
 	downloadAsset(url: string): Promise<ArrayBuffer | null>;
-	commitNotes(): Promise<void>;
+	commitNotes(): Promise<CommitNotesResult>;
 
 	// Asset operations
 	/** Compute SHA256 hash for binary data (URL-safe base64 with padding) */

@@ -125,6 +125,9 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 		// Initial check after a short delay
 		window.setTimeout(() => this.checkForPendingChanges(), 3000);
+
+		// Fetch all published URLs for status bar
+		window.setTimeout(() => this.fetchAllPublishedUrls(), 5000);
 	}
 
 	onunload() {
@@ -176,6 +179,28 @@ export default class Trip2gSyncPlugin extends Plugin {
 				// ignore
 			}
 		}
+	}
+
+	async fetchAllPublishedUrls(): Promise<void> {
+		for (const syncDir of this.settings.syncDirs) {
+			if (!syncDir.apiUrl || !syncDir.apiKey) continue;
+			try {
+				const sdk = createSdk(syncDir.apiUrl, syncDir.apiKey, this.manifest.version);
+				const data = await sdk.FetchPublishedUrls();
+				const folder = this.app.vault.getAbstractFileByPath(syncDir.path);
+				const base = folder && folder.path && folder.path !== "/" ? folder.path + "/" : "";
+				for (const item of data.notePaths) {
+					const url = item.latestNoteView?.url;
+					if (url) {
+						this.publishedUrls.set(base + item.path, url);
+					}
+				}
+			} catch {
+				// silently skip — server may be offline
+			}
+		}
+		this.savePublishedUrls();
+		this.updateStatusBar(this.app.workspace.getActiveFile());
 	}
 
 	savePublishedUrls(): void {
