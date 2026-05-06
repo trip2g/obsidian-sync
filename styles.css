@@ -516,3 +516,17 @@ img[src*="ce.trip2g.com"] {
 	padding: 3px 8px;
 	cursor: pointer;
 }
+
+.trip2g-warnings-meta {
+	margin-bottom: 14px;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	flex-wrap: wrap;
+}
+
+.trip2g-warnings-load-btn {
+	font-size: 12px;
+	padding: 3px 10px;
+	cursor: pointer;
+}

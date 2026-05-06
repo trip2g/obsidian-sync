@@ -14,6 +14,7 @@
 
 import * as fs from "fs";
 import { NodeEnv, type CliConflictResolution } from "./env";
+import { createClient } from "./client";
 import { classifySync } from "../classify";
 import { filterPlan } from "../filter";
 import { executePlan } from "../execute";
@@ -181,7 +182,32 @@ Examples:
 `);
 }
 
+async function cmdWarnings(): Promise<void> {
+	const apiUrl = process.env.TRIP2G_ENDPOINT || process.env.ENDPOINT || "http://localhost:8081/graphql";
+	const apiKey = process.env.TRIP2G_API_KEY || process.env.API_KEY || "";
+	if (!apiKey) {
+		console.error("❌ TRIP2G_API_KEY or API_KEY required");
+		process.exit(1);
+	}
+	const sdk = createClient({ apiUrl, apiKey });
+	const data = await sdk.FetchAllWarnings();
+	const result: Array<{ path: string; level: string; message: string; url: string }> = [];
+	for (const item of data.notePaths) {
+		const view = item.latestNoteView;
+		if (!view) continue;
+		for (const w of (view.warnings ?? [])) {
+			result.push({ path: item.path, level: w.level, message: w.message, url: view.url ?? "" });
+		}
+	}
+	console.log(JSON.stringify(result, null, 2));
+}
+
 async function main(): Promise<void> {
+	if (process.argv[2] === "warnings") {
+		await cmdWarnings();
+		return;
+	}
+
 	const args = parseArgs();
 
 	// Validate required args

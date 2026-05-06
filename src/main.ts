@@ -810,6 +810,8 @@ class SyncDirectoryModal extends Modal {
 }
 
 class SyncWarningsView extends ItemView {
+	private allWarningsLoaded = false;
+
 	constructor(leaf: WorkspaceLeaf, private plugin: Trip2gSyncPlugin) {
 		super(leaf);
 	}
@@ -820,22 +822,34 @@ class SyncWarningsView extends ItemView {
 
 	async onOpen() { this.render(); }
 
-	render() {
+	render(warnings?: Array<{ path: string; level: string; message: string; url: string }>) {
 		const { contentEl } = this;
 		contentEl.empty();
-		const warnings = this.plugin.lastWarnings;
+		const data = warnings ?? this.plugin.lastWarnings;
 
 		contentEl.createEl("h2", { text: "⚠️ Sync warnings" });
 		contentEl.createEl("p", {
 			text: "The system noticed anomalies during the last sync. Review and fix the issues below.",
 			cls: "trip2g-warnings-desc",
 		});
-		contentEl.createEl("p", {
-			text: '💡 Reopen anytime via command palette: "Show last sync warnings"',
+
+		const hintRow = contentEl.createDiv({ cls: "trip2g-warnings-meta" });
+		if (!this.allWarningsLoaded) {
+			hintRow.createEl("span", {
+				text: "Showing warnings from last sync only. ",
+				cls: "trip2g-warnings-hint",
+			});
+			const loadBtn = hintRow.createEl("button", { text: "Load all warnings", cls: "trip2g-warnings-load-btn" });
+			loadBtn.addEventListener("click", () => this.loadAllWarnings());
+		} else {
+			hintRow.createEl("span", { text: "Showing all warnings from server.", cls: "trip2g-warnings-hint" });
+		}
+		hintRow.createEl("span", {
+			text: '  💡 "Show last sync warnings" in command palette',
 			cls: "trip2g-warnings-hint",
 		});
 
-		if (warnings.length === 0) {
+		if (data.length === 0) {
 			contentEl.createEl("p", { text: "No warnings." });
 			return;
 		}
@@ -848,7 +862,7 @@ class SyncWarningsView extends ItemView {
 		);
 
 		const tbody = table.createEl("tbody");
-		for (const w of warnings) {
+		for (const w of data) {
 			const tr = tbody.createEl("tr");
 			tr.createEl("td", { text: w.path, cls: "trip2g-warnings-path" });
 			tr.createEl("td", { text: w.level });
@@ -884,6 +898,33 @@ class SyncWarningsView extends ItemView {
 				const text = `[${w.level}] ${w.path}: ${w.message}${w.url ? `\n${w.url}` : ""}`;
 				navigator.clipboard.writeText(text).then(() => new Notice("Copied"));
 			});
+		}
+	}
+
+	async loadAllWarnings(): Promise<void> {
+		const syncDir = this.plugin.settings.syncDirs[0];
+		if (!syncDir?.apiUrl || !syncDir?.apiKey) {
+			new Notice("No sync connection configured");
+			return;
+		}
+		new Notice("Loading all warnings...");
+		try {
+			const sdk = createSdk(syncDir.apiUrl, syncDir.apiKey, this.plugin.manifest.version);
+			const data = await sdk.FetchAllWarnings();
+			const base = syncDir.path && syncDir.path !== "/" ? syncDir.path + "/" : "";
+			const all: Array<{ path: string; level: string; message: string; url: string }> = [];
+			for (const item of data.notePaths) {
+				const view = item.latestNoteView;
+				if (!view) continue;
+				for (const w of (view.warnings ?? [])) {
+					all.push({ path: item.path, level: w.level, message: w.message, url: view.url ?? "" });
+				}
+			}
+			this.allWarningsLoaded = true;
+			this.render(all);
+			if (all.length === 0) new Notice("No warnings found");
+		} catch (e) {
+			new Notice(`Failed to load warnings: ${(e as Error).message}`);
 		}
 	}
 

@@ -3329,6 +3329,11 @@ export type FetchPublishedUrlsQueryVariables = Exact<{ [key: string]: never; }>;
 
 export type FetchPublishedUrlsQuery = { notePaths: Array<{ path: string, latestNoteView?: { url: string } | null }> };
 
+export type FetchAllWarningsQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type FetchAllWarningsQuery = { notePaths: Array<{ path: string, latestNoteView?: { url: string, warnings: Array<{ level: NoteWarningLevelEnum, message: string }> } | null }> };
+
 export type FetchNoteContentsQueryVariables = Exact<{
   filter?: InputMaybe<NotePathsFilter>;
 }>;
@@ -3396,6 +3401,20 @@ export const FetchPublishedUrlsDocument = gql`
     path: value
     latestNoteView {
       url
+    }
+  }
+}
+    `;
+export const FetchAllWarningsDocument = gql`
+    query FetchAllWarnings {
+  notePaths {
+    path: value
+    latestNoteView {
+      url
+      warnings {
+        level
+        message
+      }
     }
   }
 }
@@ -3505,6 +3524,9 @@ export function getSdk(client: GraphQLClient, withWrapper: SdkFunctionWrapper = 
     },
     FetchPublishedUrls(variables?: FetchPublishedUrlsQueryVariables, requestHeaders?: GraphQLClientRequestHeaders, signal?: RequestInit['signal']): Promise<FetchPublishedUrlsQuery> {
       return withWrapper((wrappedRequestHeaders) => client.request<FetchPublishedUrlsQuery>({ document: FetchPublishedUrlsDocument, variables, requestHeaders: { ...requestHeaders, ...wrappedRequestHeaders }, signal }), 'FetchPublishedUrls', 'query', variables);
+    },
+    FetchAllWarnings(variables?: FetchAllWarningsQueryVariables, requestHeaders?: GraphQLClientRequestHeaders, signal?: RequestInit['signal']): Promise<FetchAllWarningsQuery> {
+      return withWrapper((wrappedRequestHeaders) => client.request<FetchAllWarningsQuery>({ document: FetchAllWarningsDocument, variables, requestHeaders: { ...requestHeaders, ...wrappedRequestHeaders }, signal }), 'FetchAllWarnings', 'query', variables);
     },
     FetchNoteContents(variables?: FetchNoteContentsQueryVariables, requestHeaders?: GraphQLClientRequestHeaders, signal?: RequestInit['signal']): Promise<FetchNoteContentsQuery> {
       return withWrapper((wrappedRequestHeaders) => client.request<FetchNoteContentsQuery>({ document: FetchNoteContentsDocument, variables, requestHeaders: { ...requestHeaders, ...wrappedRequestHeaders }, signal }), 'FetchNoteContents', 'query', variables);
