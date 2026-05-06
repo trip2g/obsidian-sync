@@ -6,8 +6,10 @@
  *   npx ts-node src/sync/cli/cmd.ts --folder ./vault --api-key xxx --two-way
  *
  * Environment variables:
- *   API_KEY     - API key (alternative to --api-key)
- *   ENDPOINT    - GraphQL endpoint (alternative to --api-url)
+ *   TRIP2G_API_KEY   - API key (alternative to --api-key)
+ *   TRIP2G_ENDPOINT  - GraphQL endpoint (alternative to --api-url)
+ *   API_KEY          - fallback for TRIP2G_API_KEY
+ *   ENDPOINT         - fallback for TRIP2G_ENDPOINT
  */
 
 import * as fs from "fs";
@@ -34,8 +36,8 @@ function parseArgs(): CliArgs {
 	const result: CliArgs = {
 		folder: "",
 		prefix: "",
-		apiUrl: process.env.ENDPOINT || "http://localhost:8081/graphql",
-		apiKey: process.env.API_KEY || "",
+		apiUrl: process.env.TRIP2G_ENDPOINT || process.env.ENDPOINT || "http://localhost:8081/graphql",
+		apiKey: process.env.TRIP2G_API_KEY || process.env.API_KEY || "",
 		twoWaySync: false,
 		verbose: false,
 		dryRun: false,
@@ -160,8 +162,10 @@ Options:
   -h, --help               Show this help
 
 Environment Variables:
-  ENDPOINT    GraphQL endpoint URL
-  API_KEY     API key for authentication
+  TRIP2G_ENDPOINT    GraphQL endpoint URL
+  TRIP2G_API_KEY     API key for authentication
+  ENDPOINT           Fallback for TRIP2G_ENDPOINT
+  API_KEY            Fallback for TRIP2G_API_KEY
 
 Examples:
   # Push-only sync
