@@ -26,6 +26,7 @@ import type {
 import { DEFAULT_SETTINGS, DEFAULT_SYNC_STATE } from "./types";
 
 const SYNC_STATE_KEY = "sync-state";
+const PUBLISHED_URLS_KEY = "published-urls";
 
 function normalizeApiUrl(url: string): string {
 	return url.replace(/\/+$/, ""); // Remove trailing slashes
@@ -44,7 +45,9 @@ function createSdk(apiUrl: string, apiKey: string, pluginVersion: string): Sdk {
 export default class Trip2gSyncPlugin extends Plugin {
 	settings: PluginSettings;
 	syncStates: Map<string, SyncState> = new Map(); // apiUrl -> SyncState
+	publishedUrls: Map<string, string> = new Map(); // fullVaultPath -> url
 	ribbonIcon: HTMLElement | null = null;
+	statusBarItem: HTMLElement | null = null;
 	checkInterval: number | null = null;
 	private boundCheckOnFocus: () => void;
 	private isSyncing: boolean = false;
@@ -55,6 +58,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 		await this.loadSettings();
 		await this.loadSyncStates();
+		this.loadPublishedUrls();
 
 		// Register conflict view
 		this.registerView(CONFLICT_VIEW_TYPE, (leaf) => new ConflictView(leaf));
@@ -74,6 +78,20 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 		// Add badge styling class
 		this.ribbonIcon.addClass("sync-ribbon-icon");
+
+		// Status bar: show published URL hostname for the active file
+		this.statusBarItem = this.addStatusBarItem();
+		this.statusBarItem.style.cursor = "pointer";
+		this.statusBarItem.addEventListener("click", () => {
+			const file = this.app.workspace.getActiveFile();
+			if (!file) return;
+			const url = this.publishedUrls.get(file.path);
+			if (url) window.open(url, "_blank");
+		});
+		this.registerEvent(
+			this.app.workspace.on("file-open", (file) => this.updateStatusBar(file ?? null))
+		);
+		this.updateStatusBar(this.app.workspace.getActiveFile());
 
 		this.addSettingTab(new SyncSettingTab(this.app, this));
 
@@ -127,6 +145,45 @@ export default class Trip2gSyncPlugin extends Plugin {
 			obj[key] = value;
 		}
 		localStorage.setItem(SYNC_STATE_KEY, JSON.stringify(obj));
+	}
+
+	loadPublishedUrls(): void {
+		const stored = localStorage.getItem(PUBLISHED_URLS_KEY);
+		if (stored) {
+			try {
+				const parsed = JSON.parse(stored) as Record<string, string>;
+				this.publishedUrls = new Map(Object.entries(parsed));
+			} catch {
+				// ignore
+			}
+		}
+	}
+
+	savePublishedUrls(): void {
+		const obj: Record<string, string> = {};
+		for (const [path, url] of this.publishedUrls) {
+			obj[path] = url;
+		}
+		localStorage.setItem(PUBLISHED_URLS_KEY, JSON.stringify(obj));
+	}
+
+	updateStatusBar(file: TFile | null): void {
+		if (!this.statusBarItem) return;
+		if (!file) {
+			this.statusBarItem.setText("");
+			return;
+		}
+		const url = this.publishedUrls.get(file.path);
+		if (url) {
+			try {
+				const hostname = new URL(url).hostname;
+				this.statusBarItem.setText(`🌐 ${hostname}`);
+			} catch {
+				this.statusBarItem.setText("🌐");
+			}
+		} else {
+			this.statusBarItem.setText("");
+		}
 	}
 
 	getSyncState(apiUrl: string): SyncState {
@@ -376,6 +433,16 @@ export default class Trip2gSyncPlugin extends Plugin {
 				console.log(`[Trip2g Sync] Plan: pulls=${filteredPlan.pulls.length}, pushes=${filteredPlan.pushes.length}, conflicts=${filteredPlan.conflicts.length}, localOnly=${filteredPlan.localOnly.length}, unchanged=${filteredPlan.unchanged}`);
 
 				const result = await executePlan(env, filteredPlan, { twoWaySync });
+
+				// Store published URLs for status bar
+				if (result.updatedUrls && result.updatedUrls.length > 0) {
+					const base = folder.path === "/" || folder.path === "" ? "" : folder.path + "/";
+					for (const { path, url } of result.updatedUrls) {
+						this.publishedUrls.set(base + path, url);
+					}
+					this.savePublishedUrls();
+					this.updateStatusBar(this.app.workspace.getActiveFile());
+				}
 
 				// Show results
 				if (result.pulled > 0) {
