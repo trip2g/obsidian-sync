@@ -505,7 +505,10 @@ export default class Trip2gSyncPlugin extends Plugin {
 					console.error("[Trip2g Sync] Errors:", result.errors);
 				}
 				if (result.warnings.length > 0) {
-					new SyncWarningsModal(this.app, result.warnings).open();
+					new Notice(t().syncWarningsCount(result.warnings.length));
+					if (this.settings.showSyncWarnings !== false) {
+						new SyncWarningsModal(this.app, result.warnings).open();
+					}
 				}
 				if (result.pulled === 0 && result.pushed === 0 && result.conflictsResolved === 0 && filteredPlan.unchanged > 0) {
 					new Notice(t().allFilesUpToDate);
@@ -1010,6 +1013,16 @@ class SyncSettingTab extends PluginSettingTab {
 					if (value && this.plugin.ribbonIcon) {
 						this.plugin.ribbonIcon.removeClass("has-pending", "has-pull", "has-push", "has-conflict");
 					}
+				})
+			);
+
+		new Setting(containerEl)
+			.setName(i18n.showSyncWarningsLabel)
+			.setDesc(i18n.showSyncWarningsDesc)
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.showSyncWarnings !== false).onChange(async (value) => {
+					this.plugin.settings.showSyncWarnings = value;
+					await this.plugin.saveSettings();
 				})
 			);
 	}

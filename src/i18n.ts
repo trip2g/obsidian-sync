@@ -41,6 +41,9 @@ export interface Translations {
 	skipPushConfirmationDesc: string;
 	hideSyncStatusLabel: string;
 	hideSyncStatusDesc: string;
+	showSyncWarningsLabel: string;
+	showSyncWarningsDesc: string;
+	syncWarningsCount: (count: number) => string;
 	onboardingLink: string;
 
 	// Sync actions
@@ -162,6 +165,9 @@ const en: Translations = {
 	skipPushConfirmationDesc: "Don't show confirmation dialog before uploading files to server",
 	hideSyncStatusLabel: "Hide sync badge",
 	hideSyncStatusDesc: "Don't show the pending-changes indicator on the ribbon icon",
+	showSyncWarningsLabel: "Show sync warnings",
+	showSyncWarningsDesc: "Show a popup with warnings after sync (e.g. broken links, missing assets)",
+	syncWarningsCount: (count: number) => `⚠️ ${count} sync warning${count === 1 ? "" : "s"}`,
 	onboardingLink: "Onboarding guide",
 
 	// Sync actions
@@ -286,6 +292,9 @@ const ru: Translations = {
 	skipPushConfirmationDesc: "Не показывать диалог подтверждения перед загрузкой файлов на сервер",
 	hideSyncStatusLabel: "Скрыть бейдж синка",
 	hideSyncStatusDesc: "Не показывать индикатор ожидающих изменений на иконке",
+	showSyncWarningsLabel: "Показывать предупреждения",
+	showSyncWarningsDesc: "Показывать окно с предупреждениями после синка (битые ссылки, отсутствующие файлы)",
+	syncWarningsCount: (count: number) => `⚠️ ${count} предупреждени${count === 1 ? "е" : "й"}`,
 	onboardingLink: "Руководство по настройке",
 
 	// Sync actions

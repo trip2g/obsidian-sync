@@ -16,11 +16,14 @@ export interface PluginSettings {
 	skipPushConfirmation?: boolean;
 	/** Hide badge/indicator on ribbon icon */
 	hideSyncStatus?: boolean;
+	/** Show warnings modal after sync (default: true) */
+	showSyncWarnings?: boolean;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
 	syncDirs: [],
 	skipPushConfirmation: false,
+	showSyncWarnings: true,
 };
 
 // Sync state - stored locally to track last synced hashes
