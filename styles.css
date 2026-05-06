@@ -523,6 +523,12 @@ img[src*="ce.trip2g.com"] {
 	gap: 8px;
 	margin: 10px 0 16px;
 	flex-wrap: wrap;
+	line-height: 1;
+}
+
+.trip2g-warnings-toolbar span {
+	display: inline-flex;
+	align-items: center;
 }
 
 .trip2g-warnings-count {
