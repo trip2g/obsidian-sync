@@ -830,6 +830,10 @@ class SyncWarningsView extends ItemView {
 			text: "The system noticed anomalies during the last sync. Review and fix the issues below.",
 			cls: "trip2g-warnings-desc",
 		});
+		contentEl.createEl("p", {
+			text: '💡 Reopen anytime via command palette: "Show last sync warnings"',
+			cls: "trip2g-warnings-hint",
+		});
 
 		if (warnings.length === 0) {
 			contentEl.createEl("p", { text: "No warnings." });

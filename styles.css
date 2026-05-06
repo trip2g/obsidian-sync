@@ -460,6 +460,12 @@ img[src*="ce.trip2g.com"] {
 /* Sync Warnings View */
 .trip2g-warnings-desc {
 	color: var(--text-muted);
+	margin-bottom: 4px;
+}
+
+.trip2g-warnings-hint {
+	color: var(--text-faint);
+	font-size: 12px;
 	margin-bottom: 16px;
 }
 
