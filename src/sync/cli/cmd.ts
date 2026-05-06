@@ -201,21 +201,9 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 
-	console.log("=".repeat(60));
-	console.log("obsidian-sync CLI");
-	console.log("=".repeat(60));
-	console.log(`Folder:     ${args.folder}`);
-	if (args.prefix) {
-		console.log(`Prefix:     ${args.prefix}`);
+	if (args.dryRun) {
+		console.log(`[dry-run] folder=${args.folder}${args.prefix ? ` prefix=${args.prefix}` : ""}`);
 	}
-	console.log(`API URL:    ${args.apiUrl}`);
-	console.log(`Two-way:    ${args.twoWaySync}`);
-	console.log(`Conflicts:  ${args.conflictResolution}`);
-	console.log(`Dry run:    ${args.dryRun}`);
-	if (Object.keys(args.meta).length > 0) {
-		console.log(`Meta:       ${JSON.stringify(args.meta)}`);
-	}
-	console.log("=".repeat(60));
 
 	// Create env
 	const env = new NodeEnv({
