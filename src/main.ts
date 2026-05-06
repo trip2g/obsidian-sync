@@ -839,12 +839,12 @@ class SyncWarningsView extends ItemView {
 				text: "Showing warnings from last sync only. ",
 				cls: "trip2g-warnings-hint",
 			});
-			const loadBtn = hintRow.createEl("button", { text: "Load all warnings", cls: "trip2g-warnings-load-btn" });
+			const loadBtn = hintRow.createEl("button", { text: "Load All Warnings", cls: "trip2g-warnings-load-btn" });
 			loadBtn.addEventListener("click", () => this.loadAllWarnings());
 		} else {
 			hintRow.createEl("span", { text: "Showing all warnings from server.", cls: "trip2g-warnings-hint" });
 		}
-		const copyAllBtn = hintRow.createEl("button", { text: "Copy all Warnings (JSON)", cls: "trip2g-warnings-load-btn" });
+		const copyAllBtn = hintRow.createEl("button", { text: "Copy All Warnings (JSON)", cls: "trip2g-warnings-load-btn" });
 		copyAllBtn.addEventListener("click", () => {
 			navigator.clipboard.writeText(JSON.stringify(data, null, 2)).then(() => new Notice("Copied all warnings"));
 		});
@@ -875,7 +875,7 @@ class SyncWarningsView extends ItemView {
 			const actionsTd = tr.createEl("td", { cls: "trip2g-warnings-actions" });
 
 			// Open file in Obsidian tab
-			const openFileBtn = actionsTd.createEl("button", { text: "Open in tab" });
+			const openFileBtn = actionsTd.createEl("button", { text: "Open in Tab" });
 			openFileBtn.addEventListener("click", async () => {
 				const syncDir = this.plugin.settings.syncDirs[0];
 				if (!syncDir) return;
@@ -892,12 +892,12 @@ class SyncWarningsView extends ItemView {
 
 			// Open in browser
 			if (w.url) {
-				const openWebBtn = actionsTd.createEl("button", { text: "Open in browser" });
+				const openWebBtn = actionsTd.createEl("button", { text: "Open in Browser" });
 				openWebBtn.addEventListener("click", () => window.open(w.url, "_blank"));
 			}
 
 			// Copy warning for agent
-			const copyBtn = actionsTd.createEl("button", { text: "Copy warning" });
+			const copyBtn = actionsTd.createEl("button", { text: "Copy Warning" });
 			copyBtn.addEventListener("click", () => {
 				const text = `[${w.level}] ${w.path}: ${w.message}${w.url ? `\n${w.url}` : ""}`;
 				navigator.clipboard.writeText(text).then(() => new Notice("Copied"));
