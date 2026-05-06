@@ -844,6 +844,10 @@ class SyncWarningsView extends ItemView {
 		} else {
 			hintRow.createEl("span", { text: "Showing all warnings from server.", cls: "trip2g-warnings-hint" });
 		}
+		const copyAllBtn = hintRow.createEl("button", { text: "Copy all Warnings (JSON)", cls: "trip2g-warnings-load-btn" });
+		copyAllBtn.addEventListener("click", () => {
+			navigator.clipboard.writeText(JSON.stringify(data, null, 2)).then(() => new Notice("Copied all warnings"));
+		});
 		hintRow.createEl("span", {
 			text: '  💡 "Show last sync warnings" in command palette',
 			cls: "trip2g-warnings-hint",
