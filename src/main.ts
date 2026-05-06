@@ -1,4 +1,4 @@
-import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder } from "obsidian";
+import { App, ItemView, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { GraphQLClient } from "graphql-request";
 import { FolderSuggest } from "./FolderSuggest";
 import { MigrationModal, ServerDeletedModal, PushConfirmModal, AssetConflictModal, type AssetConflict, type AssetConflictResolution as UIAssetConflictResolution } from "./ui/ConflictModal";
@@ -27,6 +27,7 @@ import { DEFAULT_SETTINGS, DEFAULT_SYNC_STATE } from "./types";
 
 const SYNC_STATE_KEY = "sync-state";
 const PUBLISHED_URLS_KEY = "published-urls";
+const WARNINGS_VIEW_TYPE = "trip2g-sync-warnings";
 
 function normalizeApiUrl(url: string): string {
 	return url.replace(/\/+$/, ""); // Remove trailing slashes
@@ -46,6 +47,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 	settings: PluginSettings;
 	syncStates: Map<string, SyncState> = new Map(); // apiUrl -> SyncState
 	publishedUrls: Map<string, string> = new Map(); // fullVaultPath -> url
+	lastWarnings: Array<{ path: string; level: string; message: string; url: string }> = [];
 	ribbonIcon: HTMLElement | null = null;
 	statusBarItem: HTMLElement | null = null;
 	checkInterval: number | null = null;
@@ -62,6 +64,8 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 		// Register conflict view
 		this.registerView(CONFLICT_VIEW_TYPE, (leaf) => new ConflictView(leaf));
+		// Register warnings view
+		this.registerView(WARNINGS_VIEW_TYPE, (leaf) => new SyncWarningsView(leaf, this));
 
 		this.ribbonIcon = this.addRibbonIcon("sync", "Trip2g sync", () => {
 			if (this.isSyncing) {
@@ -94,6 +98,18 @@ export default class Trip2gSyncPlugin extends Plugin {
 			if (!file) return;
 			const url = this.publishedUrls.get(file.path);
 			if (url) navigator.clipboard.writeText(url).then(() => new Notice("URL copied"));
+		});
+
+		this.addCommand({
+			id: "show-last-warnings",
+			name: "Show last sync warnings",
+			callback: () => {
+				if (this.lastWarnings.length === 0) {
+					new Notice("No warnings from last sync");
+					return;
+				}
+				this.openWarningsView();
+			},
 		});
 
 		this.addCommand({
@@ -209,6 +225,17 @@ export default class Trip2gSyncPlugin extends Plugin {
 			obj[path] = url;
 		}
 		localStorage.setItem(PUBLISHED_URLS_KEY, JSON.stringify(obj));
+	}
+
+	async openWarningsView(): Promise<void> {
+		const existing = this.app.workspace.getLeavesOfType(WARNINGS_VIEW_TYPE);
+		if (existing.length > 0) {
+			this.app.workspace.revealLeaf(existing[0]);
+			(existing[0].view as SyncWarningsView).render();
+			return;
+		}
+		const leaf = this.app.workspace.getLeaf("tab");
+		await leaf.setViewState({ type: WARNINGS_VIEW_TYPE, active: true });
 	}
 
 	updateStatusBar(file: TFile | null): void {
@@ -506,8 +533,16 @@ export default class Trip2gSyncPlugin extends Plugin {
 				}
 				if (result.warnings.length > 0) {
 					new Notice(t().syncWarningsCount(result.warnings.length));
+					// Attach url from updatedUrls for context
+					const urlMap = new Map(result.updatedUrls.map((u) => [u.path, u.url]));
+					this.lastWarnings = result.warnings.map((w) => ({
+						...w,
+						url: urlMap.get(w.path) ?? this.publishedUrls.get(
+							(folder.path && folder.path !== "/" ? folder.path + "/" : "") + w.path
+						) ?? "",
+					}));
 					if (this.settings.showSyncWarnings !== false) {
-						new SyncWarningsModal(this.app, result.warnings).open();
+						await this.openWarningsView();
 					}
 				}
 				if (result.pulled === 0 && result.pushed === 0 && result.conflictsResolved === 0 && filteredPlan.unchanged > 0) {
@@ -774,27 +809,65 @@ class SyncDirectoryModal extends Modal {
 	}
 }
 
-class SyncWarningsModal extends Modal {
-	constructor(app: App, private warnings: Array<{ path: string; level: string; message: string }>) {
-		super(app);
+class SyncWarningsView extends ItemView {
+	constructor(leaf: WorkspaceLeaf, private plugin: Trip2gSyncPlugin) {
+		super(leaf);
 	}
 
-	onOpen() {
+	getViewType() { return WARNINGS_VIEW_TYPE; }
+	getDisplayText() { return "Sync warnings"; }
+	getIcon() { return "alert-triangle"; }
+
+	async onOpen() { this.render(); }
+
+	render() {
 		const { contentEl } = this;
-		contentEl.createEl("h2", { text: `⚠️ Sync warnings (${this.warnings.length})` });
-		const list = contentEl.createEl("ul");
-		list.style.maxHeight = "400px";
-		list.style.overflowY = "auto";
-		for (const w of this.warnings) {
-			const item = list.createEl("li");
-			item.createEl("strong", { text: w.path });
-			item.createEl("span", { text: `: [${w.level}] ${w.message}` });
+		contentEl.empty();
+		const warnings = this.plugin.lastWarnings;
+
+		contentEl.createEl("h2", { text: "⚠️ Sync warnings" });
+		contentEl.createEl("p", {
+			text: "The system noticed anomalies during the last sync. Review and fix the issues below.",
+			cls: "trip2g-warnings-desc",
+		});
+
+		if (warnings.length === 0) {
+			contentEl.createEl("p", { text: "No warnings." });
+			return;
+		}
+
+		const table = contentEl.createEl("table", { cls: "trip2g-warnings-table" });
+		const thead = table.createEl("thead");
+		const hr = thead.createEl("tr");
+		["Path", "Level", "Warning", "URL", "Open", "Copy"].forEach((h) =>
+			hr.createEl("th", { text: h })
+		);
+
+		const tbody = table.createEl("tbody");
+		for (const w of warnings) {
+			const tr = tbody.createEl("tr");
+			tr.createEl("td", { text: w.path, cls: "trip2g-warnings-path" });
+			tr.createEl("td", { text: w.level });
+			tr.createEl("td", { text: w.message });
+			const urlTd = tr.createEl("td");
+			if (w.url) {
+				urlTd.createEl("a", { text: new URL(w.url).hostname, href: w.url, cls: "external-link" });
+			}
+			const openTd = tr.createEl("td");
+			if (w.url) {
+				const btn = openTd.createEl("button", { text: "Open" });
+				btn.addEventListener("click", () => window.open(w.url, "_blank"));
+			}
+			const copyTd = tr.createEl("td");
+			const copyBtn = copyTd.createEl("button", { text: "Copy" });
+			copyBtn.addEventListener("click", () => {
+				const text = `[${w.level}] ${w.path}: ${w.message}${w.url ? `\n${w.url}` : ""}`;
+				navigator.clipboard.writeText(text).then(() => new Notice("Copied"));
+			});
 		}
 	}
 
-	onClose() {
-		this.contentEl.empty();
-	}
+	async onClose() { this.contentEl.empty(); }
 }
 
 class SyncSettingTab extends PluginSettingTab {
