@@ -334,7 +334,7 @@ export class ObsidianSyncEnv implements SyncEnv {
 		formData.append("map", map);
 		formData.append("0", params.blob, params.fileName);
 
-		const response = await fetch(`${this.apiUrl}/graphql`, {
+		const response = await fetch(`${this.apiUrl}/_system/graphql`, {
 			method: "POST",
 			headers: {
 				"X-API-Key": this.apiKey,

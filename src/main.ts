@@ -34,7 +34,7 @@ function normalizeApiUrl(url: string): string {
 }
 
 function createSdk(apiUrl: string, apiKey: string, pluginVersion: string): Sdk {
-	const client = new GraphQLClient(`${normalizeApiUrl(apiUrl)}/graphql`, {
+	const client = new GraphQLClient(`${normalizeApiUrl(apiUrl)}/_system/graphql`, {
 		headers: {
 			"X-API-Key": apiKey,
 			"X-Plugin-Version": pluginVersion,

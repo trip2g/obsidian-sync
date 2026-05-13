@@ -13,6 +13,7 @@
  */
 
 import * as fs from "fs";
+import * as path from "path";
 import { NodeEnv, type CliConflictResolution } from "./env";
 import { createClient } from "./client";
 import { classifySync } from "../classify";
@@ -32,13 +33,29 @@ interface CliArgs {
 	updatedOutput: string;
 }
 
+function readDataJson(): { apiUrl?: string; apiKey?: string } {
+	try {
+		const dataPath = path.join(process.cwd(), ".obsidian", "plugins", "trip2g", "data.json");
+		const data = JSON.parse(fs.readFileSync(dataPath, "utf8"));
+		const dir = data?.syncDirs?.[0];
+		if (!dir) return {};
+		return {
+			apiUrl: dir.apiUrl ? `${dir.apiUrl}/_system/graphql` : undefined,
+			apiKey: dir.apiKey || undefined,
+		};
+	} catch {
+		return {};
+	}
+}
+
 function parseArgs(): CliArgs {
 	const args = process.argv.slice(2);
+	const dataJson = readDataJson();
 	const result: CliArgs = {
 		folder: "",
 		prefix: "",
-		apiUrl: process.env.TRIP2G_ENDPOINT || process.env.ENDPOINT || "http://localhost:8081/graphql",
-		apiKey: process.env.TRIP2G_API_KEY || process.env.API_KEY || "",
+		apiUrl: process.env.TRIP2G_ENDPOINT || process.env.ENDPOINT || dataJson.apiUrl || "http://localhost:8081/_system/graphql",
+		apiKey: process.env.TRIP2G_API_KEY || process.env.API_KEY || dataJson.apiKey || "",
 		twoWaySync: false,
 		verbose: false,
 		dryRun: false,
@@ -146,7 +163,7 @@ Arguments:
   prefix                   Remote path prefix (optional, for multi-repo setups)
 
 Options:
-  -u, --api-url <url>      GraphQL endpoint (default: $ENDPOINT or http://localhost:8081/graphql)
+  -u, --api-url <url>      GraphQL endpoint (default: $ENDPOINT or .obsidian/plugins/trip2g/data.json or http://localhost:8081/_system/graphql)
   -k, --api-key <key>      API key (default: $API_KEY)
   -2, --two-way            Enable two-way sync (pull changes from server)
   -c, --conflict-resolution <mode>
@@ -183,8 +200,9 @@ Examples:
 }
 
 async function cmdWarnings(): Promise<void> {
-	const apiUrl = process.env.TRIP2G_ENDPOINT || process.env.ENDPOINT || "http://localhost:8081/graphql";
-	const apiKey = process.env.TRIP2G_API_KEY || process.env.API_KEY || "";
+	const dataJson = readDataJson();
+	const apiUrl = process.env.TRIP2G_ENDPOINT || process.env.ENDPOINT || dataJson.apiUrl || "http://localhost:8081/_system/graphql";
+	const apiKey = process.env.TRIP2G_API_KEY || process.env.API_KEY || dataJson.apiKey || "";
 	if (!apiKey) {
 		console.error("❌ TRIP2G_API_KEY or API_KEY required");
 		process.exit(1);
