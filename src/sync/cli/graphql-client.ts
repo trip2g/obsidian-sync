@@ -46,11 +46,23 @@ export class GraphQLClient {
 
 		const json = (await response.json()) as {
 			data?: T;
-			errors?: Array<{ message: string }>;
+			errors?: Array<{
+				message: string;
+				path?: unknown;
+				locations?: unknown;
+				extensions?: unknown;
+			}>;
 		};
 
 		if (json.errors?.length) {
-			throw new Error(`GraphQL Error: ${json.errors[0].message}`);
+			const summary = json.errors.map((e) => e.message).join("; ");
+			const err = new Error(`GraphQL Error: ${summary}`) as Error & {
+				graphqlErrors: typeof json.errors;
+				response: typeof json;
+			};
+			err.graphqlErrors = json.errors;
+			err.response = json;
+			throw err;
 		}
 
 		if (!json.data) {

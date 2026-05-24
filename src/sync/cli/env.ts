@@ -272,16 +272,16 @@ export class NodeEnv implements SyncEnv {
 		} catch (e) {
 			const paths = processedUpdates.map((u) => u.path).join(", ");
 			console.error(`❌ Failed to push notes (batch paths: ${paths}):`);
-			const resp = (e as { response?: { errors?: Array<{ message: string; path?: unknown; extensions?: unknown }> } }).response;
-			if (resp?.errors?.length) {
-				for (const err of resp.errors) {
-					console.error(`   GraphQL: ${err.message}`);
-					if (err.path) console.error(`   Path: ${JSON.stringify(err.path)}`);
-					if (err.extensions) console.error(`   Extensions: ${JSON.stringify(err.extensions)}`);
-				}
-			} else {
-				console.error(`   ${e}`);
+			console.error(e);
+			// graphql-request ClientError exposes .response with status + errors.
+			const anyE = e as { response?: unknown; request?: unknown };
+			if (anyE.response) {
+				console.error("   response:", JSON.stringify(anyE.response, null, 2));
 			}
+			if (anyE.request) {
+				console.error("   request:", JSON.stringify(anyE.request, null, 2));
+			}
+			console.error("   own props:", Object.getOwnPropertyNames(e as object));
 			return [];
 		}
 	}
