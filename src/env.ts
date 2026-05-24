@@ -477,7 +477,7 @@ export class ObsidianSyncEnv implements SyncEnv {
 		const files: TFile[] = [];
 
 		for (const child of folder.children) {
-			if (child instanceof TFile && (child.extension === "md" || child.extension === "html")) {
+			if (child instanceof TFile && (child.extension === "md" || child.extension === "html" || child.extension === "canvas" || child.extension === "base" || child.extension === "excalidraw")) {
 				if (!this.shouldExcludeFile(child.path)) {
 					files.push(child);
 				}
