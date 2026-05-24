@@ -270,7 +270,18 @@ export class NodeEnv implements SyncEnv {
 				url: urlMap.get(n.path) ?? null,
 			}));
 		} catch (e) {
-			console.error(`❌ Failed to push notes: ${e}`);
+			const paths = processedUpdates.map((u) => u.path).join(", ");
+			console.error(`❌ Failed to push notes (batch paths: ${paths}):`);
+			const resp = (e as { response?: { errors?: Array<{ message: string; path?: unknown; extensions?: unknown }> } }).response;
+			if (resp?.errors?.length) {
+				for (const err of resp.errors) {
+					console.error(`   GraphQL: ${err.message}`);
+					if (err.path) console.error(`   Path: ${JSON.stringify(err.path)}`);
+					if (err.extensions) console.error(`   Extensions: ${JSON.stringify(err.extensions)}`);
+				}
+			} else {
+				console.error(`   ${e}`);
+			}
 			return [];
 		}
 	}
