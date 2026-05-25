@@ -16,12 +16,18 @@ import type { SyncPlan, FileClassification, FilterOptions } from "./types";
  * @returns Filtered sync plan
  */
 export function filterPlan(plan: SyncPlan, options: FilterOptions): SyncPlan {
-	const { twoWaySync, hasPublishFields } = options;
+	const { twoWaySync, hasPublishFields, isExcluded } = options;
 
 	// Helper to check if file should be included based on publishFields
 	const isPublishable = (path: string): boolean => {
 		if (!hasPublishFields) return true; // No filter = all files publishable
 		return hasPublishFields(path);
+	};
+
+	// Helper to check if a path is excluded from sync
+	const excluded = (path: string): boolean => {
+		if (!isExcluded) return false; // No filter = nothing excluded
+		return isExcluded(path);
 	};
 
 	const filteredClassifications: FileClassification[] = [];
@@ -35,6 +41,18 @@ export function filterPlan(plan: SyncPlan, options: FilterOptions): SyncPlan {
 	let unchanged = 0;
 
 	for (const c of plan.classifications) {
+		// Excluded paths are never pushed. If they exist on the server, hide them
+		// (treat as local_deleted); otherwise drop them entirely.
+		if (excluded(c.path)) {
+			if (c.remoteHash !== null) {
+				const asHide: FileClassification =
+					c.action === "local_deleted" ? c : { ...c, action: "local_deleted" };
+				filteredClassifications.push(asHide);
+				localDeleted.push(asHide);
+			}
+			continue;
+		}
+
 		const publishable = isPublishable(c.path);
 
 		switch (c.action) {

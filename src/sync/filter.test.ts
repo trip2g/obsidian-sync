@@ -254,6 +254,71 @@ describe("filterPlan", () => {
 		});
 	});
 
+	describe("exclude patterns", () => {
+		const isExcluded = (path: string) => path === "dev" || path.startsWith("dev/") || path === "demo" || path.startsWith("demo/");
+
+		it("hides an excluded file that exists on the server (push -> local_deleted)", () => {
+			const plan = makePlan([
+				makeClassification("dev/note.md", "push"),
+				makeClassification("keep.md", "push"),
+			]);
+			const filtered = filterPlan(plan, { twoWaySync: false, isExcluded });
+
+			expect(filtered.pushes).toHaveLength(1);
+			expect(filtered.pushes[0].path).toBe("keep.md");
+			expect(filtered.localDeleted).toHaveLength(1);
+			expect(filtered.localDeleted[0].path).toBe("dev/note.md");
+			expect(filtered.localDeleted[0].action).toBe("local_deleted");
+		});
+
+		it("hides an excluded unchanged file (present on server)", () => {
+			const plan = makePlan([makeClassification("demo/x.md", "unchanged")]);
+			const filtered = filterPlan(plan, { twoWaySync: false, isExcluded });
+
+			expect(filtered.unchanged).toBe(0);
+			expect(filtered.localDeleted).toHaveLength(1);
+			expect(filtered.localDeleted[0].path).toBe("demo/x.md");
+		});
+
+		it("hides an excluded remote_only file", () => {
+			const plan = makePlan([makeClassification("demo/x.md", "remote_only")]);
+			const filtered = filterPlan(plan, { twoWaySync: true, isExcluded });
+
+			expect(filtered.remoteOnly).toHaveLength(0);
+			expect(filtered.localDeleted).toHaveLength(1);
+			expect(filtered.localDeleted[0].path).toBe("demo/x.md");
+		});
+
+		it("drops an excluded local-only file (never pushed, nothing to hide)", () => {
+			const plan = makePlan([makeClassification("dev/new.md", "local_only")]);
+			const filtered = filterPlan(plan, { twoWaySync: false, isExcluded });
+
+			expect(filtered.localOnly).toHaveLength(0);
+			expect(filtered.localDeleted).toHaveLength(0);
+			expect(filtered.classifications).toHaveLength(0);
+		});
+
+		it("leaves non-excluded files untouched", () => {
+			const plan = makePlan([
+				makeClassification("keep.md", "push"),
+				makeClassification("docs/keep.md", "unchanged"),
+			]);
+			const filtered = filterPlan(plan, { twoWaySync: false, isExcluded });
+
+			expect(filtered.pushes).toHaveLength(1);
+			expect(filtered.unchanged).toBe(1);
+			expect(filtered.localDeleted).toHaveLength(0);
+		});
+
+		it("does nothing when isExcluded is not provided", () => {
+			const plan = makePlan([makeClassification("dev/note.md", "push")]);
+			const filtered = filterPlan(plan, { twoWaySync: false });
+
+			expect(filtered.pushes).toHaveLength(1);
+			expect(filtered.localDeleted).toHaveLength(0);
+		});
+	});
+
 	describe("edge cases", () => {
 		it("handles empty plan", () => {
 			const plan = makePlan([]);

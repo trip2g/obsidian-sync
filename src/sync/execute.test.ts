@@ -111,7 +111,7 @@ function createMockEnv(options: {
 		fetchNoteAssets: vi.fn().mockResolvedValue([]),
 		uploadAsset: vi.fn().mockResolvedValue(true),
 		downloadAsset: vi.fn().mockResolvedValue(new ArrayBuffer(8)),
-		commitNotes: vi.fn().mockResolvedValue(undefined),
+		commitNotes: vi.fn().mockResolvedValue({ updated: [] }),
 
 		// Asset operations
 		computeBinaryHash: vi.fn().mockImplementation(async () => "binary_hash"),

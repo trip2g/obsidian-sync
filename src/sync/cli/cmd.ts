@@ -19,6 +19,7 @@ import { createClient } from "./client";
 import { classifySync } from "../classify";
 import { filterPlan } from "../filter";
 import { executePlan } from "../execute";
+import { makeExcludeMatcher } from "../exclude";
 
 interface CliArgs {
 	folder: string;
@@ -31,6 +32,7 @@ interface CliArgs {
 	conflictResolution: CliConflictResolution;
 	meta: Record<string, string>;
 	updatedOutput: string;
+	exclude: string[];
 }
 
 function readDataJson(): { apiUrl?: string; apiKey?: string } {
@@ -62,6 +64,7 @@ function parseArgs(): CliArgs {
 		conflictResolution: "local",
 		meta: {},
 		updatedOutput: "",
+		exclude: [],
 	};
 
 	const positionalArgs: string[] = [];
@@ -127,6 +130,14 @@ function parseArgs(): CliArgs {
 			case "-o":
 				result.updatedOutput = value ?? args[++i];
 				break;
+			case "--exclude":
+			case "-x": {
+				const excludeValue = value ?? args[++i];
+				if (excludeValue) {
+					result.exclude.push(excludeValue);
+				}
+				break;
+			}
 			case "--help":
 			case "-h":
 				printHelp();
@@ -175,6 +186,10 @@ Options:
   -m, --meta <key=value>   Add/override frontmatter field for all files (can be repeated)
   -o, --updated-output <file>
                            Write pushed notes as JSON [{path, url}] to file after sync
+  -x, --exclude <glob>     Exclude paths from sync (can be repeated). Excluded
+                           paths are never pushed; if they exist on the server
+                           they are hidden. A bare name like "dev" matches that
+                           directory and everything under it. Default: none.
   -v, --verbose            Verbose output
   -n, --dry-run            Show what would be done without making changes
   -h, --help               Show this help
@@ -191,6 +206,9 @@ Examples:
 
   # Two-way sync
   trip2g-sync ./vault --api-key xxx --two-way
+
+  # Exclude folders from a publish (they get hidden on the server if present)
+  trip2g-sync ./docs --exclude dev --exclude demo
 
   # Multi-repo setup: each repo pushes to different folder with different meta
   trip2g-sync ./docs docs --meta subgraph=docs
@@ -266,9 +284,15 @@ async function main(): Promise<void> {
 	const plan = await classifySync(env);
 
 	// 2. Filter plan based on options
+	const isExcluded = makeExcludeMatcher(args.exclude);
 	const filteredPlan = filterPlan(plan, {
 		twoWaySync: args.twoWaySync,
+		isExcluded,
 	});
+
+	if (args.exclude.length > 0) {
+		console.log(`🚫 Excluding: ${args.exclude.join(", ")}`);
+	}
 
 	// 3. Print summary
 	console.log("\n📋 Sync Plan:");

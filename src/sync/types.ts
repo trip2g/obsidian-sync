@@ -74,6 +74,10 @@ export interface FilterOptions {
 	// Callback to check if file has any of the publishFields set to true
 	// If not provided, all files are considered publishable
 	hasPublishFields?: (path: string) => boolean;
+	// Callback to check if a path is excluded from sync.
+	// Excluded paths are never pushed; if they exist on the server they are
+	// hidden (treated as local_deleted). If not provided, nothing is excluded.
+	isExcluded?: (path: string) => boolean;
 }
 
 // ============ Env Interfaces ============
