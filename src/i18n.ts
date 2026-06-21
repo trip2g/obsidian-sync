@@ -28,6 +28,12 @@ export interface Translations {
 	publishFieldDesc: string;
 	twoWaySyncLabel: string;
 	twoWaySyncDesc: string;
+	livePullIncludeLabel: string;
+	livePullIncludeDesc: string;
+	livePullIncludePlaceholder: string;
+	livePullExcludeLabel: string;
+	livePullExcludeDesc: string;
+	livePullExcludePlaceholder: string;
 	testConnection: string;
 	resetSyncState: string;
 	resetSyncStateConfirm: string;
@@ -51,6 +57,14 @@ export interface Translations {
 	pushedFiles: (count: number) => string;
 	hiddenNotes: (count: number) => string;
 	pushed: string;
+	livePulledFiles: (count: number) => string;
+	livePullConflict: (count: number) => string;
+
+	// Status bar
+	statusBarTooltip: string;
+	urlCopied: string;
+	urlCopyFailed: string;
+	urlOpenFailed: string;
 
 	// Conflict view
 	syncConflict: string;
@@ -151,6 +165,12 @@ const en: Translations = {
 	publishFieldDesc: "Only sync files with these frontmatter fields set to true. Comma-separated list. Leave empty to sync all files.",
 	twoWaySyncLabel: "Two-way sync",
 	twoWaySyncDesc: "Download updates from server. Enable for TG channel import or server-side automation.",
+	livePullIncludeLabel: "Live-pull include patterns",
+	livePullIncludeDesc: "Glob patterns (e.g. **) of notes to pull in real time as the server changes. Leave empty to disable live-pull. Requires two-way sync.",
+	livePullIncludePlaceholder: "**",
+	livePullExcludeLabel: "Live-pull exclude patterns",
+	livePullExcludeDesc: "Glob patterns to exclude from live-pull. Applied after include patterns.",
+	livePullExcludePlaceholder: "drafts/**",
 	testConnection: "Test connection",
 	resetSyncState: "Reset sync state",
 	resetSyncStateConfirm: "Reset sync state? Next sync will re-download all files from server.",
@@ -175,6 +195,14 @@ const en: Translations = {
 	pushedFiles: (count) => `Pushed ${count} files to server`,
 	hiddenNotes: (count) => `Hid ${count} notes not found locally`,
 	pushed: "Pushed",
+	livePulledFiles: (count) => `Live-pulled ${count} file${count === 1 ? "" : "s"} from server`,
+	livePullConflict: (count) => `${count} note${count === 1 ? "" : "s"} changed on server but also edited locally — sync to resolve`,
+
+	// Status bar
+	statusBarTooltip: "Click: open · Right-click: copy",
+	urlCopied: "URL copied",
+	urlCopyFailed: "Failed to copy URL",
+	urlOpenFailed: "Failed to open URL",
 
 	// Conflict view
 	syncConflict: "Sync conflict",
@@ -278,6 +306,12 @@ const ru: Translations = {
 	publishFieldDesc: "Синхронизировать только файлы с этими полями в frontmatter (значение true). Через запятую. Оставьте пустым для синхронизации всех файлов.",
 	twoWaySyncLabel: "Двусторонняя синхронизация",
 	twoWaySyncDesc: "Загружать обновления с сервера. Включите для импорта TG каналов или серверной автоматизации.",
+	livePullIncludeLabel: "Шаблоны live-pull (включить)",
+	livePullIncludeDesc: "Glob-шаблоны (например, **) заметок для загрузки в реальном времени при изменениях на сервере. Оставьте пустым, чтобы отключить live-pull. Требует двусторонней синхронизации.",
+	livePullIncludePlaceholder: "**",
+	livePullExcludeLabel: "Шаблоны live-pull (исключить)",
+	livePullExcludeDesc: "Glob-шаблоны для исключения из live-pull. Применяются после включающих шаблонов.",
+	livePullExcludePlaceholder: "drafts/**",
 	testConnection: "Проверить соединение",
 	resetSyncState: "Сбросить состояние синхронизации",
 	resetSyncStateConfirm: "Сбросить состояние? При следующей синхронизации все файлы будут загружены с сервера.",
@@ -302,6 +336,14 @@ const ru: Translations = {
 	pushedFiles: (count) => `Отправлено ${count} файлов на сервер`,
 	hiddenNotes: (count) => `Скрыто ${count} заметок, отсутствующих локально`,
 	pushed: "Отправлено",
+	livePulledFiles: (count) => `Live-pull: получено ${count} файлов с сервера`,
+	livePullConflict: (count) => `${count} заметок изменены на сервере и локально — синхронизируйте для разрешения`,
+
+	// Status bar
+	statusBarTooltip: "Клик: открыть · Правый клик: копировать",
+	urlCopied: "URL скопирован",
+	urlCopyFailed: "Не удалось скопировать URL",
+	urlOpenFailed: "Не удалось открыть URL",
 
 	// Conflict view
 	syncConflict: "Конфликт синхронизации",

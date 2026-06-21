@@ -8,6 +8,10 @@ export interface SyncDir {
 	publishField?: string;
 	/** Enable two-way sync (pull updates from server). Useful for TG channel import or server-side automation. */
 	twoWaySync?: boolean;
+	/** Glob patterns (doublestar) for live-pull inclusion. Live-pull is enabled only when non-empty and twoWaySync is on. */
+	livePullIncludePatterns?: string[];
+	/** Glob patterns (doublestar) for live-pull exclusion. Applied after include patterns. */
+	livePullExcludePatterns?: string[];
 }
 
 export interface PluginSettings {

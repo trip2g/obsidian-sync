@@ -5,9 +5,10 @@ import { MigrationModal, ServerDeletedModal, PushConfirmModal, AssetConflictModa
 import { ConflictView, CONFLICT_VIEW_TYPE } from "./ui/ConflictView";
 import { t, setLocale, detectLocale } from "./i18n";
 import { getSdk, type Sdk } from "./graphql";
-import { classifySync } from "./sync/classify";
+import { classifySync, classifyFile } from "./sync/classify";
 import { filterPlan } from "./sync/filter";
-import { executePlan } from "./sync/execute";
+import { executePlan, executePulls, downloadAssetsForNotes } from "./sync/execute";
+import { LivePullConnection, type NoteChangeItem } from "./sync/LivePullConnection";
 import { ObsidianSyncEnv } from "./env";
 import { isAlwaysPublishable } from "./sync/utils";
 import type {
@@ -53,6 +54,10 @@ export default class Trip2gSyncPlugin extends Plugin {
 	checkInterval: number | null = null;
 	private boundCheckOnFocus: () => void;
 	private isSyncing: boolean = false;
+	// Live-pull connections, keyed by composite `apiUrl + "\n" + path`.
+	private liveConnections: Map<string, LivePullConnection> = new Map();
+	// Changes received while a sync is in progress, keyed by the same composite key.
+	private pendingLivePull: Map<string, NoteChangeItem[]> = new Map();
 
 	async onload() {
 		// Initialize locale
@@ -86,18 +91,15 @@ export default class Trip2gSyncPlugin extends Plugin {
 		// Status bar: show published URL hostname for the active file
 		this.statusBarItem = this.addStatusBarItem();
 		this.statusBarItem.style.cursor = "pointer";
+		this.statusBarItem.setAttribute("aria-label", t().statusBarTooltip);
 		this.statusBarItem.addEventListener("click", () => {
-			const file = this.app.workspace.getActiveFile();
-			if (!file) return;
-			const url = this.publishedUrls.get(file.path);
-			if (url) window.open(url, "_blank");
+			const url = this.activeFileUrl();
+			if (url) this.openExternalUrl(url);
 		});
 		this.statusBarItem.addEventListener("contextmenu", (e) => {
 			e.preventDefault();
-			const file = this.app.workspace.getActiveFile();
-			if (!file) return;
-			const url = this.publishedUrls.get(file.path);
-			if (url) navigator.clipboard.writeText(url).then(() => new Notice("URL copied"));
+			const url = this.activeFileUrl();
+			if (url) this.copyUrl(url);
 		});
 
 		this.addCommand({
@@ -138,7 +140,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 				if (!file) { new Notice("No file open"); return; }
 				const url = this.publishedUrls.get(file.path);
 				if (!url) { new Notice("File not published yet"); return; }
-				navigator.clipboard.writeText(url).then(() => new Notice("URL copied"));
+				this.copyUrl(url);
 			},
 		});
 		this.registerEvent(
@@ -148,13 +150,20 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 		this.addSettingTab(new SyncSettingTab(this.app, this));
 
-		// Set up periodic check for pending changes (every 60 seconds)
+		// Periodic reconcile (every 5 minutes) as a correctness backstop.
+		// Live-pull drives the badge in between; the bus is lossy so a rare
+		// full reconcile catches anything missed.
 		this.checkInterval = window.setInterval(() => {
 			this.checkForPendingChanges();
-		}, 60000);
+		}, 300000);
 
-		// Check on window focus
-		this.boundCheckOnFocus = () => this.checkForPendingChanges();
+		// Check on window focus, and revive any dead live connections.
+		this.boundCheckOnFocus = () => {
+			this.checkForPendingChanges();
+			for (const conn of this.liveConnections.values()) {
+				conn.reconnectIfDead();
+			}
+		};
 		window.addEventListener("focus", this.boundCheckOnFocus);
 
 		// Initial check after a short delay
@@ -162,6 +171,9 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 		// Fetch all published URLs for status bar
 		window.setTimeout(() => this.fetchAllPublishedUrls(), 5000);
+
+		// Start live-pull connections.
+		this.reconcileLiveConnections();
 	}
 
 	onunload() {
@@ -170,6 +182,51 @@ export default class Trip2gSyncPlugin extends Plugin {
 			window.clearInterval(this.checkInterval);
 		}
 		window.removeEventListener("focus", this.boundCheckOnFocus);
+
+		// Tear down all live connections.
+		for (const conn of this.liveConnections.values()) {
+			conn.disconnect();
+		}
+		this.liveConnections.clear();
+	}
+
+	/** Composite key for a live connection / pending-pull queue entry. */
+	private liveKey(apiUrl: string, path: string): string {
+		return `${normalizeApiUrl(apiUrl)}\n${path}`;
+	}
+
+	/**
+	 * Tear down all live connections and rebuild from current settings.
+	 * A connection exists per syncDir where twoWaySync is on, live-pull include
+	 * patterns are set, apiUrl/apiKey/path are present, and the folder resolves.
+	 */
+	reconcileLiveConnections(): void {
+		for (const conn of this.liveConnections.values()) {
+			conn.disconnect();
+		}
+		this.liveConnections.clear();
+
+		for (const syncDir of this.settings.syncDirs) {
+			if (!syncDir.twoWaySync) continue;
+			if (!syncDir.livePullIncludePatterns?.length) continue;
+			if (!syncDir.apiUrl || !syncDir.apiKey || !syncDir.path) continue;
+
+			const folder = this.app.vault.getAbstractFileByPath(syncDir.path);
+			if (!(folder instanceof TFolder)) continue;
+
+			const key = this.liveKey(syncDir.apiUrl, syncDir.path);
+			const conn = new LivePullConnection({
+				apiUrl: normalizeApiUrl(syncDir.apiUrl),
+				apiKey: syncDir.apiKey,
+				pluginVersion: this.manifest.version,
+				includePatterns: syncDir.livePullIncludePatterns,
+				excludePatterns: syncDir.livePullExcludePatterns,
+				onConnected: () => void this.catchUpPull(syncDir, folder),
+				onChanges: (changes) => void this.autoPull(syncDir, folder, changes),
+			});
+			this.liveConnections.set(key, conn);
+			conn.connect();
+		}
 	}
 
 	async loadSettings() {
@@ -256,9 +313,48 @@ export default class Trip2gSyncPlugin extends Plugin {
 		await leaf.setViewState({ type: WARNINGS_VIEW_TYPE, active: true });
 	}
 
+	/** Published URL for the active file, or null. */
+	private activeFileUrl(): string | null {
+		const file = this.app.workspace.getActiveFile();
+		if (!file) return null;
+		return this.publishedUrls.get(file.path) ?? null;
+	}
+
+	/**
+	 * Open a URL in the external browser. window.open with "_blank" is unreliable
+	 * in Obsidian/Electron (often a silent no-op), so prefer Electron's shell and
+	 * fall back to window.open for non-Electron (mobile) builds.
+	 */
+	openExternalUrl(url: string): void {
+		try {
+			// eslint-disable-next-line @typescript-eslint/no-var-requires
+			const electron = (window as unknown as { require?: (m: string) => unknown }).require?.("electron") as
+				| { shell?: { openExternal?: (u: string) => Promise<void> } }
+				| undefined;
+			if (electron?.shell?.openExternal) {
+				void electron.shell.openExternal(url);
+				return;
+			}
+		} catch {
+			// Not running under Electron — fall through.
+		}
+		const opened = window.open(url, "_blank");
+		if (!opened) {
+			new Notice(t().urlOpenFailed);
+		}
+	}
+
+	/** Copy a URL to the clipboard with a fallback Notice on failure. */
+	copyUrl(url: string): void {
+		navigator.clipboard.writeText(url).then(
+			() => new Notice(t().urlCopied),
+			() => new Notice(t().urlCopyFailed)
+		);
+	}
+
 	updateStatusBar(file: TFile | null): void {
 		if (!this.statusBarItem) return;
-		if (!file) {
+		if (!file || this.settings.hideSyncStatus) {
 			this.statusBarItem.setText("");
 			return;
 		}
@@ -369,6 +465,265 @@ export default class Trip2gSyncPlugin extends Plugin {
 		} else {
 			this.ribbonIcon.setAttribute("aria-label", "Trip2g sync");
 		}
+	}
+
+	/**
+	 * Build an env configured for two-way pulls (writeFile asserts twoWaySync).
+	 * Mirrors the env in checkForPendingChanges but with twoWaySync enabled and
+	 * a real saveSyncState callback. UI callbacks are no-ops — auto-pull never
+	 * pushes, deletes, or resolves conflicts, so they are not exercised.
+	 */
+	private buildPullEnv(syncDir: SyncDir, folder: TFolder, syncState: SyncState): ObsidianSyncEnv {
+		const sdk = createSdk(syncDir.apiUrl, syncDir.apiKey, this.manifest.version);
+		return new ObsidianSyncEnv({
+			app: this.app,
+			sdk,
+			folder,
+			syncState,
+			apiUrl: syncDir.apiUrl,
+			apiKey: syncDir.apiKey,
+			pluginVersion: this.manifest.version,
+			publishField: syncDir.publishField || "",
+			twoWaySync: true,
+			onProgressCallback: () => {},
+			onConflictCallback: async () => [],
+			onAssetConflictCallback: async () => [],
+			onServerDeletedCallback: async () => false,
+			confirmPushCallback: async () => false,
+			saveSyncStateCallback: async () => {
+				await this.saveSyncStates();
+			},
+		});
+	}
+
+	/**
+	 * Execute safe pulls directly (executePulls + downloadAssetsForNotes).
+	 * Never touches executePlan — that has unconditional asset upload + commitNotes
+	 * passes on unchanged classifications and would push to the server.
+	 * Returns the number of files written.
+	 */
+	private async runSafePulls(
+		env: ObsidianSyncEnv,
+		paths: string[],
+		syncState: SyncState
+	): Promise<number> {
+		if (paths.length === 0) {
+			return 0;
+		}
+		const pulls = paths.map((path) => ({
+			path,
+			action: "pull" as const,
+			localHash: null,
+			remoteHash: null,
+			lastSyncedHash: null,
+		}));
+		const pullResult = await executePulls(env, pulls, syncState);
+		if (pullResult.pulledPaths.length > 0) {
+			await downloadAssetsForNotes(env, pullResult.pulledPaths);
+		}
+		if (pullResult.count > 0) {
+			await this.saveSyncStates();
+		}
+		return pullResult.count;
+	}
+
+	/**
+	 * Safe auto-pull driven by a live-pull event batch.
+	 *
+	 * Safety invariants:
+	 * - Writes a file only when classifyFile === "pull" (local untouched since last
+	 *   sync) or a create event with no local copy. Never on "conflict".
+	 * - Uses executePulls/downloadAssetsForNotes directly — structurally cannot push.
+	 * - Conflicts only raise a badge + Notice; the file is never overwritten.
+	 * - Hide events route through the existing confirmation modal, never auto-delete.
+	 * - Classifies against the freshest in-memory syncState so the plugin's own
+	 *   echo (same hash) classifies as unchanged and is a no-op.
+	 */
+	private async autoPull(syncDir: SyncDir, folder: TFolder, changes: NoteChangeItem[]): Promise<void> {
+		const key = this.liveKey(syncDir.apiUrl, syncDir.path);
+
+		// Serialize against manual syncs: queue and drain after the sync finishes.
+		if (this.isSyncing) {
+			const queued = this.pendingLivePull.get(key) ?? [];
+			queued.push(...changes);
+			this.pendingLivePull.set(key, queued);
+			return;
+		}
+
+		// Pull requires two-way sync.
+		if (!syncDir.twoWaySync) {
+			return;
+		}
+
+		try {
+			const syncState = this.getSyncState(syncDir.apiUrl);
+			const env = this.buildPullEnv(syncDir, folder, syncState);
+
+			const toPull: string[] = [];
+			let conflictCount = 0;
+			const hideEvents: string[] = [];
+
+			// Resolve remote hashes. For upserts without an inline noteView, fetch
+			// content in one batch and hash it.
+			const upserts = changes.filter(
+				(c): c is Extract<NoteChangeItem, { __typename: "NoteUpsertEvent" }> =>
+					c.__typename === "NoteUpsertEvent"
+			);
+			const missingContent = upserts
+				.filter((c) => c.noteView === null)
+				.map((c) => c.path);
+			const fetchedContent = new Map<string, string>();
+			if (missingContent.length > 0) {
+				const contents = await env.fetchNoteContents(missingContent);
+				for (const c of contents) {
+					fetchedContent.set(c.path, c.content);
+				}
+			}
+
+			for (const change of changes) {
+				if (change.__typename === "NoteHideEvent") {
+					// Only consider hiding files we have locally and have synced.
+					if ((await env.fileExists(change.path)) && syncState.files[change.path] !== undefined) {
+						hideEvents.push(change.path);
+					}
+					continue;
+				}
+
+				// Upsert: compute remote hash from inline or fetched content.
+				const content = change.noteView?.content ?? fetchedContent.get(change.path);
+				if (content === undefined) {
+					continue; // content unavailable — defer to the periodic reconcile
+				}
+				const remoteHash = await env.computeHash(content);
+
+				const localHash = (await env.fileExists(change.path))
+					? await env.computeHash(await env.readFileContent(change.path))
+					: null;
+				const lastSynced = syncState.files[change.path] ?? null;
+
+				if (change.eventType === "create" && localHash === null) {
+					toPull.push(change.path);
+					continue;
+				}
+
+				const action = classifyFile(localHash, remoteHash, lastSynced);
+				if (action === "pull") {
+					toPull.push(change.path);
+				} else if (action === "conflict") {
+					conflictCount++;
+				}
+				// unchanged / push / others: ignore.
+			}
+
+			const pulled = await this.runSafePulls(env, toPull, syncState);
+			if (pulled > 0) {
+				new Notice(t().livePulledFiles(pulled));
+				this.updateStatusBar(this.app.workspace.getActiveFile());
+			}
+
+			if (conflictCount > 0) {
+				new Notice(t().livePullConflict(conflictCount));
+				if (this.ribbonIcon && !this.settings.hideSyncStatus) {
+					this.ribbonIcon.addClass("has-pending", "has-conflict");
+				}
+			}
+
+			if (hideEvents.length > 0) {
+				await this.handleLiveHide(syncDir, folder, hideEvents, syncState);
+			}
+		} catch (e) {
+			console.warn("[Trip2g Sync] autoPull error:", e);
+		}
+	}
+
+	/**
+	 * Route live hide events through the existing server-deleted confirmation modal.
+	 * Never auto-deletes: deletion only happens if the user confirms.
+	 */
+	private async handleLiveHide(
+		syncDir: SyncDir,
+		folder: TFolder,
+		paths: string[],
+		syncState: SyncState
+	): Promise<void> {
+		const deleteLocally = await this.handleServerDeletedNew(paths);
+		if (!deleteLocally) {
+			return;
+		}
+		const env = this.buildPullEnv(syncDir, folder, syncState);
+		for (const path of paths) {
+			try {
+				await env.deleteFile(path);
+				delete syncState.files[path];
+			} catch (e) {
+				console.warn(`[Trip2g Sync] Failed to delete ${path}:`, e);
+			}
+		}
+		await this.saveSyncStates();
+	}
+
+	/**
+	 * On (re)connect, close the offline gap: take the sync lock so live events
+	 * queue behind it, run a full classify (one FetchServerHashes), execute ONLY
+	 * the pulls via the safe direct path, then release the lock and drain the queue.
+	 */
+	private async catchUpPull(syncDir: SyncDir, folder: TFolder): Promise<void> {
+		if (this.isSyncing) {
+			return; // a sync (or another catch-up) is already serializing events
+		}
+		if (!syncDir.twoWaySync) {
+			return;
+		}
+
+		this.setSyncing(true);
+		try {
+			const syncState = this.getSyncState(syncDir.apiUrl);
+			const env = this.buildPullEnv(syncDir, folder, syncState);
+			const plan = await classifySync(env);
+			if (plan.pulls.length > 0) {
+				const pullResult = await executePulls(env, plan.pulls, syncState);
+				if (pullResult.pulledPaths.length > 0) {
+					await downloadAssetsForNotes(env, pullResult.pulledPaths);
+				}
+				if (pullResult.count > 0) {
+					await this.saveSyncStates();
+					new Notice(t().livePulledFiles(pullResult.count));
+				}
+			}
+		} catch (e) {
+			console.warn("[Trip2g Sync] catchUpPull error:", e);
+		} finally {
+			this.setSyncing(false);
+			await this.drainPendingLivePull();
+		}
+	}
+
+	/** Apply any live changes that arrived while a sync was running. */
+	private async drainPendingLivePull(): Promise<void> {
+		if (this.pendingLivePull.size === 0) {
+			return;
+		}
+		const pending = this.pendingLivePull;
+		this.pendingLivePull = new Map();
+
+		for (const [key, changes] of pending) {
+			const target = this.findSyncDirByKey(key);
+			if (!target) continue;
+			await this.autoPull(target.syncDir, target.folder, changes);
+		}
+	}
+
+	/** Resolve a composite live key back to its syncDir + folder. */
+	private findSyncDirByKey(key: string): { syncDir: SyncDir; folder: TFolder } | null {
+		for (const syncDir of this.settings.syncDirs) {
+			if (!syncDir.apiUrl || !syncDir.path) continue;
+			if (this.liveKey(syncDir.apiUrl, syncDir.path) !== key) continue;
+			const folder = this.app.vault.getAbstractFileByPath(syncDir.path);
+			if (folder instanceof TFolder) {
+				return { syncDir, folder };
+			}
+		}
+		return null;
 	}
 
 	async testConnection(syncDir: SyncDir): Promise<string | null> {
@@ -562,6 +917,13 @@ export default class Trip2gSyncPlugin extends Plugin {
 					if (this.settings.showSyncWarnings !== false) {
 						await this.openWarningsView();
 					}
+				} else {
+					// No warnings this sync — clear stale ones and refresh an open view.
+					this.lastWarnings = [];
+					const openWarnings = this.app.workspace.getLeavesOfType(WARNINGS_VIEW_TYPE);
+					for (const leaf of openWarnings) {
+						(leaf.view as SyncWarningsView).render([]);
+					}
 				}
 				if (result.pulled === 0 && result.pushed === 0 && result.conflictsResolved === 0 && filteredPlan.unchanged > 0) {
 					new Notice(t().allFilesUpToDate);
@@ -572,6 +934,8 @@ export default class Trip2gSyncPlugin extends Plugin {
 			new Notice(`${t().syncError}: ${(error as Error).message}`);
 		} finally {
 			this.setSyncing(false);
+			// Apply any live-pull events that queued behind this sync.
+			await this.drainPendingLivePull();
 		}
 	}
 
@@ -911,7 +1275,7 @@ class SyncWarningsView extends ItemView {
 			// Open in browser
 			if (w.url) {
 				const openWebBtn = actionsTd.createEl("button", { text: "Open in Browser" });
-				openWebBtn.addEventListener("click", () => window.open(w.url, "_blank"));
+				openWebBtn.addEventListener("click", () => this.plugin.openExternalUrl(w.url));
 			}
 
 			// Copy warning for agent
@@ -1142,8 +1506,43 @@ class SyncSettingTab extends PluginSettingTab {
 					toggle.setValue(dir.twoWaySync ?? false).onChange(async (value) => {
 						this.plugin.settings.syncDirs[dirIndex].twoWaySync = value;
 						await this.plugin.saveSettings();
+						this.plugin.reconcileLiveConnections();
+						this.display(); // show/hide live-pull fields
 					})
 				);
+
+			// Live-pull patterns (only when two-way sync is on)
+			if (dir.twoWaySync) {
+				new Setting(containerEl)
+					.setName(i18n.livePullIncludeLabel)
+					.setDesc(i18n.livePullIncludeDesc)
+					.addText((text) => {
+						text.setPlaceholder(i18n.livePullIncludePlaceholder)
+							.setValue((dir.livePullIncludePatterns ?? []).join(", "))
+							.onChange(async (value) => {
+								const patterns = value.split(",").map((p) => p.trim()).filter(Boolean);
+								this.plugin.settings.syncDirs[dirIndex].livePullIncludePatterns =
+									patterns.length > 0 ? patterns : undefined;
+								await this.plugin.saveSettings();
+								this.plugin.reconcileLiveConnections();
+							});
+					});
+
+				new Setting(containerEl)
+					.setName(i18n.livePullExcludeLabel)
+					.setDesc(i18n.livePullExcludeDesc)
+					.addText((text) => {
+						text.setPlaceholder(i18n.livePullExcludePlaceholder)
+							.setValue((dir.livePullExcludePatterns ?? []).join(", "))
+							.onChange(async (value) => {
+								const patterns = value.split(",").map((p) => p.trim()).filter(Boolean);
+								this.plugin.settings.syncDirs[dirIndex].livePullExcludePatterns =
+									patterns.length > 0 ? patterns : undefined;
+								await this.plugin.saveSettings();
+								this.plugin.reconcileLiveConnections();
+							});
+					});
+			}
 		});
 
 		// Global settings section with visual separator
@@ -1169,6 +1568,8 @@ class SyncSettingTab extends PluginSettingTab {
 					if (value && this.plugin.ribbonIcon) {
 						this.plugin.ribbonIcon.removeClass("has-pending", "has-pull", "has-push", "has-conflict");
 					}
+					// Reflect on the status bar item too (hide/show 🌐).
+					this.plugin.updateStatusBar(this.plugin.app.workspace.getActiveFile());
 				})
 			);
 

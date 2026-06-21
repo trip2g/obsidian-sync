@@ -148,7 +148,7 @@ export async function executePlan(
 /**
  * Execute pull operations - download files from server.
  */
-async function executePulls(
+export async function executePulls(
 	env: SyncEnv,
 	pulls: FileClassification[],
 	syncState: SyncState
@@ -730,7 +730,7 @@ async function handleAssetConflicts(
  * Download assets for pulled notes.
  * Fetches asset info from server and downloads missing assets.
  */
-async function downloadAssetsForNotes(
+export async function downloadAssetsForNotes(
 	env: SyncEnv,
 	notePaths: string[]
 ): Promise<{ downloaded: number; errors: string[] }> {
