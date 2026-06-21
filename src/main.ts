@@ -101,6 +101,24 @@ export default class Trip2gSyncPlugin extends Plugin {
 		});
 
 		this.addCommand({
+			id: "sync",
+			name: "Sync now",
+			callback: () => {
+				if (this.isSyncing) {
+					new Notice("Sync already in progress");
+					return;
+				}
+				if (this.settings.syncDirs.length === 0) {
+					new Notice(t().noSyncDirsConfigured);
+				} else if (this.settings.syncDirs.length === 1) {
+					this.syncDirectory(this.settings.syncDirs[0]);
+				} else {
+					new SyncDirectoryModal(this.app, this).open();
+				}
+			},
+		});
+
+		this.addCommand({
 			id: "show-last-warnings",
 			name: "Show last sync warnings",
 			callback: () => {
