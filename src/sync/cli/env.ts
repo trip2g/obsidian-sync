@@ -402,6 +402,7 @@ export class NodeEnv implements SyncEnv {
 			query,
 			variables: {
 				input: {
+					skipCommit: true, // batch: skip per-upload PrepareLatestNotes; executePlan commits once at the end
 					file: null, // Will be replaced by multipart map
 					noteId: parseInt(params.noteId),
 					sha256Hash: params.sha256Hash,
