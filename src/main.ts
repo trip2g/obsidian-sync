@@ -5,7 +5,8 @@ import { MigrationModal, ServerDeletedModal, PushConfirmModal, AssetConflictModa
 import { ConflictView, CONFLICT_VIEW_TYPE } from "./ui/ConflictView";
 import { t, setLocale, detectLocale } from "./i18n";
 import { getSdk, type Sdk } from "./graphql";
-import { classifySync, classifyFile } from "./sync/classify";
+import { classifySync } from "./sync/classify";
+import { applyLiveChanges } from "./sync/live-apply";
 import { filterPlan } from "./sync/filter";
 import { executePlan, executePulls, downloadAssetsForNotes } from "./sync/execute";
 import { LivePullConnection, type NoteChangeItem } from "./sync/LivePullConnection";
@@ -497,37 +498,6 @@ export default class Trip2gSyncPlugin extends Plugin {
 	}
 
 	/**
-	 * Execute safe pulls directly (executePulls + downloadAssetsForNotes).
-	 * Never touches executePlan — that has unconditional asset upload + commitNotes
-	 * passes on unchanged classifications and would push to the server.
-	 * Returns the number of files written.
-	 */
-	private async runSafePulls(
-		env: ObsidianSyncEnv,
-		paths: string[],
-		syncState: SyncState
-	): Promise<number> {
-		if (paths.length === 0) {
-			return 0;
-		}
-		const pulls = paths.map((path) => ({
-			path,
-			action: "pull" as const,
-			localHash: null,
-			remoteHash: null,
-			lastSyncedHash: null,
-		}));
-		const pullResult = await executePulls(env, pulls, syncState);
-		if (pullResult.pulledPaths.length > 0) {
-			await downloadAssetsForNotes(env, pullResult.pulledPaths);
-		}
-		if (pullResult.count > 0) {
-			await this.saveSyncStates();
-		}
-		return pullResult.count;
-	}
-
-	/**
 	 * Safe auto-pull driven by a live-pull event batch.
 	 *
 	 * Safety invariants:
@@ -559,65 +529,16 @@ export default class Trip2gSyncPlugin extends Plugin {
 			const syncState = this.getSyncState(syncDir.apiUrl);
 			const env = this.buildPullEnv(syncDir, folder, syncState);
 
-			const toPull: string[] = [];
-			let conflictCount = 0;
-			const hideEvents: string[] = [];
-
-			// Resolve remote hashes. For upserts without an inline noteView, fetch
-			// content in one batch and hash it.
-			const upserts = changes.filter(
-				(c): c is Extract<NoteChangeItem, { __typename: "NoteUpsertEvent" }> =>
-					c.__typename === "NoteUpsertEvent"
+			const { pulledPaths, conflictCount, hiddenPaths } = await applyLiveChanges(
+				env,
+				changes,
+				syncState
 			);
-			const missingContent = upserts
-				.filter((c) => c.noteView === null)
-				.map((c) => c.path);
-			const fetchedContent = new Map<string, string>();
-			if (missingContent.length > 0) {
-				const contents = await env.fetchNoteContents(missingContent);
-				for (const c of contents) {
-					fetchedContent.set(c.path, c.content);
-				}
-			}
 
-			for (const change of changes) {
-				if (change.__typename === "NoteHideEvent") {
-					// Only consider hiding files we have locally and have synced.
-					if ((await env.fileExists(change.path)) && syncState.files[change.path] !== undefined) {
-						hideEvents.push(change.path);
-					}
-					continue;
-				}
-
-				// Upsert: compute remote hash from inline or fetched content.
-				const content = change.noteView?.content ?? fetchedContent.get(change.path);
-				if (content === undefined) {
-					continue; // content unavailable — defer to the periodic reconcile
-				}
-				const remoteHash = await env.computeHash(content);
-
-				const localHash = (await env.fileExists(change.path))
-					? await env.computeHash(await env.readFileContent(change.path))
-					: null;
-				const lastSynced = syncState.files[change.path] ?? null;
-
-				if (change.eventType === "create" && localHash === null) {
-					toPull.push(change.path);
-					continue;
-				}
-
-				const action = classifyFile(localHash, remoteHash, lastSynced);
-				if (action === "pull") {
-					toPull.push(change.path);
-				} else if (action === "conflict") {
-					conflictCount++;
-				}
-				// unchanged / push / others: ignore.
-			}
-
-			const pulled = await this.runSafePulls(env, toPull, syncState);
-			if (pulled > 0) {
-				new Notice(t().livePulledFiles(pulled));
+			if (pulledPaths.length > 0) {
+				await downloadAssetsForNotes(env, pulledPaths);
+				await this.saveSyncStates();
+				new Notice(t().livePulledFiles(pulledPaths.length));
 				this.updateStatusBar(this.app.workspace.getActiveFile());
 			}
 
@@ -628,8 +549,9 @@ export default class Trip2gSyncPlugin extends Plugin {
 				}
 			}
 
-			if (hideEvents.length > 0) {
-				await this.handleLiveHide(syncDir, folder, hideEvents, syncState);
+			if (hiddenPaths.length > 0) {
+				// Route through the confirmation modal — never auto-deletes.
+				await this.handleLiveHide(syncDir, folder, hiddenPaths, syncState);
 			}
 		} catch (e) {
 			console.warn("[Trip2g Sync] autoPull error:", e);

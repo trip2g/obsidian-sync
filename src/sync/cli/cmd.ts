@@ -20,6 +20,7 @@ import { classifySync } from "../classify";
 import { filterPlan } from "../filter";
 import { executePlan } from "../execute";
 import { makeExcludeMatcher } from "../exclude";
+import { runWatch } from "./watch";
 
 interface CliArgs {
 	folder: string;
@@ -27,15 +28,22 @@ interface CliArgs {
 	apiUrl: string;
 	apiKey: string;
 	twoWaySync: boolean;
+	watch: boolean;
 	verbose: boolean;
 	dryRun: boolean;
 	conflictResolution: CliConflictResolution;
 	meta: Record<string, string>;
 	updatedOutput: string;
 	exclude: string[];
+	include: string[];
 }
 
-function readDataJson(): { apiUrl?: string; apiKey?: string } {
+function readDataJson(): {
+	apiUrl?: string;
+	apiKey?: string;
+	livePullIncludePatterns?: string[];
+	livePullExcludePatterns?: string[];
+} {
 	try {
 		const dataPath = path.join(process.cwd(), ".obsidian", "plugins", "trip2g", "data.json");
 		const data = JSON.parse(fs.readFileSync(dataPath, "utf8"));
@@ -44,6 +52,8 @@ function readDataJson(): { apiUrl?: string; apiKey?: string } {
 		return {
 			apiUrl: dir.apiUrl ? `${dir.apiUrl}/_system/graphql` : undefined,
 			apiKey: dir.apiKey || undefined,
+			livePullIncludePatterns: dir.livePullIncludePatterns ?? undefined,
+			livePullExcludePatterns: dir.livePullExcludePatterns ?? undefined,
 		};
 	} catch {
 		return {};
@@ -59,12 +69,14 @@ function parseArgs(): CliArgs {
 		apiUrl: process.env.TRIP2G_ENDPOINT || process.env.ENDPOINT || dataJson.apiUrl || "http://localhost:8081/_system/graphql",
 		apiKey: process.env.TRIP2G_API_KEY || process.env.API_KEY || dataJson.apiKey || "",
 		twoWaySync: false,
+		watch: false,
 		verbose: false,
 		dryRun: false,
 		conflictResolution: "local",
 		meta: {},
 		updatedOutput: "",
 		exclude: [],
+		include: [],
 	};
 
 	const positionalArgs: string[] = [];
@@ -93,6 +105,19 @@ function parseArgs(): CliArgs {
 			case "-2":
 				result.twoWaySync = true;
 				break;
+			case "--watch":
+			case "-w":
+				result.watch = true;
+				result.twoWaySync = true;
+				break;
+			case "--include":
+			case "-i": {
+				const includeValue = value ?? args[++i];
+				if (includeValue) {
+					result.include.push(includeValue);
+				}
+				break;
+			}
 			case "--verbose":
 			case "-v":
 				result.verbose = true;
@@ -177,6 +202,11 @@ Options:
   -u, --api-url <url>      GraphQL endpoint (default: $ENDPOINT or .obsidian/plugins/trip2g/data.json or http://localhost:8081/_system/graphql)
   -k, --api-key <key>      API key (default: $API_KEY)
   -2, --two-way            Enable two-way sync (pull changes from server)
+  -w, --watch              Watch mode: stream live changes from server via SSE
+                           (implies --two-way; prefix not allowed in this mode)
+  -i, --include <glob>     Include only matching paths in live-pull (can be repeated).
+                           Flags take priority over data.json livePullIncludePatterns.
+                           Default when none specified: ** (follow everything)
   -c, --conflict-resolution <mode>
                            How to resolve conflicts (default: local)
                            - local:  Keep local version, push to server
@@ -189,7 +219,9 @@ Options:
   -x, --exclude <glob>     Exclude paths from sync (can be repeated). Excluded
                            paths are never pushed; if they exist on the server
                            they are hidden. A bare name like "dev" matches that
-                           directory and everything under it. Default: none.
+                           directory and everything under it. In --watch mode,
+                           flags take priority over data.json livePullExcludePatterns.
+                           Default: none.
   -v, --verbose            Verbose output
   -n, --dry-run            Show what would be done without making changes
   -h, --help               Show this help
@@ -261,6 +293,23 @@ async function main(): Promise<void> {
 	if (args.prefix && args.twoWaySync) {
 		console.error("❌ Error: prefix is not supported with --two-way sync");
 		process.exit(1);
+	}
+
+	if (args.watch) {
+		const dataJson = readDataJson();
+		const { exitCode } = await runWatch({
+			folder: args.folder,
+			apiUrl: args.apiUrl,
+			apiKey: args.apiKey,
+			include: args.include,
+			exclude: args.exclude,
+			conflictResolution: args.conflictResolution,
+			meta: args.meta,
+			verbose: args.verbose,
+			dataInclude: dataJson.livePullIncludePatterns,
+			dataExclude: dataJson.livePullExcludePatterns,
+		});
+		process.exit(exitCode);
 	}
 
 	if (args.dryRun) {

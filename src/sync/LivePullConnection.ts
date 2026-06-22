@@ -34,6 +34,11 @@ export interface LivePullConnectionOptions {
 	pluginVersion: string;
 	includePatterns: string[];
 	excludePatterns?: string[];
+	/**
+	 * Full GraphQL endpoint URL. When set, used verbatim instead of
+	 * appending `/_system/graphql` to `apiUrl`.
+	 */
+	endpoint?: string;
 	/** Fires after the stream is established (HTTP 200, reader open). */
 	onConnected: () => void;
 	/** Fires for every received batch of changes. */
@@ -158,7 +163,7 @@ export class LivePullConnection {
 		this.abort = abort;
 		this.lastByteAt = Date.now();
 
-		const response = await fetch(`${this.options.apiUrl}/_system/graphql`, {
+		const response = await fetch(this.options.endpoint ?? `${this.options.apiUrl}/_system/graphql`, {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
