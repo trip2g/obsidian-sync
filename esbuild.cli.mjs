@@ -19,9 +19,11 @@ await esbuild.build({
 	},
 });
 
-// Add shebang at the beginning (esbuild banner doesn't work well with minification)
+// Prepend shebang + ESM __dirname/__filename shim (CJS globals unavailable in ESM bundles).
+// Shebang MUST be the first line; the dirname shim follows on the next lines.
 const content = fs.readFileSync("dist/trip2g-sync.mjs", "utf-8");
-fs.writeFileSync("dist/trip2g-sync.mjs", `#!/usr/bin/env node\n${content}`);
+const esm_shim = `import{fileURLToPath as __fU2P}from"node:url";import{dirname as __dn}from"node:path";const __filename=__fU2P(import.meta.url);const __dirname=__dn(__filename);`;
+fs.writeFileSync("dist/trip2g-sync.mjs", `#!/usr/bin/env node\n${esm_shim}\n${content}`);
 
 console.log("✅ CLI built: dist/trip2g-sync.mjs");
 
