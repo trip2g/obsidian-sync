@@ -36,6 +36,7 @@ interface CliArgs {
 	updatedOutput: string;
 	exclude: string[];
 	include: string[];
+	stateFile: string;
 }
 
 function readDataJson(): {
@@ -77,6 +78,7 @@ function parseArgs(): CliArgs {
 		updatedOutput: "",
 		exclude: [],
 		include: [],
+		stateFile: "",
 	};
 
 	const positionalArgs: string[] = [];
@@ -155,6 +157,10 @@ function parseArgs(): CliArgs {
 			case "-o":
 				result.updatedOutput = value ?? args[++i];
 				break;
+			case "--state-file":
+			case "-s":
+				result.stateFile = value ?? args[++i];
+				break;
 			case "--exclude":
 			case "-x": {
 				const excludeValue = value ?? args[++i];
@@ -216,6 +222,7 @@ Options:
   -m, --meta <key=value>   Add/override frontmatter field for all files (can be repeated)
   -o, --updated-output <file>
                            Write pushed notes as JSON [{path, url}] to file after sync
+  -s, --state-file <path>  Sync-state file path (default: .sync-state.<host>.json derived from --api-url)
   -x, --exclude <glob>     Exclude paths from sync (can be repeated). Excluded
                            paths are never pushed; if they exist on the server
                            they are hidden. A bare name like "dev" matches that
@@ -326,6 +333,7 @@ async function main(): Promise<void> {
 		verbose: args.verbose,
 		conflictResolution: args.conflictResolution,
 		meta: args.meta,
+		stateFile: args.stateFile || undefined,
 	});
 
 	// 1. Classify files

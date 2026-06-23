@@ -57,6 +57,7 @@ node dist/trip2g-sync.mjs --folder ./vault
 | `--two-way` | `-2` | Enable two-way sync (pull changes from server) |
 | `--conflict-resolution <mode>` | `-c` | How to resolve conflicts: `local`, `remote`, `skip`, `fail` (default: `local`) |
 | `--meta <key=value>` | `-m` | Add/override frontmatter field (can be repeated) |
+| `--state-file <path>` | `-s` | Sync-state file path (default: `.sync-state.<host>.json` derived from `--api-url`) |
 | `--verbose` | `-v` | Verbose output |
 | `--dry-run` | `-n` | Show what would be done without making changes |
 | `--help` | `-h` | Show help |
@@ -135,11 +136,32 @@ fswatch -o ./vault | xargs -n1 -I{} node dist/trip2g-sync.mjs --folder ./vault -
 
 ## Sync State
 
-The CLI maintains a `.sync-state.json` file in the synced folder to track:
+The CLI maintains a sync-state file in the synced folder to track:
 - Last synced hash for each file
 - Timestamps for change detection
 
-This file should be added to `.gitignore` if you don't want to share sync state across machines.
+**Per-host files (default):** The filename is derived from the API endpoint host, so syncing the same folder to different servers never shares a cache. For example:
+
+| API URL | State file |
+|---------|-----------|
+| `http://localhost:8081/_system/graphql` | `.sync-state.localhost_8081.json` |
+| `https://trip2g.com/graphql` | `.sync-state.trip2g.com.json` |
+
+**Custom path:** Use `--state-file` (`-s`) to override the path. A relative path is resolved inside the synced folder; an absolute path is used as-is.
+
+```bash
+# Use a custom state file
+node dist/trip2g-sync.mjs --folder ./vault --state-file .sync-state.ci.json
+
+# Absolute path
+node dist/trip2g-sync.mjs --folder ./vault --state-file /tmp/my-sync-state.json
+```
+
+These files should be added to `.gitignore` if you don't want to share sync state across machines. A glob pattern covers all variants:
+
+```
+.sync-state*.json
+```
 
 ## Development
 

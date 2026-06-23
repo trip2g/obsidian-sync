@@ -37,9 +37,39 @@ export interface NodeEnvOptions extends ClientOptions {
 	publishField?: string;
 	/** Additional frontmatter fields to add/override on all pushed files */
 	meta?: Record<string, string>;
+	/**
+	 * Override the sync-state file path.
+	 * Absolute path: used as-is.
+	 * Relative path: resolved relative to `folder`.
+	 * Omit to use the default per-host name derived from `apiUrl`.
+	 */
+	stateFile?: string;
 }
 
-const STATE_FILE = ".sync-state.json";
+const LEGACY_STATE_FILE = ".sync-state.json";
+
+/**
+ * Derive a per-endpoint sync-state filename from an API URL.
+ * Uses url.host (hostname + port) so that different servers never share a cache.
+ * The host is sanitized to be safe in filenames: characters outside [a-zA-Z0-9.-] become '_'.
+ * Falls back to the legacy ".sync-state.json" for empty or invalid URLs.
+ *
+ * Examples:
+ *   "http://localhost:8081"         -> ".sync-state.localhost_8081.json"
+ *   "http://localhost:8081/graphql" -> ".sync-state.localhost_8081.json"
+ *   "https://trip2g.com/graphql"   -> ".sync-state.trip2g.com.json"
+ */
+export function stateFileNameForApiUrl(apiUrl: string): string {
+	if (!apiUrl) return LEGACY_STATE_FILE;
+	try {
+		const url = new URL(apiUrl);
+		const sanitized = url.host.replace(/[^a-zA-Z0-9.-]/g, "_");
+		if (!sanitized) return LEGACY_STATE_FILE;
+		return `.sync-state.${sanitized}.json`;
+	} catch {
+		return LEGACY_STATE_FILE;
+	}
+}
 
 export class NodeEnv implements SyncEnv {
 	private folder: string;
@@ -49,6 +79,8 @@ export class NodeEnv implements SyncEnv {
 	private conflictResolution: CliConflictResolution;
 	private publishField: string;
 	private meta: Record<string, string>;
+	/** Absolute path to the sync-state JSON file. */
+	private statePath: string;
 	private syncState: SyncState;
 	private sdk: Sdk;
 	private apiUrl: string;
@@ -64,9 +96,17 @@ export class NodeEnv implements SyncEnv {
 		this.conflictResolution = options.conflictResolution ?? "local";
 		this.publishField = options.publishField ?? "";
 		this.meta = options.meta ?? {};
-		this.syncState = this.loadSyncState();
+		// apiUrl and statePath must be set BEFORE loadSyncState() is called.
 		this.apiUrl = options.apiUrl;
 		this.apiKey = options.apiKey;
+		if (options.stateFile) {
+			this.statePath = path.isAbsolute(options.stateFile)
+				? options.stateFile
+				: path.join(this.folder, options.stateFile);
+		} else {
+			this.statePath = path.join(this.folder, stateFileNameForApiUrl(options.apiUrl));
+		}
+		this.syncState = this.loadSyncState();
 		this.sdk = createClient({ apiUrl: options.apiUrl, apiKey: options.apiKey });
 	}
 
@@ -90,10 +130,9 @@ export class NodeEnv implements SyncEnv {
 	}
 
 	private loadSyncState(): SyncState {
-		const statePath = path.join(this.folder, STATE_FILE);
 		try {
-			if (fs.existsSync(statePath)) {
-				const data = fs.readFileSync(statePath, "utf-8");
+			if (fs.existsSync(this.statePath)) {
+				const data = fs.readFileSync(this.statePath, "utf-8");
 				return JSON.parse(data);
 			}
 		} catch (e) {
@@ -492,9 +531,8 @@ export class NodeEnv implements SyncEnv {
 	// ============ State ============
 
 	async saveSyncState(state: SyncState): Promise<void> {
-		const statePath = path.join(this.folder, STATE_FILE);
 		state.lastSyncedAt = Date.now();
-		fs.writeFileSync(statePath, JSON.stringify(state, null, 2), "utf-8");
+		fs.writeFileSync(this.statePath, JSON.stringify(state, null, 2), "utf-8");
 		this.syncState = state;
 	}
 
