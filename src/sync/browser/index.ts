@@ -116,12 +116,29 @@ export class BrowserEnv implements SyncEnv {
 	 */
 	async selectDirectory(): Promise<boolean> {
 		try {
+			// Prefer the native File System Access API: showDirectoryPicker returns
+			// the directory handle directly, regardless of the folder's contents.
+			const picker = (
+				globalThis as {
+					showDirectoryPicker?: (opts?: {
+						mode?: "read" | "readwrite";
+					}) => Promise<FileSystemDirectoryHandle>;
+				}
+			).showDirectoryPicker;
+			if (picker) {
+				const handle = await picker({ mode: "readwrite" });
+				this.directoryHandle = handle;
+				await saveDirectoryHandle(handle);
+				this.log(`Directory selected: ${handle.name}`);
+				return true;
+			}
+
+			// Fallback for browsers without the File System Access API.
+			// browser-fs-access returns blobs with directoryHandle on first item.
 			const blobs = await directoryOpen({
 				recursive: true,
 				mode: "readwrite",
 			});
-
-			// browser-fs-access returns blobs with directoryHandle on first item
 			if (blobs.length > 0 && blobs[0].directoryHandle) {
 				this.directoryHandle = blobs[0].directoryHandle;
 				await saveDirectoryHandle(this.directoryHandle);
