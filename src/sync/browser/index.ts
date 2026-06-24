@@ -42,7 +42,8 @@ import {
 
 export interface BrowserEnvOptions {
 	apiUrl: string;
-	apiKey: string;
+	apiKey?: string;
+	useCookieAuth?: boolean;
 	twoWaySync?: boolean;
 	publishField?: string;
 }
@@ -784,12 +785,16 @@ export class BrowserEnv implements SyncEnv {
 	// ============ Private Helpers ============
 
 	private async graphqlRequest<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
+		const headers: Record<string, string> = {
+			"Content-Type": "application/json",
+		};
+		if (!this.options.useCookieAuth && this.options.apiKey) {
+			headers["X-API-Key"] = this.options.apiKey;
+		}
 		const response = await fetch(this.options.apiUrl, {
 			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				"X-API-Key": this.options.apiKey,
-			},
+			headers,
+			credentials: this.options.useCookieAuth ? "include" : "same-origin",
 			body: JSON.stringify({ query, variables }),
 		});
 
