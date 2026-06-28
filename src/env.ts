@@ -477,7 +477,11 @@ export class ObsidianSyncEnv implements SyncEnv {
 		const files: TFile[] = [];
 
 		for (const child of folder.children) {
-			if (child instanceof TFile && (child.extension === "md" || child.extension === "html" || child.extension === "canvas" || child.extension === "base" || child.extension === "excalidraw")) {
+			// `.html.json` layout notes report extension "json", so match them by name
+			// (the server tracks them like `.html` layouts — see isAlwaysPublishable).
+			// Without this they are absent from getLocalFiles and misclassify as
+			// remote_only/local_deleted, risking a wrongful pull over local edits.
+			if (child instanceof TFile && (child.extension === "md" || child.extension === "html" || child.extension === "canvas" || child.extension === "base" || child.extension === "excalidraw" || child.name.endsWith(".html.json"))) {
 				if (!this.shouldExcludeFile(child.path)) {
 					files.push(child);
 				}
