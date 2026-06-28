@@ -207,6 +207,27 @@ describe("executePlan", () => {
 			expect(result.errors).toHaveLength(1);
 			expect(result.errors[0]).toContain("missing.md");
 		});
+
+		it("does not overwrite a non-empty local file with empty server content", async () => {
+			// DATA LOSS guard: an empty server response must never wipe a non-empty
+			// local file (e.g. a .html.json layout the content resolver returned "" for).
+			const path = "_layouts/json-test.html.json";
+			const realContent = '{"meta":{},"body":[{"type":"html","html":"<h1>real</h1>"}]}';
+			const syncState: SyncState = { files: { [path]: `hash:${realContent}` } };
+			const env = createMockEnv({
+				syncState,
+				fileContents: { [path]: realContent },
+				serverContents: { [path]: "" },
+			});
+			const plan = emptyPlan();
+			plan.pulls = [makeClassification(path, "pull", `hash:${realContent}`, "hash:")];
+
+			const result = await executePlan(env, plan);
+
+			expect(env.writeFile).not.toHaveBeenCalledWith(path, "");
+			expect(result.pulled).toBe(0);
+			expect(syncState.files[path]).toBe(`hash:${realContent}`);
+		});
 	});
 
 	describe("pushes", () => {

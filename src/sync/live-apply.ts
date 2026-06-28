@@ -94,10 +94,18 @@ export async function applyLiveChanges(
 		const remoteHash = await env.computeHash(content);
 
 		const exists = await env.fileExists(change.path);
-		const localHash = exists
-			? await env.computeHash(await env.readFileContent(change.path))
-			: null;
+		const localContent = exists ? await env.readFileContent(change.path) : null;
+		const localHash = localContent !== null ? await env.computeHash(localContent) : null;
 		const lastSynced = syncState.files[change.path] ?? null;
+
+		// DATA-LOSS GUARD: never let empty/whitespace-only server content overwrite a
+		// non-empty local file. An empty server response (e.g. a content resolver that
+		// returns "" on a cache miss) would otherwise wipe real bytes. Treat it as a
+		// conflict: skip the write and leave syncState untouched so the user can reconcile.
+		if (content.trim() === "" && localContent !== null && localContent.trim() !== "") {
+			conflictCount++;
+			continue;
+		}
 
 		// Special case: create event with no local copy → always pull.
 		if (change.eventType === "create" && localHash === null) {
