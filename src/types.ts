@@ -22,12 +22,15 @@ export interface PluginSettings {
 	hideSyncStatus?: boolean;
 	/** Show warnings modal after sync (default: true) */
 	showSyncWarnings?: boolean;
+	/** Auto-push local changes shortly after they are saved (default: false) */
+	autoSyncOnSave?: boolean;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
 	syncDirs: [],
 	skipPushConfirmation: false,
 	showSyncWarnings: true,
+	autoSyncOnSave: false,
 };
 
 // Sync state - stored locally to track last synced hashes

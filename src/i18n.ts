@@ -45,6 +45,8 @@ export interface Translations {
 	globalSettingsHeading: string;
 	skipPushConfirmationLabel: string;
 	skipPushConfirmationDesc: string;
+	autoSyncOnSaveLabel: string;
+	autoSyncOnSaveDesc: string;
 	hideSyncStatusLabel: string;
 	hideSyncStatusDesc: string;
 	showSyncWarningsLabel: string;
@@ -183,6 +185,8 @@ const en: Translations = {
 	globalSettingsHeading: "Global settings",
 	skipPushConfirmationLabel: "Skip push confirmation",
 	skipPushConfirmationDesc: "Don't show confirmation dialog before uploading files to server",
+	autoSyncOnSaveLabel: "Auto-sync on save",
+	autoSyncOnSaveDesc: "Automatically push local changes a few seconds after you save. Conflicts are skipped and left for the sync badge — never overwritten.",
 	hideSyncStatusLabel: "Hide sync badge",
 	hideSyncStatusDesc: "Don't show the pending-changes indicator on the ribbon icon",
 	showSyncWarningsLabel: "Show sync warnings",
@@ -324,6 +328,8 @@ const ru: Translations = {
 	globalSettingsHeading: "Общие настройки",
 	skipPushConfirmationLabel: "Не спрашивать подтверждение",
 	skipPushConfirmationDesc: "Не показывать диалог подтверждения перед загрузкой файлов на сервер",
+	autoSyncOnSaveLabel: "Автосинхронизация при сохранении",
+	autoSyncOnSaveDesc: "Автоматически отправлять локальные изменения через несколько секунд после сохранения. Конфликты пропускаются и остаются на бейдже синхронизации — никогда не перезаписываются.",
 	hideSyncStatusLabel: "Скрыть бейдж синка",
 	hideSyncStatusDesc: "Не показывать индикатор ожидающих изменений на иконке",
 	showSyncWarningsLabel: "Показывать предупреждения",

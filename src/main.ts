@@ -1,4 +1,4 @@
-import { App, ItemView, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, WorkspaceLeaf } from "obsidian";
+import { App, ItemView, Modal, Notice, Plugin, PluginSettingTab, Setting, TAbstractFile, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { GraphQLClient } from "graphql-request";
 import { FolderSuggest } from "./FolderSuggest";
 import { MigrationModal, ServerDeletedModal, PushConfirmModal, AssetConflictModal, type AssetConflict, type AssetConflictResolution as UIAssetConflictResolution } from "./ui/ConflictModal";
@@ -10,6 +10,7 @@ import { applyLiveChanges } from "./sync/live-apply";
 import { filterPlan } from "./sync/filter";
 import { executePlan, executePulls, downloadAssetsForNotes } from "./sync/execute";
 import { LivePullConnection, type NoteChangeItem } from "./sync/LivePullConnection";
+import { AutoPushScheduler } from "./sync/auto-push";
 import { ObsidianSyncEnv } from "./env";
 import { isAlwaysPublishable } from "./sync/utils";
 import type {
@@ -30,6 +31,9 @@ import { DEFAULT_SETTINGS, DEFAULT_SYNC_STATE } from "./types";
 const SYNC_STATE_KEY = "sync-state";
 const PUBLISHED_URLS_KEY = "published-urls";
 const WARNINGS_VIEW_TYPE = "trip2g-sync-warnings";
+// Trailing debounce for auto-sync-on-save. Larger than the CLI watcher's 500ms
+// because Obsidian fires "modify" per keystroke; coalesce a typing burst.
+const AUTO_PUSH_DEBOUNCE_MS = 2500;
 
 function normalizeApiUrl(url: string): string {
 	return url.replace(/\/+$/, ""); // Remove trailing slashes
@@ -59,6 +63,8 @@ export default class Trip2gSyncPlugin extends Plugin {
 	private liveConnections: Map<string, LivePullConnection> = new Map();
 	// Changes received while a sync is in progress, keyed by the same composite key.
 	private pendingLivePull: Map<string, NoteChangeItem[]> = new Map();
+	// Debounced auto-push driver; non-null only while autoSyncOnSave is enabled.
+	private autoPushScheduler: AutoPushScheduler | null = null;
 
 	async onload() {
 		// Initialize locale
@@ -175,6 +181,13 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 		// Start live-pull connections.
 		this.reconcileLiveConnections();
+
+		// Auto-sync on save: build the scheduler (if enabled) and listen for local
+		// edits. registerEvent ties teardown to the plugin lifecycle.
+		this.setupAutoSync();
+		this.registerEvent(
+			this.app.vault.on("modify", (file) => this.scheduleAutoPush(file))
+		);
 	}
 
 	onunload() {
@@ -183,6 +196,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 			window.clearInterval(this.checkInterval);
 		}
 		window.removeEventListener("focus", this.boundCheckOnFocus);
+		this.autoPushScheduler?.cancel();
 
 		// Tear down all live connections.
 		for (const conn of this.liveConnections.values()) {
@@ -228,6 +242,146 @@ export default class Trip2gSyncPlugin extends Plugin {
 			this.liveConnections.set(key, conn);
 			conn.connect();
 		}
+	}
+
+	/**
+	 * Build or tear down the auto-sync-on-save scheduler to match the
+	 * autoSyncOnSave setting. Called on load and whenever the toggle changes.
+	 * The vault "modify" listener itself is registered once in onload; this only
+	 * governs whether a modify schedules a push.
+	 */
+	setupAutoSync(): void {
+		if (this.settings.autoSyncOnSave) {
+			if (!this.autoPushScheduler) {
+				this.autoPushScheduler = new AutoPushScheduler({
+					debounceMs: AUTO_PUSH_DEBOUNCE_MS,
+					isEnabled: () => this.settings.autoSyncOnSave === true,
+					isBusy: () => this.isSyncing,
+					flush: (paths) => this.runAutoPush(paths),
+				});
+			}
+		} else if (this.autoPushScheduler) {
+			this.autoPushScheduler.cancel();
+			this.autoPushScheduler = null;
+		}
+	}
+
+	/** Queue a local edit for a debounced auto-push (no-op unless enabled). */
+	private scheduleAutoPush(file: TAbstractFile): void {
+		if (!(file instanceof TFile)) return;
+		this.autoPushScheduler?.schedule(file.path);
+	}
+
+	/**
+	 * Auto-push driven by local file modifications (autoSyncOnSave). Runs the SAME
+	 * classify -> filter -> execute pipeline as the manual sync, but non-interactive:
+	 * conflicts are skipped so concurrent local+remote edits are never clobbered,
+	 * and the push confirmation is auto-approved. Holds isSyncing for its duration
+	 * so it never races a manual sync or live-pull, and drains queued live-pull
+	 * events afterwards.
+	 */
+	private async runAutoPush(paths: string[]): Promise<void> {
+		if (this.isSyncing) return; // belt-and-suspenders; scheduler also gates on isBusy
+		const targets = this.autoPushTargets(paths);
+		if (targets.length === 0) return;
+
+		this.setSyncing(true);
+		try {
+			for (const { syncDir, folder } of targets) {
+				await this.pushSyncDir(syncDir, folder);
+			}
+		} catch (e) {
+			console.warn("[Trip2g Sync] autoPush error:", e);
+		} finally {
+			this.setSyncing(false);
+			await this.drainPendingLivePull();
+		}
+	}
+
+	/** Resolve which configured syncDirs own at least one of the given dirty paths. */
+	private autoPushTargets(paths: string[]): Array<{ syncDir: SyncDir; folder: TFolder }> {
+		const targets: Array<{ syncDir: SyncDir; folder: TFolder }> = [];
+		for (const syncDir of this.settings.syncDirs) {
+			if (!syncDir.path || !syncDir.apiUrl || !syncDir.apiKey) continue;
+			const folder = this.app.vault.getAbstractFileByPath(syncDir.path);
+			if (!(folder instanceof TFolder)) continue;
+			const root = folder.path === "/" || folder.path === "";
+			const base = root ? "" : folder.path + "/";
+			const owns = paths.some((p) => root || p === folder.path || p.startsWith(base));
+			if (owns) targets.push({ syncDir, folder });
+		}
+		return targets;
+	}
+
+	/** Run one non-interactive classify -> filter -> execute push for a syncDir. */
+	private async pushSyncDir(syncDir: SyncDir, folder: TFolder): Promise<void> {
+		const syncState = this.getSyncState(syncDir.apiUrl);
+		const publishField = syncDir.publishField || "";
+		const env = this.buildPushEnv(syncDir, folder, syncState);
+
+		const plan = await classifySync(env);
+		const filteredPlan = filterPlan(plan, {
+			twoWaySync: true,
+			hasPublishFields: publishField
+				? (path: string) => this.hasPublishFieldByPath(path, folder, publishField)
+				: undefined,
+		});
+		const result = await executePlan(env, filteredPlan, { twoWaySync: true });
+
+		if (result.updatedUrls && result.updatedUrls.length > 0) {
+			const base = folder.path === "/" || folder.path === "" ? "" : folder.path + "/";
+			for (const { path, url } of result.updatedUrls) {
+				this.publishedUrls.set(base + path, url);
+			}
+			this.savePublishedUrls();
+			this.updateStatusBar(this.app.workspace.getActiveFile());
+		}
+		if (result.pushed > 0) {
+			new Notice(t().pushedFiles(result.pushed));
+		}
+	}
+
+	/**
+	 * Build an env for non-interactive auto-push (autoSyncOnSave). Mirrors
+	 * buildPullEnv but approves pushes and SKIPS every conflict (onConflict -> [],
+	 * which executePlan resolves as "skip") so a file edited both locally and on
+	 * the server is never clobbered — it stays a conflict for the badge / manual
+	 * sync. twoWaySync stays true so filterPlan keeps conflicts in the conflict
+	 * bucket (instead of converting them to pushes) and publish-field protection
+	 * still applies.
+	 */
+	private buildPushEnv(syncDir: SyncDir, folder: TFolder, syncState: SyncState): ObsidianSyncEnv {
+		const sdk = createSdk(syncDir.apiUrl, syncDir.apiKey, this.manifest.version);
+		return new ObsidianSyncEnv({
+			app: this.app,
+			sdk,
+			folder,
+			syncState,
+			apiUrl: syncDir.apiUrl,
+			apiKey: syncDir.apiKey,
+			pluginVersion: this.manifest.version,
+			publishField: syncDir.publishField || "",
+			twoWaySync: true,
+			onProgressCallback: () => {},
+			onConflictCallback: async () => [],
+			onAssetConflictCallback: async () => [],
+			onServerDeletedCallback: async () => false,
+			confirmPushCallback: async () => true,
+			saveSyncStateCallback: async () => {
+				await this.saveSyncStates();
+			},
+		});
+	}
+
+	/**
+	 * Feed live-pull self-writes to the auto-push scheduler so their resulting
+	 * vault "modify" events don't trigger an echo push. `relPaths` are relative to
+	 * the syncDir folder; convert them to full vault paths the modify handler sees.
+	 */
+	private suppressAutoPush(folder: TFolder, relPaths: string[]): void {
+		if (!this.autoPushScheduler || relPaths.length === 0) return;
+		const base = folder.path === "/" || folder.path === "" ? "" : folder.path + "/";
+		this.autoPushScheduler.suppress(relPaths.map((p) => base + p));
 	}
 
 	async loadSettings() {
@@ -535,6 +689,10 @@ export default class Trip2gSyncPlugin extends Plugin {
 				syncState
 			);
 
+			// Suppress the echo: these paths were just written locally, so their
+			// vault "modify" events must NOT schedule an auto-push.
+			this.suppressAutoPush(folder, pulledPaths);
+
 			if (pulledPaths.length > 0) {
 				await downloadAssetsForNotes(env, pulledPaths);
 				await this.saveSyncStates();
@@ -604,6 +762,8 @@ export default class Trip2gSyncPlugin extends Plugin {
 			const plan = await classifySync(env);
 			if (plan.pulls.length > 0) {
 				const pullResult = await executePulls(env, plan.pulls, syncState);
+				// Suppress echo auto-push for the files we just wrote locally.
+				this.suppressAutoPush(folder, pullResult.pulledPaths);
 				if (pullResult.pulledPaths.length > 0) {
 					await downloadAssetsForNotes(env, pullResult.pulledPaths);
 				}
@@ -1477,6 +1637,17 @@ class SyncSettingTab extends PluginSettingTab {
 				toggle.setValue(this.plugin.settings.skipPushConfirmation ?? false).onChange(async (value) => {
 					this.plugin.settings.skipPushConfirmation = value;
 					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName(i18n.autoSyncOnSaveLabel)
+			.setDesc(i18n.autoSyncOnSaveDesc)
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.autoSyncOnSave ?? false).onChange(async (value) => {
+					this.plugin.settings.autoSyncOnSave = value;
+					await this.plugin.saveSettings();
+					this.plugin.setupAutoSync();
 				})
 			);
 
