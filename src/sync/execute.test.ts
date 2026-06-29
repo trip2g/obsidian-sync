@@ -208,9 +208,10 @@ describe("executePlan", () => {
 			expect(result.errors[0]).toContain("missing.md");
 		});
 
-		it("does not overwrite a non-empty local file with empty server content", async () => {
-			// DATA LOSS guard: an empty server response must never wipe a non-empty
-			// local file (e.g. a .html.json layout the content resolver returned "" for).
+		it("pulls a legitimately-emptied note (advertised hash matches empty content)", async () => {
+			// A user who genuinely empties a note on another device should have that
+			// empty pull reach this device. The server advertises hash("") and the
+			// fetched content is "". computeHash("") === remoteHash → allow the pull.
 			const path = "_layouts/json-test.html.json";
 			const realContent = '{"meta":{},"body":[{"type":"html","html":"<h1>real</h1>"}]}';
 			const syncState: SyncState = { files: { [path]: `hash:${realContent}` } };
@@ -220,7 +221,30 @@ describe("executePlan", () => {
 				serverContents: { [path]: "" },
 			});
 			const plan = emptyPlan();
+			// remoteHash = hash("") — the server advertises the real (empty) hash.
 			plan.pulls = [makeClassification(path, "pull", `hash:${realContent}`, "hash:")];
+
+			const result = await executePlan(env, plan);
+
+			expect(env.writeFile).toHaveBeenCalledWith(path, "");
+			expect(result.pulled).toBe(1);
+			expect(syncState.files[path]).toBe("hash:");
+		});
+
+		it("blocks a lying server: advertised non-empty hash but fetched empty content", async () => {
+			// The bug: server lists path with hash("real content") but resolver returns "".
+			// computeHash("") !== remoteHash → BLOCK; leave syncState and local file intact.
+			const path = "_layouts/json-test.html.json";
+			const realContent = '{"meta":{},"body":[{"type":"html","html":"<h1>real</h1>"}]}';
+			const syncState: SyncState = { files: { [path]: `hash:${realContent}` } };
+			const env = createMockEnv({
+				syncState,
+				fileContents: { [path]: realContent },
+				serverContents: { [path]: "" }, // lying server: returns "" despite non-empty hash
+			});
+			const plan = emptyPlan();
+			// remoteHash = hash(realContent) — server advertises non-empty hash.
+			plan.pulls = [makeClassification(path, "pull", `hash:${realContent}`, `hash:${realContent}`)];
 
 			const result = await executePlan(env, plan);
 

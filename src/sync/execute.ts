@@ -199,12 +199,14 @@ export async function executePulls(
 			continue;
 		}
 
-		// DATA-LOSS GUARD: never let empty/whitespace-only server content overwrite a
-		// non-empty local file. An empty server response (e.g. a content resolver that
-		// returns "" on a cache miss) would otherwise wipe real bytes. Skip the write
-		// and leave syncState untouched; record an error so the user is informed.
-		if (content.trim() === "" && (await localFileIsNonEmpty(env, pull.path))) {
-			errors.push(`Refused to overwrite non-empty ${pull.path} with empty server content`);
+		// DATA-LOSS GUARD: block a lying server — fetched content is empty but the
+		// advertised hash is non-empty (= the server returned "" for a path whose
+		// real content is non-empty, e.g. a cache-miss resolver bug). Legitimate
+		// empties are allowed: when the user genuinely blanks a note, the server
+		// advertises hash("") and computeHash("") === pull.remoteHash passes the check.
+		const fetchedHash = content.trim() === "" ? await env.computeHash(content) : null;
+		if (fetchedHash !== null && fetchedHash !== pull.remoteHash && (await localFileIsNonEmpty(env, pull.path))) {
+			errors.push(`Refused to overwrite non-empty ${pull.path} with empty server content (hash mismatch)`);
 			continue;
 		}
 

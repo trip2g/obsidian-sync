@@ -292,6 +292,9 @@ describe("applyLiveChanges", () => {
 
 describe("DATA LOSS: empty server content must not wipe a non-empty layout", () => {
 	it("does not overwrite a non-empty _layouts/*.html.json with empty content", async () => {
+		// Guard is scoped to isAlwaysPublishable paths (_layouts/*) because the SSE
+		// event carries no advertised hash. Layouts are never legitimately blanked —
+		// they are deleted, not emptied — so blocking empty-over-non-empty is always safe.
 		const path = "_layouts/json-test.html.json";
 		const realContent = '{"meta":{},"body":[{"type":"html","html":"<h1>real</h1>"}]}';
 		const env = makeEnv({ localFiles: { [path]: realContent }, serverContents: { [path]: "" } });
@@ -311,5 +314,18 @@ describe("DATA LOSS: empty server content must not wipe a non-empty layout", () 
 		const result = await applyLiveChanges(env, [upsertChange(path, "create", null)], syncState);
 		expect(env.writeFile).toHaveBeenCalledWith(path, "");
 		expect(result.pulledPaths).toEqual([path]);
+	});
+
+	it("allows pulling empty content for a non-layout note (legit user empty)", async () => {
+		// A user who empties a non-layout note (e.g. note.md) on another device sends a
+		// real empty via SSE. Since note.md is not a layout, the guard must not fire.
+		const path = "note.md";
+		const realContent = "old content";
+		const env = makeEnv({ localFiles: { [path]: realContent }, serverContents: { [path]: "" } });
+		const syncState = makeSyncState({ [path]: makeHash(realContent) });
+		const result = await applyLiveChanges(env, [upsertChange(path, "update", null)], syncState);
+		expect(env.writeFile).toHaveBeenCalledWith(path, "");
+		expect(result.pulledPaths).toEqual([path]);
+		expect(syncState.files[path]).toBe(makeHash(""));
 	});
 });
