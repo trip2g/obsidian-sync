@@ -1,6 +1,7 @@
 import type { NoteChangeItem } from "./LivePullConnection";
 import type { SyncState } from "./types";
 import { classifyFile } from "./classify";
+import { isAlwaysPublishable } from "./utils";
 
 /**
  * Minimal env interface for applyLiveChanges.
@@ -94,10 +95,22 @@ export async function applyLiveChanges(
 		const remoteHash = await env.computeHash(content);
 
 		const exists = await env.fileExists(change.path);
-		const localHash = exists
-			? await env.computeHash(await env.readFileContent(change.path))
-			: null;
+		const localContent = exists ? await env.readFileContent(change.path) : null;
+		const localHash = localContent !== null ? await env.computeHash(localContent) : null;
 		const lastSynced = syncState.files[change.path] ?? null;
+
+		// DATA-LOSS GUARD for layout files: block empty-over-non-empty when the SSE
+		// event is for a _layouts/* path. The SSE NoteUpsertEvent carries no
+		// advertised content hash, so we cannot distinguish a genuine empty from a
+		// resolver bug. Layouts are never legitimately blanked (users delete them, not
+		// empty them), so it is always safe to block. For non-layout notes we do NOT
+		// block — the user may have legitimately emptied the note on another device.
+		// (TODO: add latestContentHash to the noteChanges SSE payload so a universal
+		// hash-discriminator guard can be applied here too, as in execute.ts.)
+		if (isAlwaysPublishable(change.path) && content.trim() === "" && localContent !== null && localContent.trim() !== "") {
+			conflictCount++;
+			continue;
+		}
 
 		// Special case: create event with no local copy → always pull.
 		if (change.eventType === "create" && localHash === null) {

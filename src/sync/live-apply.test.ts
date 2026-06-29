@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/unbound-method */
 import { describe, it, expect, vi } from "vitest";
 import { applyLiveChanges } from "./live-apply";
 import type { LiveApplyEnv } from "./live-apply";
@@ -286,5 +287,45 @@ describe("applyLiveChanges", () => {
 			// hide: caller handles deletion; syncState unchanged by applyLiveChanges
 			expect(syncState.files["hide-me.md"]).toBe("tracked-hash");
 		});
+	});
+});
+
+describe("DATA LOSS: empty server content must not wipe a non-empty layout", () => {
+	it("does not overwrite a non-empty _layouts/*.html.json with empty content", async () => {
+		// Guard is scoped to isAlwaysPublishable paths (_layouts/*) because the SSE
+		// event carries no advertised hash. Layouts are never legitimately blanked —
+		// they are deleted, not emptied — so blocking empty-over-non-empty is always safe.
+		const path = "_layouts/json-test.html.json";
+		const realContent = '{"meta":{},"body":[{"type":"html","html":"<h1>real</h1>"}]}';
+		const env = makeEnv({ localFiles: { [path]: realContent }, serverContents: { [path]: "" } });
+		const syncState = makeSyncState({ [path]: makeHash(realContent) });
+		const result = await applyLiveChanges(env, [upsertChange(path, "update", null)], syncState);
+		expect(env.writeFile).not.toHaveBeenCalledWith(path, "");
+		expect(result.pulledPaths).toEqual([]);
+		expect(syncState.files[path]).toBe(makeHash(realContent));
+	});
+
+	it("still pulls an empty server file when no non-empty local copy exists", async () => {
+		// A genuine empty note with no local file must still be written (create-like),
+		// so the guard must not block empty pulls in general.
+		const path = "_layouts/empty.html.json";
+		const env = makeEnv({ missingFiles: [path], serverContents: { [path]: "" } });
+		const syncState = makeSyncState({});
+		const result = await applyLiveChanges(env, [upsertChange(path, "create", null)], syncState);
+		expect(env.writeFile).toHaveBeenCalledWith(path, "");
+		expect(result.pulledPaths).toEqual([path]);
+	});
+
+	it("allows pulling empty content for a non-layout note (legit user empty)", async () => {
+		// A user who empties a non-layout note (e.g. note.md) on another device sends a
+		// real empty via SSE. Since note.md is not a layout, the guard must not fire.
+		const path = "note.md";
+		const realContent = "old content";
+		const env = makeEnv({ localFiles: { [path]: realContent }, serverContents: { [path]: "" } });
+		const syncState = makeSyncState({ [path]: makeHash(realContent) });
+		const result = await applyLiveChanges(env, [upsertChange(path, "update", null)], syncState);
+		expect(env.writeFile).toHaveBeenCalledWith(path, "");
+		expect(result.pulledPaths).toEqual([path]);
+		expect(syncState.files[path]).toBe(makeHash(""));
 	});
 });

@@ -146,6 +146,23 @@ export async function executePlan(
 }
 
 /**
+ * Returns true when a local file exists and has non-empty (non-whitespace)
+ * content. Used by the data-loss guard to avoid overwriting real local bytes
+ * with empty server content.
+ */
+async function localFileIsNonEmpty(env: SyncEnv, path: string): Promise<boolean> {
+	if (!(await env.fileExists(path))) {
+		return false;
+	}
+	try {
+		const local = await env.readFileContent(path);
+		return local.trim() !== "";
+	} catch {
+		return false;
+	}
+}
+
+/**
  * Execute pull operations - download files from server.
  */
 export async function executePulls(
@@ -179,6 +196,17 @@ export async function executePulls(
 		const content = contentMap.get(pull.path);
 		if (content === undefined) {
 			errors.push(`Failed to fetch: ${pull.path}`);
+			continue;
+		}
+
+		// DATA-LOSS GUARD: block a lying server — fetched content is empty but the
+		// advertised hash is non-empty (= the server returned "" for a path whose
+		// real content is non-empty, e.g. a cache-miss resolver bug). Legitimate
+		// empties are allowed: when the user genuinely blanks a note, the server
+		// advertises hash("") and computeHash("") === pull.remoteHash passes the check.
+		const fetchedHash = content.trim() === "" ? await env.computeHash(content) : null;
+		if (fetchedHash !== null && fetchedHash !== pull.remoteHash && (await localFileIsNonEmpty(env, pull.path))) {
+			errors.push(`Refused to overwrite non-empty ${pull.path} with empty server content (hash mismatch)`);
 			continue;
 		}
 

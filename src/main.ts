@@ -1206,22 +1206,6 @@ export default class Trip2gSyncPlugin extends Plugin {
 		return resolutions;
 	}
 
-	private getAllMarkdownFiles(folder: TFolder): TFile[] {
-		const files: TFile[] = [];
-
-		for (const child of folder.children) {
-			if (child instanceof TFile && (child.extension === "md" || child.extension === "html" || child.extension === "canvas" || child.extension === "base" || child.extension === "excalidraw")) {
-				if (!this.shouldExcludeFile(child.path)) {
-					files.push(child);
-				}
-			} else if (child instanceof TFolder) {
-				files.push(...this.getAllMarkdownFiles(child));
-			}
-		}
-
-		return files;
-	}
-
 	private shouldExcludeFile(filePath: string): boolean {
 		if (filePath.startsWith("_layouts/") && filePath.includes("/node_modules/")) {
 			return true;
