@@ -53,6 +53,7 @@ export interface Translations {
 	showSyncWarningsDesc: string;
 	syncWarningsCount: (count: number) => string;
 	onboardingLink: string;
+	onboardingUrl: string;
 
 	// Sync actions
 	pulledFiles: (count: number) => string;
@@ -61,6 +62,8 @@ export interface Translations {
 	pushed: string;
 	livePulledFiles: (count: number) => string;
 	livePullConflict: (count: number) => string;
+	syncFailedAuth: string;
+	syncFailedGeneric: string;
 
 	// Status bar
 	statusBarTooltip: string;
@@ -193,6 +196,7 @@ const en: Translations = {
 	showSyncWarningsDesc: "Show a popup with warnings after sync (e.g. broken links, missing assets)",
 	syncWarningsCount: (count: number) => `⚠️ ${count} sync warning${count === 1 ? "" : "s"}`,
 	onboardingLink: "Onboarding guide",
+	onboardingUrl: "https://trip2g.com/en/user/getting_started",
 
 	// Sync actions
 	pulledFiles: (count) => `Pulled ${count} files from server`,
@@ -201,6 +205,8 @@ const en: Translations = {
 	pushed: "Pushed",
 	livePulledFiles: (count) => `Live-pulled ${count} file${count === 1 ? "" : "s"} from server`,
 	livePullConflict: (count) => `${count} note${count === 1 ? "" : "s"} changed on server but also edited locally — sync to resolve`,
+	syncFailedAuth: "Trip2g: your changes aren't syncing — check your API key and site URL in settings.",
+	syncFailedGeneric: "Trip2g: sync failed — couldn't reach the server. Your changes are saved locally and will retry.",
 
 	// Status bar
 	statusBarTooltip: "Click: open · Right-click: copy",
@@ -336,6 +342,7 @@ const ru: Translations = {
 	showSyncWarningsDesc: "Показывать окно с предупреждениями после синка (битые ссылки, отсутствующие файлы)",
 	syncWarningsCount: (count: number) => `⚠️ ${count} предупреждени${count === 1 ? "е" : "й"}`,
 	onboardingLink: "Руководство по настройке",
+	onboardingUrl: "https://trip2g.com/docs/onboarding",
 
 	// Sync actions
 	pulledFiles: (count) => `Получено ${count} файлов с сервера`,
@@ -344,6 +351,8 @@ const ru: Translations = {
 	pushed: "Отправлено",
 	livePulledFiles: (count) => `Live-pull: получено ${count} файлов с сервера`,
 	livePullConflict: (count) => `${count} заметок изменены на сервере и локально — синхронизируйте для разрешения`,
+	syncFailedAuth: "Trip2g: изменения не синхронизируются — проверьте API-ключ и URL сайта в настройках.",
+	syncFailedGeneric: "Trip2g: синхронизация не удалась — сервер недоступен. Изменения сохранены локально, попробуем ещё раз.",
 
 	// Status bar
 	statusBarTooltip: "Клик: открыть · Правый клик: копировать",
