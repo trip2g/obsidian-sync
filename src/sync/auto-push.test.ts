@@ -334,6 +334,130 @@ describe("AutoPushScheduler", () => {
 		expect(model.server.get("clean.md")).toBe("v2");
 	});
 
+	it("(bug#3) a path not confirmed by the flush stays dirty and is retried (late disk-write)", async () => {
+		// Repro: user saves A and B in one window. When the debounce fires and the
+		// push reads from disk, B's write hasn't landed yet, so the flush confirms
+		// only A. B must NOT be dropped — it stays queued and a follow-up flush
+		// picks it up once its content is available.
+		const clock = new FakeClock();
+		const confirmedTotal = new Set<string>();
+		let confirmB = false; // B's disk write lands after the first flush
+		const scheduler = new AutoPushScheduler({
+			debounceMs: DEBOUNCE_MS,
+			isEnabled: () => true,
+			isBusy: () => false,
+			flush: async (paths) => {
+				// Confirm every path except B until its write has landed.
+				const confirmed = paths.filter((p) => p !== "b.md" || confirmB);
+				for (const p of confirmed) confirmedTotal.add(p);
+				return confirmed;
+			},
+			clock,
+		});
+
+		scheduler.schedule("a.md");
+		scheduler.schedule("b.md");
+		await clock.advance(DEBOUNCE_MS);
+		await flushMicrotasks();
+
+		// First flush confirmed only A; B was not pushed and must still be queued.
+		expect(confirmedTotal.has("a.md")).toBe(true);
+		expect(confirmedTotal.has("b.md")).toBe(false);
+		expect(scheduler.pendingCount()).toBe(1); // b.md still dirty
+
+		// B's write has now landed; the scheduler must retry it on its own,
+		// WITHOUT any further save event.
+		confirmB = true;
+		await clock.advance(DEBOUNCE_MS);
+		await flushMicrotasks();
+
+		expect(confirmedTotal.has("b.md")).toBe(true);
+		expect(scheduler.pendingCount()).toBe(0);
+	});
+
+	it("(bug#3) a save during an in-flight flush is not swallowed by the snapshot", async () => {
+		// While the first push is running, the user saves C. C must be flushed
+		// after the push completes, not dropped.
+		const clock = new FakeClock();
+		const flushed: string[][] = [];
+		let busy = false;
+		let held = false;
+		let release!: () => void;
+		const scheduler = new AutoPushScheduler({
+			debounceMs: DEBOUNCE_MS,
+			isEnabled: () => true,
+			isBusy: () => busy,
+			flush: async (paths) => {
+				// Only the first flush is held open (models a slow in-flight push);
+				// later flushes complete immediately.
+				if (!held) {
+					held = true;
+					busy = true;
+					await new Promise<void>((r) => (release = r));
+					busy = false;
+				}
+				flushed.push([...paths]);
+				return paths;
+			},
+			clock,
+		});
+
+		scheduler.schedule("a.md");
+		await clock.advance(DEBOUNCE_MS);
+		await flushMicrotasks(); // flush([a.md]) is now in flight, holding
+
+		// User saves c.md mid-flight.
+		scheduler.schedule("c.md");
+
+		release(); // first push completes
+		await flushMicrotasks();
+		// Give the re-armed follow-up window room to fire (advance twice to absorb
+		// any timer armed at a post-advance `now`).
+		await clock.advance(DEBOUNCE_MS);
+		await flushMicrotasks();
+		await clock.advance(DEBOUNCE_MS);
+		await flushMicrotasks();
+
+		const everFlushedC = flushed.some((batch) => batch.includes("c.md"));
+		expect(everFlushedC).toBe(true);
+		expect(scheduler.pendingCount()).toBe(0);
+	});
+
+	it("(bug#3) a path that never confirms is given up after maxAttempts (no infinite loop)", async () => {
+		// A persistent push failure (server keeps rejecting one file) must not spin
+		// the classify->push pipeline forever. After maxAttempts unconfirmed flushes
+		// the path is dropped so the scheduler goes quiet.
+		const clock = new FakeClock();
+		let flushCalls = 0;
+		const scheduler = new AutoPushScheduler({
+			debounceMs: DEBOUNCE_MS,
+			isEnabled: () => true,
+			isBusy: () => false,
+			flush: async () => {
+				flushCalls++;
+				return []; // never confirm — persistent failure
+			},
+			clock,
+			maxAttempts: 3,
+		});
+
+		scheduler.schedule("bad.md");
+		// Run well past 3 windows.
+		for (let i = 0; i < 10; i++) {
+			await clock.advance(DEBOUNCE_MS);
+			await flushMicrotasks();
+		}
+
+		expect(flushCalls).toBe(3); // stopped after the cap, did not loop forever
+		expect(scheduler.pendingCount()).toBe(0); // given up, queue is empty
+
+		// A fresh edit of the same file starts a new attempt budget.
+		scheduler.schedule("bad.md");
+		await clock.advance(DEBOUNCE_MS);
+		await flushMicrotasks();
+		expect(flushCalls).toBe(4);
+	});
+
 	it("(iv) auto-sync OFF -> scheduling never fires a flush", async () => {
 		const clock = new FakeClock();
 		let flushCalls = 0;
