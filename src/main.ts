@@ -12,6 +12,15 @@ import { executePlan, executePulls, downloadAssetsForNotes } from "./sync/execut
 import { LivePullConnection, type NoteChangeItem } from "./sync/LivePullConnection";
 import { AutoPushScheduler } from "./sync/auto-push";
 import { SyncFailureTracker } from "./sync/failure-tracker";
+import {
+	initialSyncStatus,
+	onEnabledChange,
+	onEditScheduled,
+	onSyncStart,
+	onSyncSuccess,
+	onSyncError,
+	type SyncStatusModel,
+} from "./sync/sync-status";
 import { ObsidianSyncEnv } from "./env";
 import { isAlwaysPublishable } from "./sync/utils";
 import type {
@@ -57,6 +66,10 @@ export default class Trip2gSyncPlugin extends Plugin {
 	lastWarnings: Array<{ path: string; level: string; message: string; url: string }> = [];
 	ribbonIcon: HTMLElement | null = null;
 	statusBarItem: HTMLElement | null = null;
+	// Auto-sync-on-save status indicator (idle/pending/syncing/error), separate
+	// from statusBarItem which shows the active file's published URL hostname.
+	autoStatusBarItem: HTMLElement | null = null;
+	autoStatus: SyncStatusModel = initialSyncStatus(false);
 	checkInterval: number | null = null;
 	private boundCheckOnFocus: () => void;
 	private isSyncing: boolean = false;
@@ -112,6 +125,13 @@ export default class Trip2gSyncPlugin extends Plugin {
 			const url = this.activeFileUrl();
 			if (url) this.copyUrl(url);
 		});
+
+		// Auto-sync-on-save status indicator. Only shows content while the toggle
+		// is on; otherwise stays empty so it doesn't clutter the status bar.
+		this.autoStatusBarItem = this.addStatusBarItem();
+		this.autoStatusBarItem.setAttribute("aria-label", t().autoStatusTooltip);
+		this.autoStatus = initialSyncStatus(this.settings.autoSyncOnSave === true);
+		this.renderAutoStatus();
 
 		this.addCommand({
 			id: "sync",
@@ -268,12 +288,21 @@ export default class Trip2gSyncPlugin extends Plugin {
 			this.autoPushScheduler.cancel();
 			this.autoPushScheduler = null;
 		}
+		this.setAutoStatus(onEnabledChange(this.autoStatus, this.settings.autoSyncOnSave === true));
 	}
 
 	/** Queue a local edit for a debounced auto-push (no-op unless enabled). */
 	private scheduleAutoPush(file: TAbstractFile): void {
 		if (!(file instanceof TFile)) return;
-		this.autoPushScheduler?.schedule(file.path);
+		if (!this.autoPushScheduler) return;
+		this.autoPushScheduler.schedule(file.path);
+		// Immediate feedback: flip to pending before the 2.5s debounce fires, so
+		// there's no silent gap. pendingCount stays 0 for a suppressed self-write
+		// echo (schedule consumed the suppression), so echoes show no false pending.
+		const pending = this.autoPushScheduler.pendingCount();
+		if (pending > 0) {
+			this.setAutoStatus(onEditScheduled(this.autoStatus, pending));
+		}
 	}
 
 	/**
@@ -284,28 +313,64 @@ export default class Trip2gSyncPlugin extends Plugin {
 	 * so it never races a manual sync or live-pull, and drains queued live-pull
 	 * events afterwards.
 	 */
-	private async runAutoPush(paths: string[]): Promise<void> {
-		if (this.isSyncing) return; // belt-and-suspenders; scheduler also gates on isBusy
+	private async runAutoPush(paths: string[]): Promise<string[]> {
+		// belt-and-suspenders; scheduler also gates on isBusy. Confirm nothing so the
+		// batch stays queued and retries once we're free.
+		if (this.isSyncing) return [];
 		const targets = this.autoPushTargets(paths);
-		if (targets.length === 0) return;
+		// No owning syncDir will ever push these — confirm them so they don't loop.
+		if (targets.length === 0) return paths;
 
 		this.setSyncing(true);
-		try {
-			for (const { syncDir, folder } of targets) {
-				const key = this.liveKey(syncDir.apiUrl, syncDir.path);
-				try {
-					await this.pushSyncDir(syncDir, folder);
-					this.syncFailures.recordSuccess(key);
-				} catch (e) {
-					// One dir's failure must not block the others; surface it to the user.
-					console.warn("[Trip2g Sync] autoPush error:", e);
-					this.notifySyncFailure(key, e);
-				}
-			}
-		} finally {
-			this.setSyncing(false);
-			await this.drainPendingLivePull();
+		this.setAutoStatus(onSyncStart(this.autoStatus));
+		let failed = false;
+		const confirmed = new Set<string>();
+		// Any path no configured syncDir owns can never be pushed — confirm it so it
+		// doesn't loop. (targets is non-empty here; some paths may still be unowned.)
+		for (const p of paths) {
+			if (!this.pathOwnedByAny(p, targets)) confirmed.add(p);
 		}
+		// Per-target try/catch: a failing syncDir must not discard the confirmations
+		// (already-pushed files) of the ones that succeeded, or they'd re-push next
+		// window. Each target's confirmations are kept regardless of siblings.
+		for (const { syncDir, folder } of targets) {
+			const key = this.liveKey(syncDir.apiUrl, syncDir.path);
+			try {
+				for (const c of await this.pushSyncDir(syncDir, folder, paths)) confirmed.add(c);
+				this.syncFailures.recordSuccess(key);
+			} catch (e) {
+				failed = true;
+				// One dir's failure must not block the others; surface it to the user
+				// (debounced by the failure tracker so a flaky network can't spam).
+				console.warn("[Trip2g Sync] autoPush error:", e);
+				this.notifySyncFailure(key, e);
+			}
+		}
+		this.setSyncing(false);
+		this.setAutoStatus(
+			failed ? onSyncError(this.autoStatus) : onSyncSuccess(this.autoStatus, Date.now())
+		);
+		await this.drainPendingLivePull();
+		return Array.from(confirmed);
+	}
+
+	/** Prefix to prepend to a folder-relative path to get a full vault path ("" at root). */
+	private basePrefix(folder: TFolder): string {
+		return folder.path === "/" || folder.path === "" ? "" : folder.path + "/";
+	}
+
+	/** Whether a single full vault path falls under the given folder. */
+	private folderOwnsPath(folder: TFolder, path: string): boolean {
+		const base = this.basePrefix(folder);
+		return base === "" || path === folder.path || path.startsWith(base);
+	}
+
+	/** Whether any resolved target folder owns the given path. */
+	private pathOwnedByAny(
+		path: string,
+		targets: Array<{ syncDir: SyncDir; folder: TFolder }>
+	): boolean {
+		return targets.some(({ folder }) => this.folderOwnsPath(folder, path));
 	}
 
 	/**
@@ -332,16 +397,24 @@ export default class Trip2gSyncPlugin extends Plugin {
 			if (!syncDir.path || !syncDir.apiUrl || !syncDir.apiKey) continue;
 			const folder = this.app.vault.getAbstractFileByPath(syncDir.path);
 			if (!(folder instanceof TFolder)) continue;
-			const root = folder.path === "/" || folder.path === "";
-			const base = root ? "" : folder.path + "/";
-			const owns = paths.some((p) => root || p === folder.path || p.startsWith(base));
+			const owns = paths.some((p) => this.folderOwnsPath(folder, p));
 			if (owns) targets.push({ syncDir, folder });
 		}
 		return targets;
 	}
 
-	/** Run one non-interactive classify -> filter -> execute push for a syncDir. */
-	private async pushSyncDir(syncDir: SyncDir, folder: TFolder): Promise<void> {
+	/**
+	 * Run one non-interactive classify -> filter -> execute push for a syncDir.
+	 * Returns the subset of `requested` full vault paths this push confirmed as
+	 * synced (server now holds the current on-disk content). A path whose disk
+	 * write landed AFTER classify read it stays unconfirmed so the scheduler
+	 * retries it — this is the fix for saves silently missing a push.
+	 */
+	private async pushSyncDir(
+		syncDir: SyncDir,
+		folder: TFolder,
+		requested: string[]
+	): Promise<string[]> {
 		const syncState = this.getSyncState(syncDir.apiUrl);
 		const publishField = syncDir.publishField || "";
 		const env = this.buildPushEnv(syncDir, folder, syncState);
@@ -353,18 +426,77 @@ export default class Trip2gSyncPlugin extends Plugin {
 				? (path: string) => this.hasPublishFieldByPath(path, folder, publishField)
 				: undefined,
 		});
+		// Paths this push actually attempted to upload. A requested path outside
+		// this set (conflict, publish-field-filtered, or unchanged) will never push,
+		// so it must be confirmed rather than retried in a hot loop.
+		const attempted = new Set(filteredPlan.pushes.map((p) => p.path));
 		const result = await executePlan(env, filteredPlan, { twoWaySync: true });
 
+		const base = this.basePrefix(folder);
+		let pushedHost = "";
 		if (result.updatedUrls && result.updatedUrls.length > 0) {
-			const base = folder.path === "/" || folder.path === "" ? "" : folder.path + "/";
 			for (const { path, url } of result.updatedUrls) {
 				this.publishedUrls.set(base + path, url);
 			}
 			this.savePublishedUrls();
 			this.updateStatusBar(this.app.workspace.getActiveFile());
+			pushedHost = this.urlHost(result.updatedUrls[0].url);
 		}
 		if (result.pushed > 0) {
-			new Notice(t().pushedFiles(result.pushed));
+			// Name where it went live when the URL is resolvable; fall back to the
+			// generic "Pushed N files" otherwise.
+			new Notice(
+				pushedHost ? t().pushedFilesTo(result.pushed, pushedHost) : t().pushedFiles(result.pushed)
+			);
+		}
+
+		return this.confirmSyncedPaths(env, syncState, folder, base, requested, attempted);
+	}
+
+	/**
+	 * Decide which requested full vault paths are DONE (won't be retried):
+	 * - a path this push attempted to upload is confirmed only when its CURRENT
+	 *   on-disk hash equals the recorded synced hash (server == disk now). Re-reading
+	 *   at confirm-time — not trusting the classify snapshot — closes the late-write
+	 *   race: a file rewritten after classify won't match yet and stays queued.
+	 * - a path the push did NOT attempt (conflict / publish-filtered / already
+	 *   unchanged) is confirmed unconditionally, so it can't busy-loop; conflicts
+	 *   stay on the sync badge for manual resolution.
+	 * - a gone/unreadable path is confirmed so a deleted file can't loop forever.
+	 */
+	private async confirmSyncedPaths(
+		env: ObsidianSyncEnv,
+		syncState: SyncState,
+		folder: TFolder,
+		base: string,
+		requested: string[],
+		attempted: Set<string>
+	): Promise<string[]> {
+		const confirmed: string[] = [];
+		for (const full of requested) {
+			if (!this.folderOwnsPath(folder, full)) continue; // another folder confirms it
+			const rel = base && full.startsWith(base) ? full.slice(base.length) : full;
+			if (!attempted.has(rel)) {
+				confirmed.push(full); // never going to push -> don't retry
+				continue;
+			}
+			try {
+				const content = await env.readFileContent(rel);
+				const hash = await env.computeHash(content);
+				if (syncState.files[rel] === hash) confirmed.push(full);
+			} catch {
+				confirmed.push(full); // gone/unreadable — don't retry it forever
+			}
+		}
+		return confirmed;
+	}
+
+	/** Hostname of a URL, or "" if it can't be parsed. */
+	private urlHost(url: string): string {
+		try {
+			return new URL(url).hostname;
+		} catch {
+			return "";
 		}
 	}
 
@@ -550,6 +682,41 @@ export default class Trip2gSyncPlugin extends Plugin {
 			}
 		} else {
 			this.statusBarItem.setText("");
+		}
+	}
+
+	/** Apply a transition to the auto-sync status model and re-render the bar. */
+	private setAutoStatus(next: SyncStatusModel): void {
+		this.autoStatus = next;
+		this.renderAutoStatus();
+	}
+
+	/** Render the auto-sync status-bar label from the current model. */
+	renderAutoStatus(): void {
+		if (!this.autoStatusBarItem) return;
+		const i18n = t();
+		const m = this.autoStatus;
+		switch (m.status) {
+			case "off":
+				this.autoStatusBarItem.setText("");
+				break;
+			case "pending":
+				this.autoStatusBarItem.setText(i18n.autoStatusPending(m.pending));
+				break;
+			case "syncing":
+				this.autoStatusBarItem.setText(i18n.autoStatusSyncing);
+				break;
+			case "error":
+				this.autoStatusBarItem.setText(i18n.autoStatusError);
+				break;
+			case "idle":
+			default: {
+				const time = m.lastSyncedAt
+					? new Date(m.lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+					: "";
+				this.autoStatusBarItem.setText(i18n.autoStatusSynced(time).trimEnd());
+				break;
+			}
 		}
 	}
 

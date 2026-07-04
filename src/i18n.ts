@@ -71,6 +71,15 @@ export interface Translations {
 	urlCopyFailed: string;
 	urlOpenFailed: string;
 
+	// Auto-sync status bar (autoSyncOnSave)
+	autoStatusSynced: (time: string) => string;
+	autoStatusPending: (count: number) => string;
+	autoStatusSyncing: string;
+	autoStatusError: string;
+	autoStatusTooltip: string;
+	pushedFilesTo: (count: number, host: string) => string;
+	pushError: (message: string) => string;
+
 	// Conflict view
 	syncConflict: string;
 	conflictProgress: (current: number, total: number) => string;
@@ -213,6 +222,15 @@ const en: Translations = {
 	urlCopied: "URL copied",
 	urlCopyFailed: "Failed to copy URL",
 	urlOpenFailed: "Failed to open URL",
+
+	// Auto-sync status bar (autoSyncOnSave)
+	autoStatusSynced: (time) => `✓ synced ${time}`,
+	autoStatusPending: (count) => (count > 1 ? `● ${count} pending…` : `● pending…`),
+	autoStatusSyncing: "↻ syncing…",
+	autoStatusError: "⚠ sync error",
+	autoStatusTooltip: "Auto-sync on save",
+	pushedFilesTo: (count, host) => `Published ${count} file${count === 1 ? "" : "s"} to ${host}`,
+	pushError: (message) => `Auto-sync failed: ${message}`,
 
 	// Conflict view
 	syncConflict: "Sync conflict",
@@ -359,6 +377,15 @@ const ru: Translations = {
 	urlCopied: "URL скопирован",
 	urlCopyFailed: "Не удалось скопировать URL",
 	urlOpenFailed: "Не удалось открыть URL",
+
+	// Auto-sync status bar (autoSyncOnSave)
+	autoStatusSynced: (time) => `✓ синхр. ${time}`,
+	autoStatusPending: (count) => (count > 1 ? `● ${count} в очереди…` : `● ожидание…`),
+	autoStatusSyncing: "↻ синхронизация…",
+	autoStatusError: "⚠ ошибка синхр.",
+	autoStatusTooltip: "Автосинхронизация при сохранении",
+	pushedFilesTo: (count, host) => `Опубликовано ${count} файл(ов) на ${host}`,
+	pushError: (message) => `Автосинхронизация не удалась: ${message}`,
 
 	// Conflict view
 	syncConflict: "Конфликт синхронизации",
