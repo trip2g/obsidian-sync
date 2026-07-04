@@ -11,6 +11,7 @@ import { filterPlan } from "./sync/filter";
 import { executePlan, executePulls, downloadAssetsForNotes } from "./sync/execute";
 import { LivePullConnection, type NoteChangeItem } from "./sync/LivePullConnection";
 import { AutoPushScheduler } from "./sync/auto-push";
+import { SyncFailureTracker } from "./sync/failure-tracker";
 import { ObsidianSyncEnv } from "./env";
 import { isAlwaysPublishable } from "./sync/utils";
 import type {
@@ -65,6 +66,9 @@ export default class Trip2gSyncPlugin extends Plugin {
 	private pendingLivePull: Map<string, NoteChangeItem[]> = new Map();
 	// Debounced auto-push driver; non-null only while autoSyncOnSave is enabled.
 	private autoPushScheduler: AutoPushScheduler | null = null;
+	// Surfaces otherwise console-only background sync failures as Notices, once per
+	// healthy->failing transition (see failure-tracker).
+	private syncFailures: SyncFailureTracker = new SyncFailureTracker();
 
 	async onload() {
 		// Initialize locale
@@ -288,13 +292,36 @@ export default class Trip2gSyncPlugin extends Plugin {
 		this.setSyncing(true);
 		try {
 			for (const { syncDir, folder } of targets) {
-				await this.pushSyncDir(syncDir, folder);
+				const key = this.liveKey(syncDir.apiUrl, syncDir.path);
+				try {
+					await this.pushSyncDir(syncDir, folder);
+					this.syncFailures.recordSuccess(key);
+				} catch (e) {
+					// One dir's failure must not block the others; surface it to the user.
+					console.warn("[Trip2g Sync] autoPush error:", e);
+					this.notifySyncFailure(key, e);
+				}
 			}
-		} catch (e) {
-			console.warn("[Trip2g Sync] autoPush error:", e);
 		} finally {
 			this.setSyncing(false);
 			await this.drainPendingLivePull();
+		}
+	}
+
+	/**
+	 * Surface a background sync failure to the user, debounced by the failure
+	 * tracker so a flaky network doesn't spam Notices — we notify once on the
+	 * healthy->failing transition (and again if it escalates to an auth error).
+	 * Auth failures get a distinct "check your API key/URL" message. With
+	 * opts.authOnly, only auth failures notify (used by the low-signal poll).
+	 */
+	private notifySyncFailure(key: string, error: unknown, opts?: { authOnly?: boolean }): void {
+		const notice = this.syncFailures.recordFailure(key, error);
+		if (!notice) return;
+		if (opts?.authOnly && notice.kind !== "auth") return;
+		new Notice(notice.kind === "auth" ? t().syncFailedAuth : t().syncFailedGeneric);
+		if (this.ribbonIcon && !this.settings.hideSyncStatus) {
+			this.ribbonIcon.addClass("has-pending", "has-error");
 		}
 	}
 
@@ -597,13 +624,20 @@ export default class Trip2gSyncPlugin extends Plugin {
 				if (filteredPlan.conflicts.length > 0) {
 					hasConflict = true;
 				}
-			} catch {
-				// Silently ignore errors during background check
+				this.syncFailures.recordSuccess(this.liveKey(syncDir.apiUrl, syncDir.path));
+			} catch (e) {
+				// The background poll is low-signal, but an expired key surfaces here
+				// too — notify only on a real auth failure (the tracker debounces).
+				this.notifySyncFailure(this.liveKey(syncDir.apiUrl, syncDir.path), e, { authOnly: true });
 			}
 		}
 
 		// Update badge
 		this.ribbonIcon.removeClass("has-pending", "has-pull", "has-push", "has-conflict");
+		// The tracker is the source of truth for the error badge: set when any
+		// target is failing, cleared once they all recover.
+		this.ribbonIcon.toggleClass("has-error", this.syncFailures.anyFailing());
+		if (this.syncFailures.anyFailing()) this.ribbonIcon.addClass("has-pending");
 
 		if (hasConflict) {
 			this.ribbonIcon.addClass("has-pending", "has-conflict");
@@ -711,8 +745,10 @@ export default class Trip2gSyncPlugin extends Plugin {
 				// Route through the confirmation modal — never auto-deletes.
 				await this.handleLiveHide(syncDir, folder, hiddenPaths, syncState);
 			}
+			this.syncFailures.recordSuccess(key);
 		} catch (e) {
 			console.warn("[Trip2g Sync] autoPull error:", e);
+			this.notifySyncFailure(key, e);
 		}
 	}
 
@@ -1403,7 +1439,7 @@ class SyncSettingTab extends PluginSettingTab {
 		descEl.appendText(i18n.settingsDescription + " ");
 		descEl.createEl("a", {
 			text: i18n.onboardingLink,
-			href: "https://trip2g.com/docs/onboarding",
+			href: i18n.onboardingUrl,
 		});
 
 		const buttonsContainer = new Setting(containerEl);
