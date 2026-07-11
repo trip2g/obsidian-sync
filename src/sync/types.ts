@@ -71,6 +71,11 @@ export interface SyncResult {
 
 export interface FilterOptions {
 	twoWaySync: boolean;
+	// Server-truth deletion ("prune"/"mirror"). When true, server notes absent
+	// from the local tree are hidden even when the sync-state has no record of
+	// them (classified remote_only). Off by default. Only applies to push-only
+	// sync; under twoWaySync a remote_only note is a pull candidate, not a delete.
+	prune?: boolean;
 	// Callback to check if file has any of the publishFields set to true
 	// If not provided, all files are considered publishable
 	hasPublishFields?: (path: string) => boolean;

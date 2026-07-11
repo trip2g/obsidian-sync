@@ -16,7 +16,7 @@ import type { SyncPlan, FileClassification, FilterOptions } from "./types";
  * @returns Filtered sync plan
  */
 export function filterPlan(plan: SyncPlan, options: FilterOptions): SyncPlan {
-	const { twoWaySync, hasPublishFields, isExcluded } = options;
+	const { twoWaySync, prune, hasPublishFields, isExcluded } = options;
 
 	// Helper to check if file should be included based on publishFields
 	const isPublishable = (path: string): boolean => {
@@ -105,8 +105,15 @@ export function filterPlan(plan: SyncPlan, options: FilterOptions): SyncPlan {
 					// remote_only doesn't depend on publishable (new file from server)
 					filteredClassifications.push(c);
 					remoteOnly.push(c);
+				} else if (prune) {
+					// Server-truth deletion: a note on the server, absent locally and
+					// untracked in sync-state — the orphaned-note case normal push-only
+					// sync silently ignores. Hide it (rsync --delete semantics).
+					const asHide: FileClassification = { ...c, action: "local_deleted" };
+					filteredClassifications.push(asHide);
+					localDeleted.push(asHide);
 				}
-				// If not twoWaySync -> ignored
+				// If not twoWaySync and not prune -> ignored
 				break;
 
 			case "local_deleted":
