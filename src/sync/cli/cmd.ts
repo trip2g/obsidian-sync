@@ -20,6 +20,7 @@ import { classifySync } from "../classify";
 import { filterPlan } from "../filter";
 import { executePlan } from "../execute";
 import { makeExcludeMatcher } from "../exclude";
+import { summarizePrune, pruneNeedsForce } from "../prune";
 import { runWatch } from "./watch";
 
 interface CliArgs {
@@ -31,6 +32,8 @@ interface CliArgs {
 	watch: boolean;
 	verbose: boolean;
 	dryRun: boolean;
+	prune: boolean;
+	force: boolean;
 	conflictResolution: CliConflictResolution;
 	meta: Record<string, string>;
 	updatedOutput: string;
@@ -73,6 +76,8 @@ function parseArgs(): CliArgs {
 		watch: false,
 		verbose: false,
 		dryRun: false,
+		prune: false,
+		force: false,
 		conflictResolution: "local",
 		meta: {},
 		updatedOutput: "",
@@ -127,6 +132,13 @@ function parseArgs(): CliArgs {
 			case "--dry-run":
 			case "-n":
 				result.dryRun = true;
+				break;
+			case "--prune":
+			case "--mirror":
+				result.prune = true;
+				break;
+			case "--force":
+				result.force = true;
 				break;
 			case "--conflict-resolution":
 			case "-c": {
@@ -229,6 +241,18 @@ Options:
                            directory and everything under it. In --watch mode,
                            flags take priority over data.json livePullExcludePatterns.
                            Default: none.
+      --prune, --mirror    Server-truth deletion (rsync --delete semantics):
+                           hide every server note under the synced prefix that
+                           is NOT present locally, even ones the local
+                           sync-state has no record of. Fixes orphaned server
+                           notes left behind after a sync-state reset/replace
+                           (they are classified remote_only and normally
+                           ignored, so they are never hidden). Opt-in; without
+                           it behavior is 100% unchanged. Prints a loud summary
+                           before hiding and honors --dry-run. Refuses to run
+                           when the local tree is empty but the server has notes
+                           (partial/reset copy) unless --force is also given.
+      --force              Allow --prune even when the local tree looks empty.
   -v, --verbose            Verbose output
   -n, --dry-run            Show what would be done without making changes
   -h, --help               Show this help
@@ -248,6 +272,10 @@ Examples:
 
   # Exclude folders from a publish (they get hidden on the server if present)
   trip2g-sync ./docs --exclude dev --exclude demo
+
+  # Mirror: hide any server note not present locally (orphaned-note cleanup)
+  trip2g-sync ./docs --prune --dry-run   # preview what would be hidden
+  trip2g-sync ./docs --prune             # actually hide them
 
   # Multi-repo setup: each repo pushes to different folder with different meta
   trip2g-sync ./docs docs --meta subgraph=docs
@@ -344,11 +372,32 @@ async function main(): Promise<void> {
 	const isExcluded = makeExcludeMatcher(args.exclude);
 	const filteredPlan = filterPlan(plan, {
 		twoWaySync: args.twoWaySync,
+		prune: args.prune,
 		isExcluded,
 	});
 
 	if (args.exclude.length > 0) {
 		console.log(`🚫 Excluding: ${args.exclude.join(", ")}`);
+	}
+
+	// Prune (server-truth deletion): loud summary + empty-local-tree guard.
+	if (args.prune) {
+		const summary = summarizePrune(plan, filteredPlan);
+		console.log(`\n🪓 PRUNE: ${summary.paths.length} server notes not present locally will be hidden:`);
+		for (const p of summary.paths) {
+			console.log(`  ${p}`);
+		}
+		if (!args.force && pruneNeedsForce(summary)) {
+			console.error(
+				`\n❌ Refusing to prune: 0 local notes under the synced prefix but ${summary.serverPresent} on the server.\n` +
+					`   This looks like a partial or reset local copy — pruning would wipe the server.\n` +
+					`   Re-run with --force if this is intentional.`
+			);
+			// In --dry-run keep previewing; otherwise refuse before any hide.
+			if (!args.dryRun) {
+				process.exit(1);
+			}
+		}
 	}
 
 	// 3. Print summary

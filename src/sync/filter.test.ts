@@ -319,6 +319,55 @@ describe("filterPlan", () => {
 		});
 	});
 
+	describe("prune (server-truth deletion)", () => {
+		it("regression: push-only sync without prune never hides an orphaned remote_only note", () => {
+			const plan = makePlan([makeClassification("orphan.md", "remote_only")]);
+			const filtered = filterPlan(plan, { twoWaySync: false });
+
+			expect(filtered.remoteOnly).toHaveLength(0);
+			expect(filtered.localDeleted).toHaveLength(0);
+		});
+
+		it("hides an orphaned remote_only note in push-only sync with prune", () => {
+			const plan = makePlan([makeClassification("orphan.md", "remote_only")]);
+			const filtered = filterPlan(plan, { twoWaySync: false, prune: true });
+
+			expect(filtered.remoteOnly).toHaveLength(0);
+			expect(filtered.localDeleted).toHaveLength(1);
+			expect(filtered.localDeleted[0].path).toBe("orphan.md");
+			expect(filtered.localDeleted[0].action).toBe("local_deleted");
+		});
+
+		it("prune leaves locally-present notes untouched", () => {
+			const plan = makePlan([
+				makeClassification("keep.md", "push"),
+				makeClassification("stable.md", "unchanged"),
+				makeClassification("orphan.md", "remote_only"),
+			]);
+			const filtered = filterPlan(plan, { twoWaySync: false, prune: true });
+
+			expect(filtered.pushes).toHaveLength(1);
+			expect(filtered.unchanged).toBe(1);
+			expect(filtered.localDeleted.map((c) => c.path)).toEqual(["orphan.md"]);
+		});
+
+		it("prune does not hide remote_only under two-way sync (still a pull candidate)", () => {
+			const plan = makePlan([makeClassification("new.md", "remote_only")]);
+			const filtered = filterPlan(plan, { twoWaySync: true, prune: true });
+
+			expect(filtered.remoteOnly).toHaveLength(1);
+			expect(filtered.localDeleted).toHaveLength(0);
+		});
+
+		it("prune still hides a genuine local_deleted note", () => {
+			const plan = makePlan([makeClassification("gone.md", "local_deleted")]);
+			const filtered = filterPlan(plan, { twoWaySync: false, prune: true });
+
+			expect(filtered.localDeleted).toHaveLength(1);
+			expect(filtered.localDeleted[0].path).toBe("gone.md");
+		});
+	});
+
 	describe("edge cases", () => {
 		it("handles empty plan", () => {
 			const plan = makePlan([]);
