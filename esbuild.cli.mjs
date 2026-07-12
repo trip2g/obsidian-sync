@@ -6,7 +6,7 @@ await esbuild.build({
 	entryPoints: ["src/sync/cli/cmd.ts"],
 	bundle: true,
 	platform: "node",
-	target: "node18",
+	target: "node20",
 	format: "esm",
 	logLevel: "info",
 	sourcemap: false,
