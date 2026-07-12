@@ -11,7 +11,8 @@ await esbuild.build({
 	logLevel: "info",
 	sourcemap: false,
 	treeShaking: true,
-	minify: true,
+	minify: false,
+	keepNames: true,
 	outfile: "dist/trip2g-sync.mjs",
 	alias: {
 		// Replace graphql-tag with minimal shim (saves ~150KB)
