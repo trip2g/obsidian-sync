@@ -856,14 +856,9 @@ async function uploadMissingAssetsForNotes(
 			// Resolve local path
 			let localPath = asset.absolutePath?.replace(/^\//, "");
 
-			// If no absolutePath, resolve relative to note's folder
+			// If no absolutePath, resolve via the same wikilink resolver used for pushed notes
 			if (!localPath && asset.id) {
-				const noteDir = note.path.includes("/")
-					? note.path.substring(0, note.path.lastIndexOf("/"))
-					: "";
-				// Handle relative paths like "./image.png" or "image.png"
-				const assetPath = asset.id.replace(/^\.\//, "");
-				localPath = noteDir ? `${noteDir}/${assetPath}` : assetPath;
+				localPath = (await env.resolveAssetPath(asset.id, note.path)) ?? undefined;
 			}
 
 			if (!localPath) {
