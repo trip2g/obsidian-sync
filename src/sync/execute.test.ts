@@ -843,6 +843,56 @@ describe("executePlan", () => {
 		});
 	});
 
+	describe("unified asset reconciliation (pushed + unchanged share one resolution path)", () => {
+		it("resolves via resolveAssetPath(assetId, notePath) for BOTH pushed and unchanged notes (no path-doubling)", async () => {
+			// Nested note; asset id is the full vault path, absolutePath unknown ("").
+			// A naive join would double the directory prefix; resolveAssetPath must not.
+			const binaryContents: Record<string, ArrayBuffer> = {
+				"notes/deep/pic.png": new TextEncoder().encode("bytes").buffer,
+			};
+			const resolver = async (assetId: string) => (binaryContents[assetId] !== undefined ? assetId : null);
+
+			// --- pushed entry point ---
+			const pushedEnv = createMockEnv({ fileContents: { "notes/deep/page.md": "content" }, binaryContents });
+			(pushedEnv.resolveAssetPath as ReturnType<typeof vi.fn>).mockImplementation(resolver);
+			(pushedEnv.pushNotes as ReturnType<typeof vi.fn>).mockResolvedValue([
+				{
+					id: "v1",
+					path: "notes/deep/page.md",
+					assets: [{ path: "notes/deep/pic.png", sha256Hash: null, url: "", absolutePath: "" }],
+				},
+			]);
+			const pushedPlan = emptyPlan();
+			pushedPlan.pushes = [makeClassification("notes/deep/page.md", "push")];
+			await executePlan(pushedEnv, pushedPlan, { twoWaySync: false });
+
+			expect(pushedEnv.resolveAssetPath).toHaveBeenCalledWith("notes/deep/pic.png", "notes/deep/page.md");
+			expect(pushedEnv.uploadAsset).toHaveBeenCalledWith(
+				expect.objectContaining({ absolutePath: "notes/deep/pic.png", relativePath: "notes/deep/pic.png" })
+			);
+
+			// --- unchanged entry point ---
+			const unchangedEnv = createMockEnv({ syncState: { files: { "notes/deep/page.md": "h" } }, binaryContents });
+			(unchangedEnv.resolveAssetPath as ReturnType<typeof vi.fn>).mockImplementation(resolver);
+			(unchangedEnv.fetchNoteAssets as ReturnType<typeof vi.fn>).mockResolvedValue([
+				{
+					path: "notes/deep/page.md",
+					noteId: "v2",
+					assets: [{ id: "notes/deep/pic.png", url: "", hash: null, absolutePath: "" }],
+				},
+			]);
+			const unchangedPlan = emptyPlan();
+			unchangedPlan.classifications = [makeClassification("notes/deep/page.md", "unchanged", "h", "h")];
+			unchangedPlan.unchanged = 1;
+			await executePlan(unchangedEnv, unchangedPlan, { twoWaySync: false });
+
+			expect(unchangedEnv.resolveAssetPath).toHaveBeenCalledWith("notes/deep/pic.png", "notes/deep/page.md");
+			expect(unchangedEnv.uploadAsset).toHaveBeenCalledWith(
+				expect.objectContaining({ absolutePath: "notes/deep/pic.png", relativePath: "notes/deep/pic.png" })
+			);
+		});
+	});
+
 	describe("edge cases and error handling", () => {
 		it("handles write errors during pull", async () => {
 			const env = createMockEnv({
