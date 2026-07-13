@@ -21,6 +21,7 @@ import type {
 	AssetConflictResolution,
 } from "../types";
 import { resolveAssetPath } from "../resolve";
+import { uploadWithRetry, AssetTooLargeError } from "../upload-retry";
 import { createClient, type ClientOptions } from "./client";
 import type { Sdk } from "../../graphql";
 
@@ -402,24 +403,12 @@ export class NodeEnv implements SyncEnv {
 	}
 
 	async uploadAsset(params: UploadAssetParams): Promise<boolean> {
-		const maxRetries = 10;
-
-		for (let attempt = 1; attempt <= maxRetries; attempt++) {
-			try {
-				const success = await this.uploadAssetOnce(params);
-				if (success) {
-					return true;
-				}
-			} catch (e) {
-				if (attempt < maxRetries) {
-					this.log(`⚠️ Upload attempt ${attempt} failed, retrying: ${params.relativePath}`);
-					continue;
-				}
-				console.error(`❌ Failed to upload asset ${params.relativePath} after ${maxRetries} attempts: ${e}`);
-				return false;
-			}
-		}
-		return false;
+		return uploadWithRetry(() => this.uploadAssetOnce(params), {
+			// Preserve the CLI's original no-delay retry behavior.
+			sleep: async () => {},
+			onRetry: (attempt) => this.log(`⚠️ Upload attempt ${attempt} failed, retrying: ${params.relativePath}`),
+			onGiveUp: (e) => console.error(`❌ Failed to upload asset ${params.relativePath}: ${e}`),
+		});
 	}
 
 	private async uploadAssetOnce(params: UploadAssetParams): Promise<boolean> {
@@ -468,6 +457,9 @@ export class NodeEnv implements SyncEnv {
 			body: formData,
 		});
 
+		if (response.status === 413) {
+			throw new AssetTooLargeError(params.fileName);
+		}
 		if (!response.ok) {
 			const body = await response.text();
 			throw new Error(`HTTP ${response.status}: ${response.statusText}\n${body}`);

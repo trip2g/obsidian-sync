@@ -5,6 +5,7 @@
 
 import { directoryOpen, fileSave } from "browser-fs-access";
 import { isAlwaysPublishable } from "../utils";
+import { AssetTooLargeError } from "../upload-retry";
 import type {
 	SyncEnv,
 	SyncState,
@@ -617,6 +618,9 @@ export class BrowserEnv implements SyncEnv {
 			body: formData,
 		});
 
+		if (response.status === 413) {
+			throw new AssetTooLargeError(params.fileName);
+		}
 		if (!response.ok) {
 			const body = await response.text();
 			throw new Error(`HTTP ${response.status}: ${response.statusText}\n${body}`);
