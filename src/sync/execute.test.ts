@@ -798,6 +798,49 @@ describe("executePlan", () => {
 				})
 			);
 		});
+
+		it("resolves layout assets via resolveAssetPath instead of naive path join (no path-doubling)", async () => {
+			// buildLayoutAssets (pushnotes/resolve.go) surfaces not-yet-uploaded layout assets
+			// with absolutePath="" and id = the full vault-relative path.
+			const syncState: SyncState = { files: { "_layouts/mesh/index.html": "note_hash" } };
+			const binaryContents: Record<string, ArrayBuffer> = {
+				"_layouts/mesh/demo-en.mp4": new TextEncoder().encode("video bytes").buffer,
+			};
+			const env = createMockEnv({ syncState, binaryContents });
+
+			(env.resolveAssetPath as ReturnType<typeof vi.fn>).mockImplementation(async (assetPath: string) => {
+				return binaryContents[assetPath] !== undefined ? assetPath : null;
+			});
+
+			const plan = emptyPlan();
+			const unchangedFile = makeClassification("_layouts/mesh/index.html", "unchanged", "note_hash", "note_hash");
+			plan.classifications = [unchangedFile];
+			plan.unchanged = 1;
+
+			(env.fetchNoteAssets as ReturnType<typeof vi.fn>).mockResolvedValue([
+				{
+					path: "_layouts/mesh/index.html",
+					noteId: "note_version_1",
+					assets: [
+						{
+							id: "_layouts/mesh/demo-en.mp4",
+							url: "",
+							hash: null,
+							absolutePath: "",
+						},
+					],
+				},
+			]);
+
+			await executePlan(env, plan, { twoWaySync: false });
+
+			// Must resolve to the single correct path, not "_layouts/mesh/_layouts/mesh/demo-en.mp4"
+			expect(env.uploadAsset).toHaveBeenCalledWith(
+				expect.objectContaining({
+					absolutePath: "_layouts/mesh/demo-en.mp4",
+				})
+			);
+		});
 	});
 
 	describe("edge cases and error handling", () => {
