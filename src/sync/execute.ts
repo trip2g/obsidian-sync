@@ -8,7 +8,6 @@ import type {
 	ConflictResolution,
 	NoteUpdate,
 	PushedNote,
-	NoteAsset,
 	AssetConflictInfo,
 	AssetConflictResolution,
 	AssetSyncResult,
@@ -109,21 +108,30 @@ export async function executePlan(
 		await handleLocalDeleted(env, plan.localDeleted, syncState);
 	}
 
-	// 6. Sync assets for pushed notes
+	// 6. Reconcile assets for pushed notes
 	if (pushedNotes.length > 0) {
-		const assetResult = await syncAssets(env, pushedNotes, options.twoWaySync);
+		const notes: ReconcileNote[] = pushedNotes.map((note) => ({
+			id: note.id,
+			path: note.path,
+			assets: (note.assets ?? []).map((a) => ({
+				id: a.path,
+				serverHash: a.sha256Hash,
+				serverUrl: a.url,
+			})),
+		}));
+		const assetResult = await reconcileAssets(env, notes, options.twoWaySync);
 		result.assetsUploaded = assetResult.uploaded;
 		result.assetsDownloaded = assetResult.downloaded;
 		result.errors.push(...assetResult.errors);
 	}
 
-	// 6b. Check and upload missing assets for unchanged notes
+	// 6b. Reconcile missing assets for unchanged notes
 	// This handles the case where asset upload failed on previous sync
 	const unchangedPaths = plan.classifications
 		.filter((c) => c.action === "unchanged" && c.remoteHash !== null)
 		.map((c) => c.path);
 	if (unchangedPaths.length > 0) {
-		const assetResult = await uploadMissingAssetsForNotes(env, unchangedPaths);
+		const assetResult = await reconcileAssetsForUnchangedNotes(env, unchangedPaths);
 		result.assetsUploaded += assetResult.uploaded;
 		result.errors.push(...assetResult.errors);
 	}
@@ -484,32 +492,52 @@ async function handleLocalDeleted(
 
 // ============ Asset Sync ============
 
-interface AssetToUpload {
-	noteId: string;
-	notePath: string;
-	asset: NoteAsset;
-	localPath: string;
+/** A note whose assets should be reconciled against the server. */
+interface ReconcileNote {
+	/** Version id used as uploadAsset's noteId. */
+	id: string;
+	path: string;
+	assets: ReconcileAsset[];
 }
 
-interface AssetToDownload {
-	asset: NoteAsset;
+interface ReconcileAsset {
+	/** Wikilink/relative-path identifier, e.g. "image.png" or "_layouts/mesh/x.mp4". */
+	id: string;
+	/** SHA256 recorded on the server, or null/"" if not uploaded yet. */
+	serverHash: string | null;
+	/** Download URL recorded on the server, or null/"" if not uploaded yet. */
+	serverUrl: string | null;
+}
+
+interface ReconcileUpload {
+	noteId: string;
+	assetId: string;
+	localPath: string;
+	localHash: string;
+}
+
+interface ReconcileDownload {
+	assetId: string;
+	url: string;
 	localPath: string;
 }
 
 /**
- * Sync assets for pushed notes.
+ * Single reconciliation routine for both pushed and unchanged notes.
  *
- * For each note's assets:
- * - If asset has no sha256Hash on server → upload local file
- * - If asset exists locally with different hash → conflict (or auto-upload in one-way mode)
- * - If asset doesn't exist locally (two-way only) → download from server
+ * Every local path is resolved via env.resolveAssetPath(asset.id, note.path)
+ * (never a bespoke join), and each asset is classified with one code path:
+ *   - no server hash/url recorded → upload
+ *   - local hash === server hash  → skip
+ *   - hashes differ               → conflict (one-way mode: auto keep-local)
+ *
+ * Downloads only happen in two-way mode when the asset is missing locally.
  */
-async function syncAssets(
+async function reconcileAssets(
 	env: SyncEnv,
-	pushedNotes: PushedNote[],
+	notes: ReconcileNote[],
 	twoWaySync: boolean
 ): Promise<AssetSyncResult> {
-	console.log(`[Trip2g Sync] syncAssets called with ${pushedNotes.length} notes, twoWaySync=${twoWaySync}`);
 	const result: AssetSyncResult = {
 		uploaded: 0,
 		downloaded: 0,
@@ -517,97 +545,85 @@ async function syncAssets(
 		errors: [],
 	};
 
-	// Stryker disable all
-	// optimization - caller already filters empty
-	if (pushedNotes.length === 0) {
-		return result;
-	}
-	// Stryker restore all
-
-	const toUpload: AssetToUpload[] = [];
-	const toDownload: AssetToDownload[] = [];
+	const toUpload: ReconcileUpload[] = [];
+	const toDownload: ReconcileDownload[] = [];
 	const conflicts: AssetConflictInfo[] = [];
 
-	// Classify each asset
-	for (const note of pushedNotes) {
-		console.log(`[Trip2g Sync] Processing assets for note: ${note.path}, assets count: ${note.assets?.length ?? 0}`);
-		if (!note.assets || note.assets.length === 0) {
-			continue;
-		}
-
+	for (const note of notes) {
 		for (const asset of note.assets) {
-			// Resolve asset path relative to note
-			const localPath = await env.resolveAssetPath(asset.path, note.path);
-			console.log(`[Trip2g Sync] Asset "${asset.path}" -> localPath: ${localPath ?? "NOT FOUND"}, sha256Hash: ${asset.sha256Hash ?? "null"}`);
+			const localPath = await env.resolveAssetPath(asset.id, note.path);
 			if (!localPath) {
-				// Cannot resolve asset path (e.g., file doesn't exist in Obsidian)
+				// Cannot resolve asset path (e.g., file doesn't exist locally)
 				continue;
 			}
 
-			// Asset not yet uploaded to server - need to upload
-			if (!asset.sha256Hash || !asset.absolutePath || !asset.url) {
-				console.log(`[Trip2g Sync] Queuing upload: ${asset.path} (no hash on server)`);
-				toUpload.push({ noteId: note.id, notePath: note.path, asset, localPath });
-				continue;
-			}
-
-			// Check if asset exists locally
 			const exists = await env.fileExists(localPath);
-			if (exists) {
-				// Asset exists locally - check hash
+			const onServer = !!asset.serverHash && !!asset.serverUrl;
+
+			if (!onServer) {
+				// Not uploaded yet — upload if we have a local copy.
+				if (!exists) {
+					continue;
+				}
 				try {
 					const localData = await env.readBinaryFile(localPath);
 					const localHash = await env.computeBinaryHash(localData);
-
-					if (localHash === asset.sha256Hash) {
-						// Hashes match - no action needed
-						continue;
-					}
-
-					// Conflict: local and remote differ
-					conflicts.push({
-						path: asset.path,
-						absolutePath: localPath,
-						noteId: note.id,
-						localHash,
-						remoteHash: asset.sha256Hash,
-						remoteUrl: asset.url,
-					});
+					toUpload.push({ noteId: note.id, assetId: asset.id, localPath, localHash });
 				} catch (e) {
 					result.errors.push(`Failed to read local asset ${localPath}: ${e}`);
 				}
-			} else if (twoWaySync) {
-				// Asset missing locally - download only if two-way sync is enabled
-				toDownload.push({ asset, localPath });
+				continue;
+			}
+
+			if (!exists) {
+				// On server but missing locally — download only when two-way sync is on.
+				if (twoWaySync) {
+					toDownload.push({ assetId: asset.id, url: asset.serverUrl as string, localPath });
+				}
+				continue;
+			}
+
+			try {
+				const localData = await env.readBinaryFile(localPath);
+				const localHash = await env.computeBinaryHash(localData);
+				if (localHash === asset.serverHash) {
+					// Hashes match - no action needed
+					continue;
+				}
+				conflicts.push({
+					path: asset.id,
+					absolutePath: localPath,
+					noteId: note.id,
+					localHash,
+					remoteHash: asset.serverHash as string,
+					remoteUrl: asset.serverUrl as string,
+				});
+			} catch (e) {
+				result.errors.push(`Failed to read local asset ${localPath}: ${e}`);
 			}
 		}
 	}
 
-	// Upload new assets (sequentially to avoid overwhelming server)
-	// Deduplicate by (noteId, localPath) - same file may need to be associated with multiple notes
-	console.log(`[Trip2g Sync] Assets to upload: ${toUpload.length}, to download: ${toDownload.length}, conflicts: ${conflicts.length}`);
+	// Upload new assets, deduped by (noteId, localPath) - same file may back multiple notes.
 	if (toUpload.length > 0) {
-		const uniqueUploads = new Map<string, AssetToUpload>();
+		const unique = new Map<string, ReconcileUpload>();
 		for (const item of toUpload) {
 			const key = `${item.noteId}:${item.localPath}`;
-			if (!uniqueUploads.has(key)) {
-				uniqueUploads.set(key, item);
+			if (!unique.has(key)) {
+				unique.set(key, item);
 			}
 		}
 
-		const deduped = Array.from(uniqueUploads.values());
+		const deduped = Array.from(unique.values());
 		const uploadTotal = deduped.length;
 		let uploadCurrent = 0;
-		console.log(`[Trip2g Sync] Uploading ${uploadTotal} unique (note, asset) pairs`);
 
 		for (const item of deduped) {
 			uploadCurrent++;
-			console.log(`[Trip2g Sync] Uploading asset ${uploadCurrent}/${uploadTotal}: ${item.localPath}`);
-			env.onProgress({ step: "upload_asset", current: uploadCurrent, total: uploadTotal, path: item.asset.path });
+			env.onProgress({ step: "upload_asset", current: uploadCurrent, total: uploadTotal, path: item.assetId });
 
 			try {
 				const localData = await env.readBinaryFile(item.localPath);
-				const localHash = await env.computeBinaryHash(localData);
 				const blob = new Blob([localData]);
 				const fileName = item.localPath.substring(item.localPath.lastIndexOf("/") + 1);
 
@@ -615,41 +631,36 @@ async function syncAssets(
 					noteId: item.noteId,
 					blob,
 					fileName,
-					relativePath: item.asset.path,
+					relativePath: item.assetId,
 					absolutePath: item.localPath,
-					sha256Hash: localHash,
+					sha256Hash: item.localHash,
 				});
 
 				if (success) {
 					result.uploaded++;
 				}
 			} catch (e) {
-				result.errors.push(`Failed to upload asset ${item.asset.path}: ${e}`);
+				result.errors.push(`Failed to upload asset ${item.assetId}: ${e}`);
 			}
 		}
 	}
 
-	// Download missing assets (two-way sync only)
+	// Download missing assets (two-way sync only).
 	if (toDownload.length > 0) {
 		const downloadTotal = toDownload.length;
 		let downloadCurrent = 0;
 
 		for (const item of toDownload) {
 			downloadCurrent++;
-			env.onProgress({ step: "download_asset", current: downloadCurrent, total: downloadTotal, path: item.asset.path });
-
-			if (!item.asset.url) {
-				continue;
-			}
+			env.onProgress({ step: "download_asset", current: downloadCurrent, total: downloadTotal, path: item.assetId });
 
 			try {
-				const data = await env.downloadAsset(item.asset.url);
+				const data = await env.downloadAsset(item.url);
 				if (!data) {
-					result.errors.push(`Failed to download asset ${item.asset.path}`);
+					result.errors.push(`Failed to download asset ${item.assetId}`);
 					continue;
 				}
 
-				// Create directories if needed
 				const dirPath = item.localPath.substring(0, item.localPath.lastIndexOf("/"));
 				if (dirPath) {
 					await env.createFolder(dirPath);
@@ -658,17 +669,16 @@ async function syncAssets(
 				await env.writeBinaryFile(item.localPath, data);
 				result.downloaded++;
 			} catch (e) {
-				result.errors.push(`Failed to download asset ${item.asset.path}: ${e}`);
+				result.errors.push(`Failed to download asset ${item.assetId}: ${e}`);
 			}
 		}
 	}
 
-	// Handle conflicts
 	if (conflicts.length > 0) {
 		const assetResult = await handleAssetConflicts(env, conflicts, twoWaySync);
 		result.uploaded += assetResult.uploaded;
 		result.downloaded += assetResult.downloaded;
-		result.conflictsResolved = assetResult.conflictsResolved;
+		result.conflictsResolved += assetResult.conflictsResolved;
 		result.errors.push(...assetResult.errors);
 	}
 
@@ -827,106 +837,29 @@ export async function downloadAssetsForNotes(
 // ============ Asset Upload for Unchanged Notes ============
 
 /**
- * Upload missing assets for unchanged notes.
- * This handles the case where asset upload failed on a previous sync.
+ * Reconcile assets for unchanged notes (upload-only, one-way): handles the case
+ * where asset upload failed on a previous sync or a referenced file changed.
+ * Delegates to the shared reconcileAssets routine.
  */
-async function uploadMissingAssetsForNotes(
+async function reconcileAssetsForUnchangedNotes(
 	env: SyncEnv,
 	notePaths: string[]
-): Promise<{ uploaded: number; errors: string[] }> {
-	const result = { uploaded: 0, errors: [] as string[] };
-
+): Promise<AssetSyncResult> {
 	if (notePaths.length === 0) {
-		return result;
+		return { uploaded: 0, downloaded: 0, conflictsResolved: 0, errors: [] };
 	}
 
-	// Fetch asset info for notes
 	const noteAssets = await env.fetchNoteAssets(notePaths);
-	if (noteAssets.length === 0) {
-		return result;
-	}
+	const notes: ReconcileNote[] = noteAssets.map((note) => ({
+		id: note.noteId,
+		path: note.path,
+		assets: note.assets.map((a) => ({
+			id: a.id,
+			serverHash: a.hash || null,
+			serverUrl: a.url || null,
+		})),
+	}));
 
-	// Collect assets that need to be uploaded:
-	// - hash is null = not uploaded yet
-	// - hash differs from local = local file was changed
-	const toUpload: Array<{ noteId: string; notePath: string; assetPath: string; localPath: string; localHash: string }> = [];
-
-	for (const note of noteAssets) {
-		for (const asset of note.assets) {
-			// Resolve local path
-			let localPath = asset.absolutePath?.replace(/^\//, "");
-
-			// If no absolutePath, resolve via the same wikilink resolver used for pushed notes
-			if (!localPath && asset.id) {
-				localPath = (await env.resolveAssetPath(asset.id, note.path)) ?? undefined;
-			}
-
-			if (!localPath) {
-				continue;
-			}
-
-			// Check if file exists locally
-			const exists = await env.fileExists(localPath);
-			if (!exists) {
-				continue;
-			}
-
-			// Compute local hash to compare with server hash
-			try {
-				const localData = await env.readBinaryFile(localPath);
-				const localHash = await env.computeBinaryHash(localData);
-
-				// Skip if hashes match (asset is already synced)
-				if (localHash === asset.hash) {
-					continue;
-				}
-
-				// Asset needs upload: either not uploaded (hash null) or changed (hash differs)
-				toUpload.push({
-					noteId: note.noteId, // version ID from server
-					notePath: note.path,
-					assetPath: asset.id,
-					localPath,
-					localHash,
-				});
-			} catch (e) {
-				result.errors.push(`Failed to read local asset ${localPath}: ${e}`);
-			}
-		}
-	}
-
-	if (toUpload.length === 0) {
-		return result;
-	}
-
-	const total = toUpload.length;
-	let current = 0;
-
-	for (const item of toUpload) {
-		current++;
-		env.onProgress({ step: "upload_asset", current, total, path: item.assetPath });
-
-		try {
-			const localData = await env.readBinaryFile(item.localPath);
-			const blob = new Blob([localData]);
-			const fileName = item.localPath.substring(item.localPath.lastIndexOf("/") + 1);
-
-			const success = await env.uploadAsset({
-				noteId: item.noteId,
-				blob,
-				fileName,
-				relativePath: item.assetPath,
-				absolutePath: item.localPath,
-				sha256Hash: item.localHash, // Use pre-computed hash
-			});
-
-			if (success) {
-				result.uploaded++;
-			}
-		} catch (e) {
-			result.errors.push(`Failed to upload asset ${item.assetPath}: ${e}`);
-		}
-	}
-
-	return result;
+	// Unchanged notes are reconciled upload-only (one-way): no downloads, no prompts.
+	return reconcileAssets(env, notes, false);
 }

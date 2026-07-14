@@ -6,6 +6,7 @@
 import { App, TFile, TFolder, requestUrl } from "obsidian";
 import type { Sdk } from "./graphql";
 import { isAlwaysPublishable } from "./sync/utils";
+import { uploadWithRetry, AssetTooLargeError } from "./sync/upload-retry";
 import type {
 	SyncEnv,
 	SyncState,
@@ -282,23 +283,11 @@ export class ObsidianSyncEnv implements SyncEnv {
 	}
 
 	async uploadAsset(params: UploadAssetParams): Promise<boolean> {
-		const maxRetries = 10;
-
-		for (let attempt = 1; attempt <= maxRetries; attempt++) {
-			try {
-				const success = await this.uploadAssetOnce(params);
-				if (success) {
-					return true;
-				}
-			} catch (e) {
-				console.error(`[Trip2g Sync] Upload attempt ${attempt} failed for ${params.relativePath}:`, e);
-				if (attempt < maxRetries) {
-					const delay = Math.pow(2, attempt - 1) * 1000;
-					await new Promise((resolve) => setTimeout(resolve, delay));
-				}
-			}
-		}
-		return false;
+		return uploadWithRetry(() => this.uploadAssetOnce(params), {
+			onRetry: (attempt, e) =>
+				console.error(`[Trip2g Sync] Upload attempt ${attempt} failed for ${params.relativePath}:`, e),
+			onGiveUp: (e) => console.error(`[Trip2g Sync] Upload failed for ${params.relativePath}:`, e),
+		});
 	}
 
 	private async uploadAssetOnce(params: UploadAssetParams): Promise<boolean> {
@@ -343,6 +332,9 @@ export class ObsidianSyncEnv implements SyncEnv {
 			body: formData,
 		});
 
+		if (response.status === 413) {
+			throw new AssetTooLargeError(params.fileName);
+		}
 		if (!response.ok) {
 			throw new Error(`HTTP error! status: ${response.status}`);
 		}
