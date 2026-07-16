@@ -5,7 +5,7 @@
 
 import { App, TFile, TFolder, requestUrl } from "obsidian";
 import type { Sdk } from "./graphql";
-import { isAlwaysPublishable } from "./sync/utils";
+import { isAlwaysPublishable, sameOrigin, resolveAssetUrl } from "./sync/utils";
 import { uploadWithRetry, AssetTooLargeError } from "./sync/upload-retry";
 import type {
 	SyncEnv,
@@ -361,15 +361,17 @@ export class ObsidianSyncEnv implements SyncEnv {
 	}
 
 	async downloadAsset(url: string): Promise<ArrayBuffer | null> {
+		const resolvedUrl = resolveAssetUrl(this.apiUrl, url);
 		try {
-			const response = await requestUrl({ url });
+			const headers = sameOrigin(this.apiUrl, resolvedUrl) ? { "X-API-Key": this.apiKey } : undefined;
+			const response = await requestUrl({ url: resolvedUrl, headers });
 			if (response.status >= 400) {
-				console.error(`[Trip2g Sync] HTTP ${response.status} downloading asset from ${url}`);
+				console.error(`[Trip2g Sync] HTTP ${response.status} downloading asset from ${resolvedUrl}`);
 				return null;
 			}
 			return response.arrayBuffer;
 		} catch (e) {
-			console.error(`[Trip2g Sync] Failed to download asset from ${url}:`, e);
+			console.error(`[Trip2g Sync] Failed to download asset from ${resolvedUrl}:`, e);
 			return null;
 		}
 	}

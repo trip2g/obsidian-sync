@@ -4,7 +4,7 @@
  */
 
 import { directoryOpen, fileSave } from "browser-fs-access";
-import { isAlwaysPublishable } from "../utils";
+import { isAlwaysPublishable, sameOrigin, resolveAssetUrl } from "../utils";
 import { AssetTooLargeError } from "../upload-retry";
 import type {
 	SyncEnv,
@@ -647,15 +647,19 @@ export class BrowserEnv implements SyncEnv {
 	}
 
 	async downloadAsset(url: string): Promise<ArrayBuffer | null> {
+		const resolvedUrl = resolveAssetUrl(this.options.apiUrl, url);
 		try {
-			const response = await fetch(url);
+			const headers = sameOrigin(this.options.apiUrl, resolvedUrl)
+				? { "X-API-Key": this.options.apiKey }
+				: undefined;
+			const response = await fetch(resolvedUrl, { headers });
 			if (!response.ok) {
 				this.log(`Failed to download asset: HTTP ${response.status}`, "error");
 				return null;
 			}
 			return response.arrayBuffer();
 		} catch (e) {
-			this.log(`Failed to download asset from ${url}: ${e}`, "error");
+			this.log(`Failed to download asset from ${resolvedUrl}: ${e}`, "error");
 			return null;
 		}
 	}

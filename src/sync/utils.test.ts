@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isAlwaysPublishable } from "./utils";
+import { isAlwaysPublishable, sameOrigin, resolveAssetUrl } from "./utils";
 
 describe("isAlwaysPublishable", () => {
 	it("returns true for HTML files in _layouts/", () => {
@@ -42,5 +42,115 @@ describe("isAlwaysPublishable", () => {
 		expect(isAlwaysPublishable("_layouts/")).toBe(false);
 		expect(isAlwaysPublishable(".html")).toBe(false);
 		expect(isAlwaysPublishable("_layouts")).toBe(false);
+	});
+});
+
+describe("sameOrigin", () => {
+	it("returns true for same origin, differing paths (CLI-style apiUrl)", () => {
+		expect(
+			sameOrigin("http://localhost:20081/graphql", "http://localhost:20081/_system/assets/abc/x.png")
+		).toBe(true);
+	});
+
+	it("returns true for same origin, differing paths (plugin-style base apiUrl)", () => {
+		expect(sameOrigin("http://localhost:20081", "http://localhost:20081/_system/assets/abc/x.png")).toBe(
+			true
+		);
+	});
+
+	it("returns false for different host", () => {
+		expect(sameOrigin("http://localhost:20081", "http://evil.example.com/_system/assets/abc/x.png")).toBe(
+			false
+		);
+	});
+
+	it("returns false for different port", () => {
+		expect(sameOrigin("http://localhost:20081", "http://localhost:9999/_system/assets/abc/x.png")).toBe(
+			false
+		);
+	});
+
+	it("returns false for different protocol", () => {
+		expect(sameOrigin("http://localhost:20081", "https://localhost:20081/_system/assets/abc/x.png")).toBe(
+			false
+		);
+	});
+
+	it("returns false for a relative asset url", () => {
+		expect(sameOrigin("http://localhost:20081", "/_system/assets/abc/x.png")).toBe(false);
+	});
+
+	it("returns false for an empty asset url", () => {
+		expect(sameOrigin("http://localhost:20081", "")).toBe(false);
+	});
+
+	it("returns false for a malformed asset url", () => {
+		expect(sameOrigin("http://localhost:20081", "not a valid url")).toBe(false);
+	});
+
+	it("returns false for an empty apiUrl", () => {
+		expect(sameOrigin("", "http://localhost:20081/_system/assets/abc/x.png")).toBe(false);
+	});
+
+	it("returns false for a malformed apiUrl", () => {
+		expect(sameOrigin("not a valid url", "http://localhost:20081/_system/assets/abc/x.png")).toBe(false);
+	});
+});
+
+describe("resolveAssetUrl", () => {
+	it("returns an absolute http url unchanged", () => {
+		expect(resolveAssetUrl("http://localhost:20081/graphql", "http://cdn.example.com/x.png")).toBe(
+			"http://cdn.example.com/x.png"
+		);
+	});
+
+	it("returns an absolute https url unchanged", () => {
+		expect(resolveAssetUrl("http://localhost:20081/graphql", "https://cdn.example.com/x.png")).toBe(
+			"https://cdn.example.com/x.png"
+		);
+	});
+
+	it("resolves a relative url against a CLI-style apiUrl (graphql endpoint)", () => {
+		expect(resolveAssetUrl("http://localhost:20081/graphql", "/_system/assets/ab/c.png")).toBe(
+			"http://localhost:20081/_system/assets/ab/c.png"
+		);
+	});
+
+	it("resolves a relative url against a plugin-style base apiUrl", () => {
+		expect(resolveAssetUrl("http://localhost:20081", "/_system/assets/ab/c.png")).toBe(
+			"http://localhost:20081/_system/assets/ab/c.png"
+		);
+	});
+
+	it("preserves percent-encoded filenames", () => {
+		expect(resolveAssetUrl("http://localhost:20081", "/_system/assets/ab/my%20file.png")).toBe(
+			"http://localhost:20081/_system/assets/ab/my%20file.png"
+		);
+	});
+
+	it("returns the url unchanged when apiUrl is empty", () => {
+		expect(resolveAssetUrl("", "/_system/assets/ab/c.png")).toBe("/_system/assets/ab/c.png");
+	});
+
+	it("returns the url unchanged when apiUrl is malformed", () => {
+		expect(resolveAssetUrl("not a valid url", "/_system/assets/ab/c.png")).toBe("/_system/assets/ab/c.png");
+	});
+});
+
+describe("resolveAssetUrl + sameOrigin (downloadAsset guard chain)", () => {
+	it("keeps the api key gated off for a cross-origin absolute url (e.g. a CDN via PublicURL)", () => {
+		const apiUrl = "http://localhost:20081/graphql";
+		const assetUrl = "https://cdn.example.com/_system/assets/ab/c.png";
+		const resolved = resolveAssetUrl(apiUrl, assetUrl);
+		expect(resolved).toBe(assetUrl);
+		expect(sameOrigin(apiUrl, resolved)).toBe(false);
+	});
+
+	it("sends the api key for a relative url resolved back to the same origin as apiUrl", () => {
+		const apiUrl = "http://localhost:20081/graphql";
+		const assetUrl = "/_system/assets/ab/c.png";
+		const resolved = resolveAssetUrl(apiUrl, assetUrl);
+		expect(resolved).toBe("http://localhost:20081/_system/assets/ab/c.png");
+		expect(sameOrigin(apiUrl, resolved)).toBe(true);
 	});
 });
