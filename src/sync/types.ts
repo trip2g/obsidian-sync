@@ -108,6 +108,7 @@ export interface PushedNote {
 	path: string;
 	assets: NoteAsset[];
 	url?: string | null;
+	warnings?: NoteWarning[];
 }
 
 export interface NoteAsset {

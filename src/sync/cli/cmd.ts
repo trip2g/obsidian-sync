@@ -488,11 +488,34 @@ async function main(): Promise<void> {
 	}
 	if (result.warnings.length > 0) {
 		console.log(`  Warnings:           ${result.warnings.length}`);
-		for (const w of result.warnings) {
-			console.log(`    ⚠️  [${w.level}] ${w.path}: ${w.message}`);
-		}
 	}
 	console.log("=".repeat(60));
+
+	// Print warnings grouped by file. A layout that fails to parse or render
+	// (Critical) syncs but is unusable at render time, so it must fail the CLI
+	// run loudly here instead of surfacing only when a visitor hits the page.
+	let hasCritical = false;
+	if (result.warnings.length > 0) {
+		const RED = "\x1b[31m";
+		const YELLOW = "\x1b[33m";
+		const RESET = "\x1b[0m";
+		const byPath = new Map<string, typeof result.warnings>();
+		for (const w of result.warnings) {
+			const forPath = byPath.get(w.path) ?? [];
+			forPath.push(w);
+			byPath.set(w.path, forPath);
+		}
+		console.log("\n⚠️  Warnings:");
+		for (const [path, warnings] of byPath) {
+			console.log(`  ${path}`);
+			for (const w of warnings) {
+				const isCritical = w.level === "CRITICAL";
+				hasCritical = hasCritical || isCritical;
+				const color = isCritical ? RED : YELLOW;
+				console.log(`    ${color}[${w.level}]${RESET} ${w.message}`);
+			}
+		}
+	}
 
 	// 6. Print updated URLs
 	const updatedUrls = result.updatedUrls ?? [];
@@ -509,6 +532,11 @@ async function main(): Promise<void> {
 		} else {
 			console.log(`💡 --updated-output $(mktemp /tmp/updated-XXXXXX.json)`);
 		}
+	}
+
+	if (hasCritical) {
+		console.error("\n❌ Critical warnings detected, aborting.");
+		process.exit(1);
 	}
 }
 

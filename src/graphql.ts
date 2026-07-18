@@ -3355,7 +3355,7 @@ export type PushNotesMutationVariables = Exact<{
 
 export type PushNotesMutation = { pushNotes:
     | { message: string }
-    | { notes: Array<{ id: number, path: string, assets: Array<{ path: string, sha256Hash?: string | null, absolutePath: string, url: string }> }>, updated: Array<{ path: string, url?: string | null }> }
+    | { notes: Array<{ id: number, path: string, assets: Array<{ path: string, sha256Hash?: string | null, absolutePath: string, url: string }>, warnings: Array<{ level: NoteWarningLevelEnum, message: string }> }>, updated: Array<{ path: string, url?: string | null }> }
    };
 
 export type HideNotesMutationVariables = Exact<{
@@ -3455,6 +3455,10 @@ export const PushNotesDocument = gql`
           sha256Hash
           absolutePath
           url
+        }
+        warnings {
+          level
+          message
         }
       }
       updated {
