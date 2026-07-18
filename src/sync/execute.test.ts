@@ -318,6 +318,61 @@ describe("executePlan", () => {
 			expect(result.errors).toHaveLength(1);
 		});
 
+		it("collects warnings returned by pushNotes (e.g. a broken layout)", async () => {
+			const env = createMockEnv({
+				fileContents: { "note.md": "content" },
+			});
+			(env.pushNotes as ReturnType<typeof vi.fn>).mockImplementation(async () => [
+				{ id: "id_note.md", path: "note.md", assets: [] },
+				{
+					id: "id_layout",
+					path: "_layouts/broken.html",
+					assets: [],
+					warnings: [{ level: "CRITICAL", message: "parse error: unexpected token" }],
+				},
+			]);
+			const plan = emptyPlan();
+			plan.pushes = [makeClassification("note.md", "push")];
+
+			const result = await executePlan(env, plan);
+
+			expect(result.warnings).toEqual([
+				{ path: "_layouts/broken.html", level: "CRITICAL", message: "parse error: unexpected token" },
+			]);
+		});
+
+		it("dedupes identical warnings repeated across batches", async () => {
+			// The server returns its full current notes+layouts list on every
+			// pushNotes call, so a broken layout's warning would otherwise be
+			// reported once per batch.
+			const fileContents: Record<string, string> = {};
+			const pushes: FileClassification[] = [];
+			for (let i = 0; i < 150; i++) {
+				const path = `note${i}.md`;
+				fileContents[path] = `content ${i}`;
+				pushes.push(makeClassification(path, "push"));
+			}
+			const env = createMockEnv({ fileContents, pushBatchSize: 100 });
+			(env.pushNotes as ReturnType<typeof vi.fn>).mockImplementation(async () => [
+				{
+					id: "id_layout",
+					path: "_layouts/broken.html",
+					assets: [],
+					warnings: [{ level: "CRITICAL", message: "parse error: unexpected token" }],
+				},
+			]);
+			const plan = emptyPlan();
+			plan.pushes = pushes;
+
+			const result = await executePlan(env, plan);
+
+			// Two batches (100 + 50) each report the same layout warning; expect one.
+			expect(env.pushNotes).toHaveBeenCalledTimes(2);
+			expect(result.warnings).toEqual([
+				{ path: "_layouts/broken.html", level: "CRITICAL", message: "parse error: unexpected token" },
+			]);
+		});
+
 		it("batches pushNotes calls according to pushBatchSize", async () => {
 			// Create 250 files
 			const fileContents: Record<string, string> = {};

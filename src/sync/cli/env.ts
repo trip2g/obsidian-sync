@@ -308,6 +308,7 @@ export class NodeEnv implements SyncEnv {
 					url: a.url ?? null,
 				})),
 				url: urlMap.get(n.path) ?? null,
+				warnings: n.warnings.map((w) => ({ level: w.level, message: w.message })),
 			}));
 		} catch (e) {
 			const paths = processedUpdates.map((u) => u.path).join(", ");

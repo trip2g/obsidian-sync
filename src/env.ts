@@ -227,6 +227,7 @@ export class ObsidianSyncEnv implements SyncEnv {
 				absolutePath: a.absolutePath ?? null,
 				url: a.url ?? null,
 			})),
+			warnings: n.warnings.map((w) => ({ level: w.level, message: w.message })),
 		}));
 	}
 

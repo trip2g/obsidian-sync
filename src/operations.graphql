@@ -61,6 +61,10 @@ mutation PushNotes($input: PushNotesInput!) {
 					absolutePath
 					url
 				}
+				warnings {
+					level
+					message
+				}
 			}
 			updated {
 				path
