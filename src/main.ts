@@ -620,7 +620,10 @@ export default class Trip2gSyncPlugin extends Plugin {
 		const existing = this.app.workspace.getLeavesOfType(WARNINGS_VIEW_TYPE);
 		if (existing.length > 0) {
 			this.app.workspace.revealLeaf(existing[0]);
-			(existing[0].view as SyncWarningsView).render();
+			// A deferred leaf (Obsidian 1.7+) has a placeholder view without
+			// render(); it renders itself via onOpen once loaded, so skip here.
+			const view = existing[0].view;
+			if (view instanceof SyncWarningsView) view.render();
 			return;
 		}
 		const leaf = this.app.workspace.getLeaf("tab");
@@ -1207,7 +1210,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 					this.lastWarnings = [];
 					const openWarnings = this.app.workspace.getLeavesOfType(WARNINGS_VIEW_TYPE);
 					for (const leaf of openWarnings) {
-						(leaf.view as SyncWarningsView).render([]);
+						if (leaf.view instanceof SyncWarningsView) leaf.view.render([]);
 					}
 				}
 				if (result.pulled === 0 && result.pushed === 0 && result.conflictsResolved === 0 && filteredPlan.unchanged > 0) {
