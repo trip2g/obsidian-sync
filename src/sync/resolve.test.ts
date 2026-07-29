@@ -8,6 +8,7 @@ function createEnv(existingFiles: string[]): ResolveEnv {
 	const fileSet = new Set(existingFiles);
 	return {
 		fileExistsSync: (path: string) => fileSet.has(path),
+		listVaultFiles: () => existingFiles,
 	};
 }
 
@@ -147,6 +148,53 @@ describe("resolveAssetPath", () => {
 		it("handles unicode filenames", () => {
 			const env = createEnv(["изображение.png"]);
 			expect(resolveAssetPath(env, "изображение.png", "note.md")).toBe("изображение.png");
+		});
+	});
+
+	describe("global vault search", () => {
+		it("finds an asset in a folder unrelated to the note", () => {
+			// Obsidian resolves [[kanban-board.png]] anywhere in the vault.
+			const env = createEnv(["en/user/kanban.md", "en/user/img/kanban-board.png"]);
+			expect(resolveAssetPath(env, "kanban-board.png", "en/user/kanban.md")).toBe(
+				"en/user/img/kanban-board.png"
+			);
+		});
+
+		it("prefers the shortest path when several files match", () => {
+			const env = createEnv(["a/b/c/image.png", "x/image.png"]);
+			expect(resolveAssetPath(env, "image.png", "note.md")).toBe("x/image.png");
+		});
+
+		it("sorts lexicographically at equal depth", () => {
+			const env = createEnv(["b/image.png", "a/image.png"]);
+			expect(resolveAssetPath(env, "image.png", "note.md")).toBe("a/image.png");
+		});
+
+		it("matches the basename case-insensitively", () => {
+			const env = createEnv(["img/Kanban-Board.PNG"]);
+			expect(resolveAssetPath(env, "kanban-board.png", "note.md")).toBe("img/Kanban-Board.PNG");
+		});
+
+		it("keeps root and assets/ priority over deeper matches", () => {
+			const env = createEnv(["image.png", "assets/image.png", "deep/image.png"]);
+			expect(resolveAssetPath(env, "image.png", "note.md")).toBe("image.png");
+		});
+
+		it("does not apply to explicit paths", () => {
+			const env = createEnv(["img/image.png"]);
+			expect(resolveAssetPath(env, "sub/image.png", "note.md")).toBeNull();
+			expect(resolveAssetPath(env, "./image.png", "note.md")).toBeNull();
+			expect(resolveAssetPath(env, "/image.png", "note.md")).toBeNull();
+		});
+
+		it("returns null when nothing matches", () => {
+			const env = createEnv(["img/other.png"]);
+			expect(resolveAssetPath(env, "image.png", "note.md")).toBeNull();
+		});
+
+		it("is skipped when the env cannot list the vault", () => {
+			const env: ResolveEnv = { fileExistsSync: () => false };
+			expect(resolveAssetPath(env, "image.png", "note.md")).toBeNull();
 		});
 	});
 });

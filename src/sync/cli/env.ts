@@ -86,6 +86,8 @@ export class NodeEnv implements SyncEnv {
 	private sdk: Sdk;
 	private apiUrl: string;
 	private apiKey: string;
+	/** Every vault file, rebuilt on each getLocalFiles() walk. Used for global wikilink resolution. */
+	private vaultFiles: string[] | null = null;
 
 	pushBatchSize = 100;
 
@@ -151,7 +153,19 @@ export class NodeEnv implements SyncEnv {
 	// ============ ClassifyEnv ============
 
 	async getLocalFiles(): Promise<LocalFile[]> {
+		return this.walkVault().notes;
+	}
+
+	listVaultFiles(): string[] {
+		// getLocalFiles() refreshes the cache at the start of every sync run;
+		// walk on demand when an asset is resolved before that.
+		return this.vaultFiles ?? this.walkVault().all;
+	}
+
+	/** Walk the vault once, collecting syncable notes and every file path. */
+	private walkVault(): { notes: LocalFile[]; all: string[] } {
 		const files: LocalFile[] = [];
+		const vaultFiles: string[] = [];
 		const walk = (dir: string) => {
 			const entries = fs.readdirSync(dir, { withFileTypes: true });
 			for (const entry of entries) {
@@ -163,10 +177,12 @@ export class NodeEnv implements SyncEnv {
 				if (entry.isDirectory()) {
 					walk(fullPath);
 				} else if (entry.isFile()) {
+					const relPath = path.relative(this.folder, fullPath);
+					vaultFiles.push(relPath.split(path.sep).join("/"));
+
 					const ext = path.extname(entry.name).toLowerCase();
 					if (ext === ".md" || ext === ".html" || ext === ".canvas" || ext === ".base" || ext === ".excalidraw" || entry.name.endsWith(".html.json")) {
 						const stat = fs.statSync(fullPath);
-						const relPath = path.relative(this.folder, fullPath);
 						files.push({
 							// Use remote path with prefix for sync comparison
 							path: this.toRemotePath(relPath),
@@ -177,7 +193,8 @@ export class NodeEnv implements SyncEnv {
 			}
 		};
 		walk(this.folder);
-		return files;
+		this.vaultFiles = vaultFiles;
+		return { notes: files, all: vaultFiles };
 	}
 
 	async getServerHashes(): Promise<ServerHash[]> {
