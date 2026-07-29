@@ -28,6 +28,7 @@ import type {
 import { classifySync } from "../classify";
 import { filterPlan } from "../filter";
 import { executePlan } from "../execute";
+import { pickByBasename } from "../resolve";
 import {
 	saveDirectoryHandle,
 	loadDirectoryHandle,
@@ -67,6 +68,8 @@ export class BrowserEnv implements SyncEnv {
 	private callbacks: UICallbacks;
 	private fileCache: Map<string, FileSystemFileHandle> = new Map();
 	private existsCache: Map<string, boolean> = new Map();
+	/** Every vault file, rebuilt on each getLocalFiles() walk. Used for global wikilink resolution. */
+	private vaultFiles: string[] = [];
 
 	pushBatchSize = 100;
 
@@ -259,6 +262,7 @@ export class BrowserEnv implements SyncEnv {
 		}
 
 		const files: LocalFile[] = [];
+		this.vaultFiles = [];
 		await this.walkDirectory(this.directoryHandle, "", files);
 		return files;
 	}
@@ -277,6 +281,8 @@ export class BrowserEnv implements SyncEnv {
 			if (handle.kind === "directory") {
 				await this.walkDirectory(handle, path, files);
 			} else if (handle.kind === "file") {
+				this.vaultFiles.push(path);
+
 				const ext = name.split(".").pop()?.toLowerCase();
 				if (ext === "md" || ext === "html") {
 					const file = await handle.getFile();
@@ -758,7 +764,8 @@ export class BrowserEnv implements SyncEnv {
 			}
 		}
 
-		return null;
+		// Anywhere in the vault (last resort) — Obsidian resolves a bare name globally.
+		return pickByBasename(this.vaultFiles, assetPath);
 	}
 
 	// ============ State ============

@@ -14,6 +14,38 @@ import * as path from "path";
  */
 export interface ResolveEnv {
 	fileExistsSync(filePath: string): boolean;
+
+	// Every file in the vault, vault-relative and slash-separated. Optional:
+	// an env that cannot enumerate files keeps the root/assets/note-folder
+	// probes only.
+	listVaultFiles?(): string[];
+}
+
+/**
+ * Pick the file whose basename matches `name`, following Obsidian's shortest
+ * path rule: fewer path segments wins, ties broken lexicographically so the
+ * result is stable across runs.
+ *
+ * @param paths - Vault-relative file paths
+ * @param name - Bare file name from a wikilink (no /)
+ */
+export function pickByBasename(paths: string[], name: string): string | null {
+	const wanted = name.toLowerCase();
+
+	let best: string | null = null;
+	let bestDepth = 0;
+	for (const filePath of paths) {
+		if (path.posix.basename(filePath).toLowerCase() !== wanted) {
+			continue;
+		}
+		const depth = filePath.split("/").length;
+		if (best === null || depth < bestDepth || (depth === bestDepth && filePath < best)) {
+			best = filePath;
+			bestDepth = depth;
+		}
+	}
+
+	return best;
 }
 
 /**
@@ -76,13 +108,20 @@ export function resolveAssetPath(
 		return assetsPath;
 	}
 
-	// 3. Relative to note's directory (last resort)
+	// 3. Relative to note's directory
 	const noteDir = path.dirname(notePath);
 	if (noteDir && noteDir !== ".") {
 		const relativePath = path.posix.join(noteDir, assetPath);
 		if (env.fileExistsSync(relativePath)) {
 			return relativePath;
 		}
+	}
+
+	// 4. Anywhere in the vault (last resort) — Obsidian resolves a bare name
+	// globally, so [[img.png]] finds it in any folder, not just those above.
+	const vaultFiles = env.listVaultFiles?.();
+	if (vaultFiles) {
+		return pickByBasename(vaultFiles, assetPath);
 	}
 
 	// Not found
