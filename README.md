@@ -49,6 +49,9 @@ Once configured, the plugin will sync your notes with trip2g.com. You can:
 
 - Use the ribbon icon to manually trigger synchronization
 - Access sync commands from the command palette (Ctrl/Cmd + P)
+- Open or copy a note's published link from the note's `...` menu, or via the
+  "Open published URL in browser" / "Copy published URL of current file"
+  commands (on mobile these can be pinned to the toolbar)
 - Monitor sync status through notifications
 
 ## Support

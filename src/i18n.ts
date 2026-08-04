@@ -71,6 +71,12 @@ export interface Translations {
 	urlCopyFailed: string;
 	urlOpenFailed: string;
 
+	// Published URL actions (command palette, note "..." menu)
+	openOnSite: string;
+	copySiteLink: string;
+	noFileOpen: string;
+	notPublishedYet: string;
+
 	// Auto-sync status bar (autoSyncOnSave)
 	autoStatusSynced: (time: string) => string;
 	autoStatusPending: (count: number) => string;
@@ -222,6 +228,12 @@ const en: Translations = {
 	urlCopied: "URL copied",
 	urlCopyFailed: "Failed to copy URL",
 	urlOpenFailed: "Failed to open URL",
+
+	// Published URL actions (command palette, note "..." menu)
+	openOnSite: "Open on site",
+	copySiteLink: "Copy site link",
+	noFileOpen: "No file open",
+	notPublishedYet: "File not published yet",
 
 	// Auto-sync status bar (autoSyncOnSave)
 	autoStatusSynced: (time) => `✓ synced ${time}`,
@@ -377,6 +389,12 @@ const ru: Translations = {
 	urlCopied: "URL скопирован",
 	urlCopyFailed: "Не удалось скопировать URL",
 	urlOpenFailed: "Не удалось открыть URL",
+
+	// Published URL actions (command palette, note "..." menu)
+	openOnSite: "Открыть на сайте",
+	copySiteLink: "Скопировать ссылку на сайт",
+	noFileOpen: "Нет открытого файла",
+	notPublishedYet: "Файл ещё не опубликован",
 
 	// Auto-sync status bar (autoSyncOnSave)
 	autoStatusSynced: (time) => `✓ синхр. ${time}`,
