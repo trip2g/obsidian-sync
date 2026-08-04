@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { isAlwaysPublishable, sameOrigin, resolveAssetUrl } from "./utils";
+import * as nodePath from "path";
+import {
+	isAlwaysPublishable,
+	sameOrigin,
+	resolveAssetUrl,
+	posixBasename,
+	posixDirname,
+	posixJoin,
+} from "./utils";
 
 describe("isAlwaysPublishable", () => {
 	it("returns true for HTML files in _layouts/", () => {
@@ -153,4 +161,39 @@ describe("resolveAssetUrl + sameOrigin (downloadAsset guard chain)", () => {
 		expect(resolved).toBe("http://localhost:20081/_system/assets/ab/c.png");
 		expect(sameOrigin(apiUrl, resolved)).toBe(true);
 	});
+});
+
+// The browser bundle can't import node's "path" (esbuild has nothing to resolve
+// it to), so these mirror `path.posix` for vault-relative paths. Each case is
+// asserted against node itself, so the two can't drift.
+describe("posix path helpers", () => {
+	const dirnameCases = ["folder/note.md", "note.md", "a/b/c.md", "", "/a.md", "a/b/"];
+	for (const p of dirnameCases) {
+		it(`posixDirname(${JSON.stringify(p)}) matches path.posix.dirname`, () => {
+			expect(posixDirname(p)).toBe(nodePath.posix.dirname(p));
+		});
+	}
+
+	const basenameCases = ["folder/image.png", "image.png", "a/b/c.png", ""];
+	for (const p of basenameCases) {
+		it(`posixBasename(${JSON.stringify(p)}) matches path.posix.basename`, () => {
+			expect(posixBasename(p)).toBe(nodePath.posix.basename(p));
+		});
+	}
+
+	const joinCases: Array<[string, string]> = [
+		["folder", "image.png"],
+		[".", "image.png"],
+		["", "image.png"],
+		["assets", "image.png"],
+		["a/b", "../image.png"],
+		["a", ".."],
+		["..", "a"],
+		["a/b", "c/d.png"],
+	];
+	for (const [a, b] of joinCases) {
+		it(`posixJoin(${JSON.stringify(a)}, ${JSON.stringify(b)}) matches path.posix.join`, () => {
+			expect(posixJoin(a, b)).toBe(nodePath.posix.join(a, b));
+		});
+	}
 });
