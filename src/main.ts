@@ -1,4 +1,4 @@
-import { App, ItemView, Modal, Notice, Plugin, PluginSettingTab, Setting, TAbstractFile, TFile, TFolder, WorkspaceLeaf } from "obsidian";
+import { App, ItemView, Menu, Modal, Notice, Plugin, PluginSettingTab, Setting, TAbstractFile, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { GraphQLClient } from "graphql-request";
 import { FolderSuggest } from "./FolderSuggest";
 import { MigrationModal, ServerDeletedModal, PushConfirmModal, AssetConflictModal, type AssetConflict, type AssetConflictResolution as UIAssetConflictResolution } from "./ui/ConflictModal";
@@ -167,13 +167,33 @@ export default class Trip2gSyncPlugin extends Plugin {
 			id: "copy-published-url",
 			name: "Copy published URL of current file",
 			callback: () => {
-				const file = this.app.workspace.getActiveFile();
-				if (!file) { new Notice("No file open"); return; }
-				const url = this.publishedUrls.get(file.path);
-				if (!url) { new Notice("File not published yet"); return; }
-				this.copyUrl(url);
+				const url = this.activeFileUrlOrNotice();
+				if (url) this.copyUrl(url);
 			},
 		});
+
+		this.addCommand({
+			id: "open-published-url",
+			name: "Open published URL in browser",
+			callback: () => {
+				const url = this.activeFileUrlOrNotice();
+				if (url) this.openExternalUrl(url);
+			},
+		});
+
+		// The note "..." menu (and long-press in the editor) — on mobile there is no
+		// status bar, so this is the only way to reach the published URL by hand.
+		this.registerEvent(
+			this.app.workspace.on("file-menu", (menu, file) => {
+				if (file instanceof TFile) this.addPublishedUrlMenuItems(menu, file);
+			})
+		);
+		this.registerEvent(
+			this.app.workspace.on("editor-menu", (menu, _editor, info) => {
+				if (info.file) this.addPublishedUrlMenuItems(menu, info.file);
+			})
+		);
+
 		this.registerEvent(
 			this.app.workspace.on("file-open", (file) => this.updateStatusBar(file ?? null))
 		);
@@ -635,6 +655,39 @@ export default class Trip2gSyncPlugin extends Plugin {
 		const file = this.app.workspace.getActiveFile();
 		if (!file) return null;
 		return this.publishedUrls.get(file.path) ?? null;
+	}
+
+	/** Same, but explains via a Notice why there is no URL — for commands. */
+	private activeFileUrlOrNotice(): string | null {
+		const file = this.app.workspace.getActiveFile();
+		if (!file) {
+			new Notice(t().noFileOpen);
+			return null;
+		}
+		const url = this.publishedUrls.get(file.path);
+		if (!url) {
+			new Notice(t().notPublishedYet);
+			return null;
+		}
+		return url;
+	}
+
+	/** Published-URL actions for a file menu; nothing is added for unpublished files. */
+	private addPublishedUrlMenuItems(menu: Menu, file: TFile): void {
+		const url = this.publishedUrls.get(file.path);
+		if (!url) return;
+		menu.addItem((item) =>
+			item
+				.setTitle(t().openOnSite)
+				.setIcon("globe")
+				.onClick(() => this.openExternalUrl(url))
+		);
+		menu.addItem((item) =>
+			item
+				.setTitle(t().copySiteLink)
+				.setIcon("copy")
+				.onClick(() => this.copyUrl(url))
+		);
 	}
 
 	/**
