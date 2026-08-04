@@ -1555,6 +1555,9 @@ class SyncWarningsView extends ItemView {
 				navigator.clipboard.writeText(JSON.stringify(data, null, 2)).then(() => new Notice("Copied"));
 			});
 		}
+		// Mobile has no tab close button in reach, so the view carries its own.
+		const closeBtn = toolbar.createEl("button", { text: "Close", cls: "trip2g-warnings-action-btn" });
+		closeBtn.addEventListener("click", () => this.leaf.detach());
 		toolbar.createEl("span", {
 			text: '· Reopen: "Show last sync warnings" in command palette',
 			cls: "trip2g-warnings-hint",
