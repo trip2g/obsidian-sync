@@ -6,8 +6,7 @@
  * [[image.png]] resolves to /image.png even when referenced from /folder/note.md
  */
 
-/* eslint-disable import/no-nodejs-modules */
-import * as path from "path";
+import { posixBasename, posixDirname, posixJoin } from "./utils";
 
 /**
  * Minimal interface for file existence check - easy to mock in tests.
@@ -35,7 +34,7 @@ export function pickByBasename(paths: string[], name: string): string | null {
 	let best: string | null = null;
 	let bestDepth = 0;
 	for (const filePath of paths) {
-		if (path.posix.basename(filePath).toLowerCase() !== wanted) {
+		if (posixBasename(filePath).toLowerCase() !== wanted) {
 			continue;
 		}
 		const depth = filePath.split("/").length;
@@ -69,8 +68,8 @@ export function resolveAssetPath(
 	// Handle explicit paths (contain /)
 	if (assetPath.startsWith("./")) {
 		// Explicit relative: ./image.png -> folder/image.png
-		const noteDir = path.dirname(notePath);
-		const relativePath = path.join(noteDir, assetPath.slice(2));
+		const noteDir = posixDirname(notePath);
+		const relativePath = posixJoin(noteDir, assetPath.slice(2));
 		if (env.fileExistsSync(relativePath)) {
 			return relativePath;
 		}
@@ -103,15 +102,15 @@ export function resolveAssetPath(
 	}
 
 	// 2. Common assets folder
-	const assetsPath = path.posix.join("assets", assetPath);
+	const assetsPath = posixJoin("assets", assetPath);
 	if (env.fileExistsSync(assetsPath)) {
 		return assetsPath;
 	}
 
 	// 3. Relative to note's directory
-	const noteDir = path.dirname(notePath);
+	const noteDir = posixDirname(notePath);
 	if (noteDir && noteDir !== ".") {
-		const relativePath = path.posix.join(noteDir, assetPath);
+		const relativePath = posixJoin(noteDir, assetPath);
 		if (env.fileExistsSync(relativePath)) {
 			return relativePath;
 		}

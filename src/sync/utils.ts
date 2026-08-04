@@ -18,6 +18,37 @@ export function isAlwaysPublishable(path: string): boolean {
 }
 
 /**
+ * `path.posix` equivalents for vault-relative paths. Node's `path` can't be
+ * bundled for the browser build (esbuild has nothing to resolve it to), and on
+ * Windows `path.join`/`path.dirname` would treat `\` as a separator — vault
+ * paths are always slash-separated. Absolute paths aren't part of the contract.
+ */
+export function posixBasename(p: string): string {
+	return p.slice(p.lastIndexOf("/") + 1);
+}
+
+export function posixDirname(p: string): string {
+	const trimmed = p.replace(/\/+$/, "");
+	const cut = trimmed.lastIndexOf("/");
+	if (cut < 0) return ".";
+	if (cut === 0) return "/";
+	return trimmed.slice(0, cut);
+}
+
+export function posixJoin(...parts: string[]): string {
+	const segments: string[] = [];
+	for (const segment of parts.join("/").split("/")) {
+		if (segment === "" || segment === ".") continue;
+		if (segment === ".." && segments.length > 0 && segments[segments.length - 1] !== "..") {
+			segments.pop();
+			continue;
+		}
+		segments.push(segment);
+	}
+	return segments.join("/") || ".";
+}
+
+/**
  * Check whether an asset url shares the origin (protocol+host+port) of the client's apiUrl.
  * Used to gate sending the API key: it must never leak to a third-party host that
  * PublicURL-absolutized asset urls could point to. Fails closed on malformed/relative input.
