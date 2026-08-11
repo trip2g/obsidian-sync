@@ -16,8 +16,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { NodeEnv, type CliConflictResolution } from "./env";
 import { createClient } from "./client";
-import { GraphQLClient } from "./graphql-client";
-import { runGraphQLCommand, runIntrospectCommand, type GraphQLTransport } from "./graphql-cmd";
+import { runGraphQLCommand, runIntrospectCommand, type MCPTransport } from "./graphql-cmd";
 import { classifySync } from "../classify";
 import { filterPlan } from "../filter";
 import { executePlan } from "../execute";
@@ -262,11 +261,12 @@ Options:
 Subcommands:
   warnings                 Print note warnings as JSON
   graphql '<query>' ['<variables json>']
-                           Run a GraphQL query against the configured instance.
-                           Credentials come from data.json, so no flags are needed.
-  graphql --introspect ['<TypeName>']
-                           List the fields of a type as SDL. Without a name,
-                           covers Query, Mutation, AdminQuery and AdminMutation.
+                           Run a GraphQL query through the MCP lane, where an
+                           API key carries its admin rights. Credentials come
+                           from data.json, so no flags are needed.
+  graphql --introspect '<pattern>'
+                           Show schema types matching the pattern, with their
+                           fields and input fields (e.g. AdminMutation, CreateUser).
 
 Environment Variables:
   TRIP2G_ENDPOINT    GraphQL endpoint URL
@@ -327,14 +327,37 @@ async function cmdGraphQL(): Promise<void> {
 		process.exit(1);
 	}
 
-	const client = new GraphQLClient(apiUrl, { headers: { "X-API-Key": apiKey } });
-	const transport: GraphQLTransport = async ({ query, variables }) =>
-		({ data: await client.request({ document: query, variables }) });
+	// An API key only carries admin rights over MCP, so calls go there rather
+	// than to /_system/graphql — where the same key is refused as unauthorized.
+	const mcpUrl = apiUrl.replace(/\/_system\/graphql\/?$/, "") + "/_system/mcp";
+	const transport: MCPTransport = async ({ tool, args }) => {
+		const response = await fetch(mcpUrl, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Accept: "application/json, text/event-stream",
+				"X-API-Key": apiKey,
+			},
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "tools/call",
+				params: { name: tool, arguments: args },
+			}),
+		});
+
+		if (!response.ok) {
+			const body = await response.text().catch(() => "");
+			throw new Error(`HTTP ${response.status}: ${response.statusText}${body ? `\n${body}` : ""}`);
+		}
+
+		return response.json();
+	};
 
 	const [, , , first, second] = process.argv;
 	const result =
 		first === "--introspect"
-			? await runIntrospectCommand({ typeName: second, transport })
+			? await runIntrospectCommand({ pattern: second, transport })
 			: await runGraphQLCommand({ query: first, variablesJSON: second, transport });
 
 	if (result.stdout) console.log(result.stdout);
