@@ -2,10 +2,13 @@
  * `trip2g-sync graphql` — run a GraphQL query against the instance this vault
  * is already configured for.
  *
+ * Calls travel the MCP lane (`/_system/mcp`, tools `graphql_request` and
+ * `graphql_introspection`), not `/_system/graphql` directly: an API key only
+ * carries admin rights over MCP, so this is the lane where admin queries and
+ * mutations actually work.
+ *
  * Exists for agents: the credentials are in .obsidian/plugins/trip2g/data.json
  * and the endpoint is derived from it, so nothing has to be assembled by hand.
- * `--introspect` answers "what can I even call here?" without dumping a full
- * introspection payload into the agent's context.
  */
 
 export interface GraphQLResponse {
@@ -13,10 +16,11 @@ export interface GraphQLResponse {
 	errors?: Array<{ message: string }>;
 }
 
-export type GraphQLTransport = (body: {
-	query: string;
-	variables?: Record<string, unknown>;
-}) => Promise<GraphQLResponse>;
+/** Calls one MCP tool and returns its raw JSON-RPC result payload. */
+export type MCPTransport = (call: {
+	tool: string;
+	args: Record<string, unknown>;
+}) => Promise<{ result?: { structuredContent?: unknown; content?: Array<{ text?: string }> }; error?: { message: string } }>;
 
 export interface CommandResult {
 	stdout: string;
@@ -24,45 +28,32 @@ export interface CommandResult {
 	exitCode: number;
 }
 
-/** Root types an agent is most likely to want listed. */
-export const ROOT_TYPES = ["Query", "Mutation", "AdminQuery", "AdminMutation"];
+/** Maps one MCP tool result onto the GraphQL response the caller expects. */
+export function toGraphQLResponse(
+	raw: Awaited<ReturnType<MCPTransport>>
+): GraphQLResponse {
+	// A rejected query surfaces as a JSON-RPC error, not as GraphQL `errors`.
+	if (raw.error) return { errors: [{ message: raw.error.message }] };
 
-const TYPE_REF = `
-fragment TypeRef on __Type {
-  kind name
-  ofType { kind name ofType { kind name ofType { kind name } } }
-}`;
+	const structured = raw.result?.structuredContent;
+	if (structured && typeof structured === "object") return structured as GraphQLResponse;
 
-interface TypeRef {
-	kind: string;
-	name: string | null;
-	ofType?: TypeRef | null;
-}
+	const text = raw.result?.content?.[0]?.text;
+	if (typeof text === "string") {
+		try {
+			return JSON.parse(text) as GraphQLResponse;
+		} catch {
+			return { data: text };
+		}
+	}
 
-/** Renders an introspected type reference back into SDL, e.g. [Note!]!. */
-export function renderType(type: TypeRef | null | undefined): string {
-	if (!type) return "?";
-	if (type.kind === "NON_NULL") return `${renderType(type.ofType)}!`;
-	if (type.kind === "LIST") return `[${renderType(type.ofType)}]`;
-	return type.name ?? "?";
-}
-
-interface IntrospectedField {
-	name: string;
-	description?: string | null;
-	args?: Array<{ name: string; type: TypeRef }>;
-	type: TypeRef;
-}
-
-function renderField(field: IntrospectedField): string {
-	const args = (field.args ?? []).map((a) => `${a.name}: ${renderType(a.type)}`).join(", ");
-	return `  ${field.name}${args ? `(${args})` : ""}: ${renderType(field.type)}`;
+	return { errors: [{ message: "MCP returned neither structured content nor text" }] };
 }
 
 export async function runGraphQLCommand(opts: {
 	query?: string;
 	variablesJSON?: string;
-	transport: GraphQLTransport;
+	transport: MCPTransport;
 }): Promise<CommandResult> {
 	if (!opts.query) {
 		return {
@@ -83,7 +74,11 @@ export async function runGraphQLCommand(opts: {
 
 	let response: GraphQLResponse;
 	try {
-		response = await opts.transport({ query: opts.query, variables });
+		const raw = await opts.transport({
+			tool: "graphql_request",
+			args: variables ? { query: opts.query, variables } : { query: opts.query },
+		});
+		response = toGraphQLResponse(raw);
 	} catch (err) {
 		return { stdout: "", stderr: String(err), exitCode: 1 };
 	}
@@ -101,50 +96,40 @@ export async function runGraphQLCommand(opts: {
 	return { stdout: JSON.stringify(response.data ?? null, null, 2), stderr: "", exitCode: 0 };
 }
 
+/**
+ * Answers "what can I call here, and with what arguments?" without dumping the
+ * whole schema: the server filters introspection by `pattern` and returns the
+ * matching types with their fields and inputFields.
+ */
 export async function runIntrospectCommand(opts: {
-	typeName?: string;
-	transport: GraphQLTransport;
+	pattern?: string;
+	transport: MCPTransport;
 }): Promise<CommandResult> {
-	const names = opts.typeName ? [opts.typeName] : ROOT_TYPES;
-
-	// One request per type keeps the payload small and the output readable.
-	const sections: string[] = [];
-	const missing: string[] = [];
-
-	for (const name of names) {
-		let response: GraphQLResponse;
-		try {
-			response = await opts.transport({
-				query: `query($name: String!) { __type(name: $name) { name fields { name args { name type { ...TypeRef } } type { ...TypeRef } } } }${TYPE_REF}`,
-				variables: { name },
-			});
-		} catch (err) {
-			return { stdout: sections.join("\n\n"), stderr: String(err), exitCode: 1 };
-		}
-
-		if (response.errors?.length) {
-			return {
-				stdout: sections.join("\n\n"),
-				stderr: response.errors.map((e) => e.message).join("\n"),
-				exitCode: 1,
-			};
-		}
-
-		const type = (response.data as { __type?: { name: string; fields?: IntrospectedField[] } } | undefined)
-			?.__type;
-		if (!type) {
-			missing.push(name);
-			continue;
-		}
-
-		const fields = (type.fields ?? []).map(renderField).join("\n");
-		sections.push(`type ${type.name} {\n${fields}\n}`);
+	if (!opts.pattern) {
+		return {
+			stdout: "",
+			stderr: "usage: trip2g-sync.mjs graphql --introspect '<pattern>'   (e.g. AdminMutation, CreateUser)",
+			exitCode: 2,
+		};
 	}
 
-	if (!sections.length) {
-		return { stdout: "", stderr: `unknown type(s): ${missing.join(", ")}`, exitCode: 1 };
+	let raw: Awaited<ReturnType<MCPTransport>>;
+	try {
+		raw = await opts.transport({ tool: "graphql_introspection", args: { pattern: opts.pattern } });
+	} catch (err) {
+		return { stdout: "", stderr: String(err), exitCode: 1 };
 	}
 
-	const note = missing.length ? `\n\n# not found: ${missing.join(", ")}` : "";
-	return { stdout: `${sections.join("\n\n")}${note}`, stderr: "", exitCode: 0 };
+	if (raw.error) return { stdout: "", stderr: raw.error.message, exitCode: 1 };
+
+	const text = raw.result?.content?.[0]?.text;
+	if (typeof text !== "string") {
+		return { stdout: "", stderr: "introspection returned no content", exitCode: 1 };
+	}
+
+	try {
+		return { stdout: JSON.stringify(JSON.parse(text), null, 2), stderr: "", exitCode: 0 };
+	} catch {
+		return { stdout: text, stderr: "", exitCode: 0 };
+	}
 }
