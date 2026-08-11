@@ -16,6 +16,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { NodeEnv, type CliConflictResolution } from "./env";
 import { createClient } from "./client";
+import { GraphQLClient } from "./graphql-client";
+import { runGraphQLCommand, runIntrospectCommand, type GraphQLTransport } from "./graphql-cmd";
 import { classifySync } from "../classify";
 import { filterPlan } from "../filter";
 import { executePlan } from "../execute";
@@ -257,6 +259,15 @@ Options:
   -n, --dry-run            Show what would be done without making changes
   -h, --help               Show this help
 
+Subcommands:
+  warnings                 Print note warnings as JSON
+  graphql '<query>' ['<variables json>']
+                           Run a GraphQL query against the configured instance.
+                           Credentials come from data.json, so no flags are needed.
+  graphql --introspect ['<TypeName>']
+                           List the fields of a type as SDL. Without a name,
+                           covers Query, Mutation, AdminQuery and AdminMutation.
+
 Environment Variables:
   TRIP2G_ENDPOINT    GraphQL endpoint URL
   TRIP2G_API_KEY     API key for authentication
@@ -305,9 +316,40 @@ async function cmdWarnings(): Promise<void> {
 	console.log(JSON.stringify(result, null, 2));
 }
 
+// cmdGraphQL resolves credentials exactly like cmdWarnings, so an agent gets a
+// working GraphQL call from the vault root with no flags at all.
+async function cmdGraphQL(): Promise<void> {
+	const dataJson = readDataJson();
+	const apiUrl = process.env.TRIP2G_ENDPOINT || process.env.ENDPOINT || dataJson.apiUrl || "http://localhost:8081/_system/graphql";
+	const apiKey = process.env.TRIP2G_API_KEY || process.env.API_KEY || dataJson.apiKey || "";
+	if (!apiKey) {
+		console.error("❌ TRIP2G_API_KEY or API_KEY required");
+		process.exit(1);
+	}
+
+	const client = new GraphQLClient(apiUrl, { headers: { "X-API-Key": apiKey } });
+	const transport: GraphQLTransport = async ({ query, variables }) =>
+		({ data: await client.request({ document: query, variables }) });
+
+	const [, , , first, second] = process.argv;
+	const result =
+		first === "--introspect"
+			? await runIntrospectCommand({ typeName: second, transport })
+			: await runGraphQLCommand({ query: first, variablesJSON: second, transport });
+
+	if (result.stdout) console.log(result.stdout);
+	if (result.stderr) console.error(result.stderr);
+	if (result.exitCode !== 0) process.exit(result.exitCode);
+}
+
 async function main(): Promise<void> {
 	if (process.argv[2] === "warnings") {
 		await cmdWarnings();
+		return;
+	}
+
+	if (process.argv[2] === "graphql") {
+		await cmdGraphQL();
 		return;
 	}
 
