@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { stateFileNameForApiUrl } from "./env";
+import { NodeEnv, stateFileNameForApiUrl } from "./env";
 
 describe("stateFileNameForApiUrl", () => {
 	it("returns host-based filename for http://localhost:8081", () => {
@@ -118,5 +118,44 @@ describe("stateFileNameForApiUrl — stateFile override", () => {
 		// When no stateFile override is given, the name comes from stateFileNameForApiUrl
 		const name = stateFileNameForApiUrl("https://trip2g.com/graphql");
 		expect(name).toBe(".sync-state.trip2g.com.json");
+	});
+});
+
+describe("NodeEnv.getServerHashes", () => {
+	// A failed fetch used to be caught here and reported as an empty list. An
+	// empty list already means something — a server holding no notes — so the
+	// two became indistinguishable, and classification read a 404 as "every
+	// note was deleted upstream" on a vault where nothing had happened.
+	it("rejects when the fetch fails, rather than reporting an empty server", async () => {
+		const folder = fs.mkdtempSync(path.join(os.tmpdir(), "sync-env-hashes-"));
+		const env = new NodeEnv({
+			folder,
+			apiUrl: "http://localhost:8081/graphql",
+			apiKey: "test-key",
+			twoWaySync: true,
+		});
+
+		(env as unknown as { sdk: { FetchServerHashes: () => Promise<never> } }).sdk = {
+			FetchServerHashes: () => Promise.reject(new Error("HTTP 404: Not Found")),
+		};
+
+		await expect(env.getServerHashes()).rejects.toThrow("HTTP 404");
+	});
+
+	it("returns the server's notes when the fetch succeeds", async () => {
+		const folder = fs.mkdtempSync(path.join(os.tmpdir(), "sync-env-hashes-ok-"));
+		const env = new NodeEnv({
+			folder,
+			apiUrl: "http://localhost:8081/graphql",
+			apiKey: "test-key",
+			twoWaySync: true,
+		});
+
+		(env as unknown as { sdk: { FetchServerHashes: () => Promise<unknown> } }).sdk = {
+			FetchServerHashes: () =>
+				Promise.resolve({ notePaths: [{ path: "wiki/note.md", hash: "abc" }] }),
+		};
+
+		await expect(env.getServerHashes()).resolves.toEqual([{ path: "wiki/note.md", hash: "abc" }]);
 	});
 });
