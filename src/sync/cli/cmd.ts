@@ -23,6 +23,7 @@ import { executePlan } from "../execute";
 import { makeExcludeMatcher } from "../exclude";
 import { summarizePrune, pruneNeedsForce } from "../prune";
 import { runWatch } from "./watch";
+import { formatPlanSummary } from "./plan-summary";
 
 interface CliArgs {
 	folder: string;
@@ -215,12 +216,16 @@ Usage:
 
 Arguments:
   folder                   Local folder to sync (required)
-  prefix                   Remote path prefix (optional, for multi-repo setups)
+  prefix                   Remote path prefix (optional, for multi-repo setups).
+                           Not supported together with --two-way.
 
 Options:
   -u, --api-url <url>      GraphQL endpoint (default: $ENDPOINT or .obsidian/plugins/trip2g/data.json or http://localhost:8081/_system/graphql)
   -k, --api-key <key>      API key (default: $API_KEY)
-  -2, --two-way            Enable two-way sync (pull changes from server)
+  -2, --two-way            Enable two-way sync (pull changes from server).
+                           Notes that exist on the server but not locally are
+                           DOWNLOADED as new local files; they are reported on
+                           the "Remote only" line, not on "To pull".
   -w, --watch              Watch mode: stream live changes from server via SSE
                            (implies --two-way; prefix not allowed in this mode)
   -i, --include <glob>     Include only matching paths in live-pull (can be repeated).
@@ -249,14 +254,29 @@ Options:
                            notes left behind after a sync-state reset/replace
                            (they are classified remote_only and normally
                            ignored, so they are never hidden). Opt-in; without
-                           it behavior is 100% unchanged. Prints a loud summary
-                           before hiding and honors --dry-run. Refuses to run
-                           when the local tree is empty but the server has notes
-                           (partial/reset copy) unless --force is also given.
+                           it --prune itself does nothing -- note that a note
+                           deleted locally is still hidden on the server, with
+                           or without this flag (see Deletions below). Prints
+                           a loud summary before hiding and honors --dry-run.
+                           Refuses to run when the local tree is empty but the
+                           server has notes (partial/reset copy) unless --force
+                           is also given.
       --force              Allow --prune even when the local tree looks empty.
   -v, --verbose            Verbose output
   -n, --dry-run            Show what would be done without making changes
   -h, --help               Show this help
+
+Deletions:
+  Deleting a note locally and syncing HIDES it on the server. This needs no
+  flag and happens in both push-only and --two-way mode: once the sync state
+  knows a file, its absence reads as a deletion rather than as a file to fetch.
+  Before the state knows it, the same absence reads as a new server note and
+  the file is downloaded instead -- the same "rm" therefore has opposite
+  effects before and after the first sync. Check the "Local deleted" line, and
+  --dry-run, before syncing a tree you have removed files from.
+
+  A note deleted on the server is reported as "Server deleted"; the CLI keeps
+  the local copy.
 
 Subcommands:
   warnings                 Print note warnings as JSON
@@ -468,14 +488,9 @@ async function main(): Promise<void> {
 	// 3. Print summary
 	console.log("\n📋 Sync Plan:");
 	console.log("-".repeat(40));
-	console.log(`  Unchanged:      ${filteredPlan.unchanged}`);
-	console.log(`  To push:        ${filteredPlan.pushes.length}`);
-	console.log(`  Local only:     ${filteredPlan.localOnly.length}`);
-	console.log(`  To pull:        ${filteredPlan.pulls.length}`);
-	console.log(`  Remote only:    ${filteredPlan.remoteOnly.length}`);
-	console.log(`  Conflicts:      ${filteredPlan.conflicts.length}`);
-	console.log(`  Local deleted:  ${filteredPlan.localDeleted.length}`);
-	console.log(`  Server deleted: ${filteredPlan.serverDeleted.length}`);
+	for (const line of formatPlanSummary(filteredPlan, args.conflictResolution)) {
+		console.log(line);
+	}
 	console.log("-".repeat(40));
 
 	// Print details if verbose

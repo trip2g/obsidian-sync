@@ -64,6 +64,39 @@ node dist/trip2g-sync.mjs --folder ./vault
 | `--dry-run` | `-n` | Show what would be done without making changes |
 | `--help` | `-h` | Show help |
 
+## Reading the sync plan
+
+Every run prints one line per bucket, and each non-empty bucket says what the
+run will do to it. The counts alone are ambiguous in both directions, so read
+the effect, not just the number:
+
+| Line | With `--two-way` | Without |
+|---|---|---|
+| `To pull` | downloaded over the local file | ignored |
+| `Remote only` | **downloaded as new local files** | ignored |
+| `Local deleted` | **hidden on the server** | **hidden on the server** |
+| `Server deleted` | kept locally | ignored |
+| `Conflicts` | whatever `--conflict-resolution` says (default `local`: local wins and is pushed) | same |
+
+Two of these surprise people:
+
+**`Remote only` is not "ignored".** Under `--two-way` those notes are written
+to disk. They are counted separately from `To pull` because they are new files
+rather than updates, so a plan reading `To pull: 0` / `Remote only: 25` will
+still create twenty-five local files.
+
+**A note deleted locally is hidden on the server**, with no flag involved. Once
+the sync state knows a file, its absence reads as a deletion; before the state
+knows it, the same absence reads as a new server note and the file is
+downloaded instead. So the same `rm` has opposite effects before and after the
+first sync. `--prune` is a separate, opt-in mechanism for notes the state never
+recorded — it is not what makes ordinary deletions propagate.
+
+**Conflicts default to `local`.** A first sync from a stale copy resolves every
+conflict by pushing the stale local version over the server's. Use
+`--conflict-resolution skip` when you do not yet know which side is ahead, and
+`--dry-run` to see the list first.
+
 ## Prune / Mirror (`--prune`)
 
 `--prune` (alias `--mirror`) makes a push behave like `rsync --delete`: after
