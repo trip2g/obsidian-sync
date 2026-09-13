@@ -90,6 +90,20 @@ describe("filterPlan", () => {
 	});
 
 	describe("twoWaySync: false (push only)", () => {
+		// The CLI plan summary labels "Remote only" and "Server deleted" without
+		// checking the mode, which is only correct while these stay empty here.
+		it("empties remoteOnly and serverDeleted, so a non-zero count implies two-way", () => {
+			const plan = makePlan([
+				makeClassification("remote.md", "remote_only"),
+				makeClassification("gone.md", "server_deleted"),
+			]);
+
+			const filtered = filterPlan(plan, { twoWaySync: false });
+
+			expect(filtered.remoteOnly).toEqual([]);
+			expect(filtered.serverDeleted).toEqual([]);
+		});
+
 		it("ignores pulls when twoWaySync is false", () => {
 			const plan = makePlan([makeClassification("note.md", "pull")]);
 			const filtered = filterPlan(plan, { twoWaySync: false });
