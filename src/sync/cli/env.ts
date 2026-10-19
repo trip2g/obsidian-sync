@@ -50,6 +50,17 @@ export interface NodeEnvOptions extends ClientOptions {
 
 const LEGACY_STATE_FILE = ".sync-state.json";
 
+export class CorruptSyncStateError extends Error {
+	constructor(statePath: string, reason: string) {
+		super(
+			`Refusing to sync: the sync state file ${statePath} is unreadable (${reason}). ` +
+				`Restore it from a backup, or move it away to start from an empty state ` +
+				`(every file that then differs from the server is treated as a conflict).`
+		);
+		this.name = "CorruptSyncStateError";
+	}
+}
+
 /**
  * Derive a per-endpoint sync-state filename from an API URL.
  * Uses url.host (hostname + port) so that different servers never share a cache.
@@ -133,16 +144,24 @@ export class NodeEnv implements SyncEnv {
 		return remotePath.startsWith(this.prefix + "/");
 	}
 
+	// A state that cannot be read is not an empty state. Treated as empty, every
+	// file that differs from the server becomes a first-sync conflict, which the
+	// default resolution answers by pushing the local copy over the server's.
 	private loadSyncState(): SyncState {
-		try {
-			if (fs.existsSync(this.statePath)) {
-				const data = fs.readFileSync(this.statePath, "utf-8");
-				return JSON.parse(data);
-			}
-		} catch (e) {
-			this.log(`Warning: Could not load sync state: ${e}`);
+		if (!fs.existsSync(this.statePath)) {
+			return { files: {} };
 		}
-		return { files: {} };
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(fs.readFileSync(this.statePath, "utf-8"));
+		} catch (e) {
+			throw new CorruptSyncStateError(this.statePath, String(e));
+		}
+		const files = (parsed as { files?: unknown } | null)?.files;
+		if (typeof files !== "object" || files === null || Array.isArray(files)) {
+			throw new CorruptSyncStateError(this.statePath, `no "files" object`);
+		}
+		return parsed as SyncState;
 	}
 
 	private log(message: string): void {
