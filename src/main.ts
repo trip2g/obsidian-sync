@@ -1352,6 +1352,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 					const result = await executePlan(env, pullPlan, { twoWaySync });
 					new Notice(t().pulledFiles(result.pulled));
+					this.reportSyncErrors(result.errors);
 				} else {
 					// Review each conflict - run normal flow
 					const folder = (env as unknown as { folder: TFolder }).folder;
