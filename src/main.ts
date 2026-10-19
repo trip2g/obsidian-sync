@@ -22,7 +22,7 @@ import {
 	type SyncStatusModel,
 } from "./sync/sync-status";
 import { ObsidianSyncEnv } from "./env";
-import { isAlwaysPublishable } from "./sync/utils";
+import { isAlwaysPublishable, syncErrorNotice } from "./sync/utils";
 import type {
 	PluginSettings,
 	SyncDir,
@@ -356,8 +356,15 @@ export default class Trip2gSyncPlugin extends Plugin {
 		for (const { syncDir, folder } of targets) {
 			const key = this.liveKey(syncDir.apiUrl, syncDir.path);
 			try {
-				for (const c of await this.pushSyncDir(syncDir, folder, paths)) confirmed.add(c);
-				this.syncFailures.recordSuccess(key);
+				const pushed = await this.pushSyncDir(syncDir, folder, paths);
+				for (const c of pushed.confirmed) confirmed.add(c);
+				if (pushed.pushErrors.length > 0) {
+					failed = true;
+					console.warn("[Trip2g Sync] autoPush errors:", pushed.pushErrors);
+					this.notifySyncFailure(key, new Error(pushed.pushErrors.join("; ")));
+				} else {
+					this.syncFailures.recordSuccess(key);
+				}
 			} catch (e) {
 				failed = true;
 				// One dir's failure must not block the others; surface it to the user
@@ -429,12 +436,16 @@ export default class Trip2gSyncPlugin extends Plugin {
 	 * synced (server now holds the current on-disk content). A path whose disk
 	 * write landed AFTER classify read it stays unconfirmed so the scheduler
 	 * retries it — this is the fix for saves silently missing a push.
+	 *
+	 * A failed note push or hide comes back in pushErrors for the caller to treat
+	 * as an auto-push failure. Any other error, such as a failed asset, is
+	 * reported here and leaves the auto-push status alone.
 	 */
 	private async pushSyncDir(
 		syncDir: SyncDir,
 		folder: TFolder,
 		requested: string[]
-	): Promise<string[]> {
+	): Promise<{ confirmed: string[]; pushErrors: string[] }> {
 		const syncState = this.getSyncState(syncDir.apiUrl);
 		const publishField = syncDir.publishField || "";
 		const env = this.buildPushEnv(syncDir, folder, syncState);
@@ -470,7 +481,10 @@ export default class Trip2gSyncPlugin extends Plugin {
 			);
 		}
 
-		return this.confirmSyncedPaths(env, syncState, folder, base, requested, attempted);
+		const confirmed = await this.confirmSyncedPaths(env, syncState, folder, base, requested, attempted);
+		const pushErrors = new Set(result.pushErrors);
+		this.reportSyncErrors(result.errors.filter((e) => !pushErrors.has(e)));
+		return { confirmed, pushErrors: result.pushErrors };
 	}
 
 	/**
@@ -1242,9 +1256,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 				if (result.assetsDownloaded > 0) {
 					new Notice(t().assetDownloaded(result.assetsDownloaded));
 				}
-				if (result.errors.length > 0) {
-					console.error("[Trip2g Sync] Errors:", result.errors);
-				}
+				this.reportSyncErrors(result.errors);
 				if (result.warnings.length > 0) {
 					new Notice(t().syncWarningsCount(result.warnings.length));
 					// Attach url from updatedUrls for context
@@ -1278,6 +1290,18 @@ export default class Trip2gSyncPlugin extends Plugin {
 			// Apply any live-pull events that queued behind this sync.
 			await this.drainPendingLivePull();
 		}
+	}
+
+	/**
+	 * A push or hide that failed stays unsynced and is retried next time; the
+	 * user still has to hear about it, as they did when the failure aborted the sync.
+	 */
+	private reportSyncErrors(errors: string[]): void {
+		if (errors.length === 0) {
+			return;
+		}
+		console.error("[Trip2g Sync] Errors:", errors);
+		new Notice(`${t().syncError}: ${syncErrorNotice(errors)}`);
 	}
 
 	/**
@@ -1327,6 +1351,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 					const result = await executePlan(env, pullPlan, { twoWaySync });
 					new Notice(t().pulledFiles(result.pulled));
+					this.reportSyncErrors(result.errors);
 				} else {
 					// Review each conflict - run normal flow
 					const folder = (env as unknown as { folder: TFolder }).folder;
@@ -1345,6 +1370,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 					if (result.pushed > 0) {
 						new Notice(t().pushedFiles(result.pushed));
 					}
+					this.reportSyncErrors(result.errors);
 				}
 
 				await this.saveSyncStates();

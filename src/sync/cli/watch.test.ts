@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { runWatch, createLock, isWatchablePath, type WatchEnv, type WatchArgs, type WatchDeps } from "./watch";
+import { runWatch, createLock, isWatchablePath, createWatchEnv, type WatchEnv, type WatchArgs, type WatchDeps } from "./watch";
 import type {
 	SyncState,
 	LocalFile,
@@ -606,5 +606,29 @@ describe("runWatch", () => {
 
 		signalHandler?.("SIGINT");
 		await run;
+	});
+});
+
+describe("createWatchEnv", () => {
+	// Without --state-file, watch and one-shot runs given the same flag kept two
+	// different states, and the one watch read had no base for the files the
+	// one-shot runs had synced.
+	it("reads the state named by --state-file, as a one-shot run does", () => {
+		const folder = fs.mkdtempSync(path.join(os.tmpdir(), "watch-state-file-"));
+		try {
+			fs.writeFileSync(path.join(folder, "custom-state.json"), JSON.stringify({ files: { "n.md": "hash_n" } }));
+			const env = createWatchEnv({
+				folder,
+				apiUrl: "http://localhost:8081/_system/graphql",
+				apiKey: "k",
+				include: [],
+				exclude: [],
+				conflictResolution: "skip",
+				stateFile: "custom-state.json",
+			});
+			expect(env.getSyncState().files).toEqual({ "n.md": "hash_n" });
+		} finally {
+			fs.rmSync(folder, { recursive: true });
+		}
 	});
 });

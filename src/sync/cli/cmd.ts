@@ -24,6 +24,7 @@ import { makeExcludeMatcher } from "../exclude";
 import { summarizePrune, pruneNeedsForce } from "../prune";
 import { runWatch } from "./watch";
 import { formatPlanSummary } from "./plan-summary";
+import { printSyncResult } from "./sync-report";
 
 interface CliArgs {
 	folder: string;
@@ -278,6 +279,13 @@ Deletions:
   A note deleted on the server is reported as "Server deleted"; the CLI keeps
   the local copy.
 
+Exit status:
+  0  every operation succeeded
+  1  the run failed, wholly or in part: a push, pull, hide or asset transfer
+     failed, a layout has a critical warning, or the CLI could not start.
+     A partial failure exits 1 after the results are printed; what failed
+     stays unsynced and is retried on the next run.
+
 Subcommands:
   warnings                 Print note warnings as JSON
   graphql '<query>' ['<variables json>']
@@ -428,6 +436,7 @@ async function main(): Promise<void> {
 			verbose: args.verbose,
 			dataInclude: dataJson.livePullIncludePatterns,
 			dataExclude: dataJson.livePullExcludePatterns,
+			stateFile: args.stateFile || undefined,
 		});
 		process.exit(exitCode);
 	}
@@ -546,77 +555,9 @@ async function main(): Promise<void> {
 	console.log("\n🚀 Executing sync...");
 	const result = await executePlan(env, filteredPlan, { twoWaySync: args.twoWaySync });
 
-	if (totalActions === 0 && result.assetsUploaded === 0 && result.assetsDownloaded === 0) {
-		console.log("\n✅ Everything is up to date!");
-		return;
-	}
-
-	// 5. Print results
-	console.log("\n" + "=".repeat(60));
-	console.log("📊 SYNC RESULTS:");
-	console.log("=".repeat(60));
-	console.log(`  Pushed:             ${result.pushed}`);
-	console.log(`  Pulled:             ${result.pulled}`);
-	console.log(`  Conflicts resolved: ${result.conflictsResolved}`);
-	console.log(`  Assets uploaded:    ${result.assetsUploaded}`);
-	console.log(`  Assets downloaded:  ${result.assetsDownloaded}`);
-	if (result.errors.length > 0) {
-		console.log(`  Errors:             ${result.errors.length}`);
-		for (const err of result.errors) {
-			console.log(`    ❌ ${err}`);
-		}
-	}
-	if (result.warnings.length > 0) {
-		console.log(`  Warnings:           ${result.warnings.length}`);
-	}
-	console.log("=".repeat(60));
-
-	// Print warnings grouped by file. A layout that fails to parse or render
-	// (Critical) syncs but is unusable at render time, so it must fail the CLI
-	// run loudly here instead of surfacing only when a visitor hits the page.
-	let hasCritical = false;
-	if (result.warnings.length > 0) {
-		const RED = "\x1b[31m";
-		const YELLOW = "\x1b[33m";
-		const RESET = "\x1b[0m";
-		const byPath = new Map<string, typeof result.warnings>();
-		for (const w of result.warnings) {
-			const forPath = byPath.get(w.path) ?? [];
-			forPath.push(w);
-			byPath.set(w.path, forPath);
-		}
-		console.log("\n⚠️  Warnings:");
-		for (const [path, warnings] of byPath) {
-			console.log(`  ${path}`);
-			for (const w of warnings) {
-				const isCritical = w.level === "CRITICAL";
-				hasCritical = hasCritical || isCritical;
-				const color = isCritical ? RED : YELLOW;
-				console.log(`    ${color}[${w.level}]${RESET} ${w.message}`);
-			}
-		}
-	}
-
-	// 6. Print updated URLs
-	const updatedUrls = result.updatedUrls ?? [];
-	if (updatedUrls.length > 0) {
-		console.log("\n📎 Published:");
-		if (updatedUrls.length <= 20) {
-			for (const { path, url } of updatedUrls) {
-				console.log(`  ${path} → ${url}`);
-			}
-		}
-		if (args.updatedOutput) {
-			fs.writeFileSync(args.updatedOutput, JSON.stringify(updatedUrls, null, 2));
-			console.log(`💾 Saved to ${args.updatedOutput}`);
-		} else {
-			console.log(`💡 --updated-output $(mktemp /tmp/updated-XXXXXX.json)`);
-		}
-	}
-
-	if (hasCritical) {
-		console.error("\n❌ Critical warnings detected, aborting.");
-		process.exit(1);
+	const exitCode = printSyncResult(result, totalActions, args.updatedOutput);
+	if (exitCode !== 0) {
+		process.exit(exitCode);
 	}
 }
 

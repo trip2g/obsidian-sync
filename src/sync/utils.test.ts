@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import * as nodePath from "path";
 import {
 	isAlwaysPublishable,
+	syncErrorNotice,
 	sameOrigin,
 	resolveAssetUrl,
 	posixBasename,
@@ -196,4 +197,21 @@ describe("posix path helpers", () => {
 			expect(posixJoin(a, b)).toBe(nodePath.posix.join(a, b));
 		});
 	}
+});
+
+describe("syncErrorNotice", () => {
+	it("shows a short error whole", () => {
+		expect(syncErrorNotice(["Failed to hide a.md: timeout"])).toBe("Failed to hide a.md: timeout");
+	});
+
+	it("cuts a batch failure short after its first notes and counts the other errors", () => {
+		const paths = Array.from({ length: 100 }, (_, i) => `notes/note-${i}.md`);
+		const batch = `Failed to push ${paths.join(", ")}: timeout`;
+
+		const text = syncErrorNotice([batch, "Failed to download asset img.png"]);
+
+		expect(text.startsWith("Failed to push notes/note-0.md, ")).toBe(true);
+		expect(text.length).toBeLessThan(260);
+		expect(text.endsWith("… (+1 more)")).toBe(true);
+	});
 });

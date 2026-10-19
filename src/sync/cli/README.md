@@ -186,6 +186,15 @@ node dist/trip2g-sync.mjs --folder ./wiki --meta subgraph=team-wiki --meta team=
 | `skip` | Skip conflicting files |
 | `fail` | Exit with error on first conflict (useful for CI) |
 
+## Exit Status
+
+| Code | Meaning |
+|------|---------|
+| `0` | Every operation succeeded |
+| `1` | The run failed, wholly or in part: a push, pull, hide or asset transfer failed, a layout has a critical warning, or the CLI could not start |
+
+A partial failure exits `1` after the results are printed. Whatever succeeded is recorded in the sync state; whatever failed stays unsynced and is retried on the next run.
+
 ## Examples
 
 ### CI/CD Pipeline

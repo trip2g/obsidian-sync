@@ -23,6 +23,7 @@ import type {
 import { resolveAssetPath } from "../resolve";
 import { uploadWithRetry, AssetTooLargeError } from "../upload-retry";
 import { createClient, type ClientOptions } from "./client";
+import { writeFileAtomic, sweepStaleTempFiles } from "./atomic-write";
 import type { Sdk } from "../../graphql";
 
 /** CLI conflict resolution strategy */
@@ -48,6 +49,17 @@ export interface NodeEnvOptions extends ClientOptions {
 }
 
 const LEGACY_STATE_FILE = ".sync-state.json";
+
+export class CorruptSyncStateError extends Error {
+	constructor(statePath: string, reason: string) {
+		super(
+			`Refusing to sync: the sync state file ${statePath} is unreadable (${reason}). ` +
+				`Restore it from a backup, or move it away to start from an empty state ` +
+				`(every file that then differs from the server is treated as a conflict).`
+		);
+		this.name = "CorruptSyncStateError";
+	}
+}
 
 /**
  * Derive a per-endpoint sync-state filename from an API URL.
@@ -109,6 +121,8 @@ export class NodeEnv implements SyncEnv {
 		} else {
 			this.statePath = path.join(this.folder, stateFileNameForApiUrl(options.apiUrl));
 		}
+		sweepStaleTempFiles(this.folder, true);
+		sweepStaleTempFiles(path.dirname(this.statePath), false);
 		this.syncState = this.loadSyncState();
 		this.sdk = createClient({ apiUrl: options.apiUrl, apiKey: options.apiKey });
 	}
@@ -132,16 +146,24 @@ export class NodeEnv implements SyncEnv {
 		return remotePath.startsWith(this.prefix + "/");
 	}
 
+	// A state that cannot be read is not an empty state. Treated as empty, every
+	// file that differs from the server becomes a first-sync conflict, which the
+	// default resolution answers by pushing the local copy over the server's.
 	private loadSyncState(): SyncState {
-		try {
-			if (fs.existsSync(this.statePath)) {
-				const data = fs.readFileSync(this.statePath, "utf-8");
-				return JSON.parse(data);
-			}
-		} catch (e) {
-			this.log(`Warning: Could not load sync state: ${e}`);
+		if (!fs.existsSync(this.statePath)) {
+			return { files: {} };
 		}
-		return { files: {} };
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(fs.readFileSync(this.statePath, "utf-8"));
+		} catch (e) {
+			throw new CorruptSyncStateError(this.statePath, String(e));
+		}
+		const files = (parsed as { files?: unknown } | null)?.files;
+		if (typeof files !== "object" || files === null || Array.isArray(files)) {
+			throw new CorruptSyncStateError(this.statePath, `no "files" object`);
+		}
+		return parsed as SyncState;
 	}
 
 	private log(message: string): void {
@@ -236,12 +258,12 @@ export class NodeEnv implements SyncEnv {
 
 	async writeFile(filePath: string, content: string): Promise<void> {
 		const fullPath = path.join(this.folder, filePath);
-		fs.writeFileSync(fullPath, content, "utf-8");
+		writeFileAtomic(fullPath, content);
 	}
 
 	async writeBinaryFile(filePath: string, data: ArrayBuffer): Promise<void> {
 		const fullPath = path.join(this.folder, filePath);
-		fs.writeFileSync(fullPath, Buffer.from(data));
+		writeFileAtomic(fullPath, Buffer.from(data));
 	}
 
 	async readBinaryFile(filePath: string): Promise<ArrayBuffer> {
@@ -340,7 +362,7 @@ export class NodeEnv implements SyncEnv {
 				console.error("   request:", JSON.stringify(anyE.request, null, 2));
 			}
 			console.error("   own props:", Object.getOwnPropertyNames(e as object));
-			return [];
+			throw e;
 		}
 	}
 
@@ -361,6 +383,7 @@ export class NodeEnv implements SyncEnv {
 			console.log(`✅ Hidden ${paths.length} notes`);
 		} catch (e) {
 			console.error(`❌ Failed to hide notes: ${e}`);
+			throw e;
 		}
 	}
 
@@ -544,7 +567,7 @@ export class NodeEnv implements SyncEnv {
 
 	async saveSyncState(state: SyncState): Promise<void> {
 		state.lastSyncedAt = Date.now();
-		fs.writeFileSync(this.statePath, JSON.stringify(state, null, 2), "utf-8");
+		writeFileAtomic(this.statePath, JSON.stringify(state, null, 2));
 		this.syncState = state;
 	}
 

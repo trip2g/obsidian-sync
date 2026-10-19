@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -157,5 +157,93 @@ describe("NodeEnv.getServerHashes", () => {
 		};
 
 		await expect(env.getServerHashes()).resolves.toEqual([{ path: "wiki/note.md", hash: "abc" }]);
+	});
+});
+
+describe("NodeEnv sync state that cannot be read", () => {
+	// Read as empty, a damaged state turns every file that differs from the
+	// server into a first-sync conflict, and the default resolution pushes the
+	// local copy over the server's.
+	const cases: Array<[string, string]> = [
+		["truncated JSON", '{"files": {"a.md": "hash_a", "b.m'],
+		["an empty file", ""],
+		["JSON without a files object", '{"lastSyncedAt": 1}'],
+	];
+	for (const [name, content] of cases) {
+		it(`refuses to start, naming the file, on ${name}`, () => {
+			const folder = fs.mkdtempSync(path.join(os.tmpdir(), "sync-env-corrupt-"));
+			try {
+				const stateFile = path.join(folder, "state.json");
+				fs.writeFileSync(stateFile, content, "utf-8");
+				const build = () =>
+					new NodeEnv({
+						folder,
+						apiUrl: "http://localhost:8081/graphql",
+						apiKey: "test-key",
+						twoWaySync: true,
+						stateFile,
+					});
+
+				expect(build).toThrow(stateFile);
+				expect(fs.readFileSync(stateFile, "utf-8")).toBe(content);
+			} finally {
+				fs.rmSync(folder, { recursive: true });
+			}
+		});
+	}
+
+	it("starts empty when there is no state file yet", () => {
+		const folder = fs.mkdtempSync(path.join(os.tmpdir(), "sync-env-nostate-"));
+		try {
+			const env = new NodeEnv({
+				folder,
+				apiUrl: "http://localhost:8081/graphql",
+				apiKey: "test-key",
+				twoWaySync: true,
+			});
+			expect(env.getSyncState()).toEqual({ files: {} });
+		} finally {
+			fs.rmSync(folder, { recursive: true });
+		}
+	});
+});
+
+describe("NodeEnv push and hide failures", () => {
+	// Swallowed, a failed push looked like a push that confirmed nothing and a
+	// failed hide like one that succeeded; the sync summary never mentioned either.
+	const makeEnv = (sdk: unknown) => {
+		const folder = fs.mkdtempSync(path.join(os.tmpdir(), "sync-env-push-"));
+		const env = new NodeEnv({
+			folder,
+			apiUrl: "http://localhost:8081/graphql",
+			apiKey: "test-key",
+			twoWaySync: true,
+		});
+		(env as unknown as { sdk: unknown }).sdk = sdk;
+		return env;
+	};
+
+	it("rejects when the server refuses a push batch", async () => {
+		const env = makeEnv({
+			PushNotes: () => Promise.resolve({ pushNotes: { message: "File content must be UTF-8 text" } }),
+		});
+		const silence = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			await expect(env.pushNotes([{ path: "a.md", content: "a" }], true)).rejects.toThrow("UTF-8");
+		} finally {
+			silence.mockRestore();
+		}
+	});
+
+	it("rejects when a hide fails", async () => {
+		const env = makeEnv({
+			HideNotes: () => Promise.reject(new Error("HTTP 502: Bad Gateway")),
+		});
+		const silence = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			await expect(env.hideNotes(["a.md"])).rejects.toThrow("HTTP 502");
+		} finally {
+			silence.mockRestore();
+		}
 	});
 });
