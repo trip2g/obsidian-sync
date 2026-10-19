@@ -67,3 +67,42 @@ function syncDirectory(dir: string): void {
 		fs.closeSync(fd);
 	}
 }
+
+const TEMP_NAME = /^\..+\.(\d+)\.[0-9a-f]{12}\.tmp$/;
+
+/**
+ * Remove the temporary files writeFileAtomic leaves behind when its process
+ * dies between creating one and renaming it. A file whose process is still
+ * alive belongs to a write in progress and is kept. With recursive, the walk
+ * descends like the vault walk: never into dot directories or node_modules.
+ */
+export function sweepStaleTempFiles(dir: string, recursive: boolean): void {
+	let entries: fs.Dirent[];
+	try {
+		entries = fs.readdirSync(dir, { withFileTypes: true });
+	} catch {
+		return;
+	}
+	for (const entry of entries) {
+		const fullPath = path.join(dir, entry.name);
+		if (entry.isDirectory()) {
+			if (recursive && !entry.name.startsWith(".") && entry.name !== "node_modules") {
+				sweepStaleTempFiles(fullPath, true);
+			}
+			continue;
+		}
+		const match = TEMP_NAME.exec(entry.name);
+		if (match && entry.isFile() && !processAlive(Number(match[1]))) {
+			fs.rmSync(fullPath, { force: true });
+		}
+	}
+}
+
+function processAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (e) {
+		return (e as NodeJS.ErrnoException).code === "EPERM";
+	}
+}

@@ -105,4 +105,23 @@ describe("a crash while the CLI writes", () => {
 		expect(fs.statSync(path.join(dir, "real", "n.md")).mode & 0o777).toBe(0o600);
 		expect(makeEnv().getSyncState().files).toEqual({ "link.md": "h" });
 	});
+
+	it("removes the temporary files of a write whose process died, and keeps those of a live one", () => {
+		fs.mkdirSync(path.join(dir, "sub"));
+		fs.mkdirSync(path.join(dir, ".git"));
+		const dead = path.join(dir, "sub", ".n.md.999999999.a1b2c3d4e5f6.tmp");
+		const live = path.join(dir, `.m.md.${process.pid}.a1b2c3d4e5f6.tmp`);
+		const hidden = path.join(dir, ".git", ".x.json.999999999.a1b2c3d4e5f6.tmp");
+		const lookalike = path.join(dir, ".n.md.999999999.tmp");
+		for (const f of [dead, live, hidden, lookalike]) {
+			fs.writeFileSync(f, "partial");
+		}
+
+		makeEnv();
+
+		expect(fs.existsSync(dead)).toBe(false);
+		expect(fs.existsSync(live)).toBe(true);
+		expect(fs.existsSync(hidden)).toBe(true);
+		expect(fs.existsSync(lookalike)).toBe(true);
+	});
 });

@@ -23,7 +23,7 @@ import type {
 import { resolveAssetPath } from "../resolve";
 import { uploadWithRetry, AssetTooLargeError } from "../upload-retry";
 import { createClient, type ClientOptions } from "./client";
-import { writeFileAtomic } from "./atomic-write";
+import { writeFileAtomic, sweepStaleTempFiles } from "./atomic-write";
 import type { Sdk } from "../../graphql";
 
 /** CLI conflict resolution strategy */
@@ -121,6 +121,8 @@ export class NodeEnv implements SyncEnv {
 		} else {
 			this.statePath = path.join(this.folder, stateFileNameForApiUrl(options.apiUrl));
 		}
+		sweepStaleTempFiles(this.folder, true);
+		sweepStaleTempFiles(path.dirname(this.statePath), false);
 		this.syncState = this.loadSyncState();
 		this.sdk = createClient({ apiUrl: options.apiUrl, apiKey: options.apiKey });
 	}
