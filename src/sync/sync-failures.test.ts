@@ -176,6 +176,48 @@ describe("a conflict resolved with keep_both", () => {
 		expect(w.server.get("n (server).md")).toBe("server edit");
 	});
 
+	it("never overwrites an existing server copy, on disk or on the server", async () => {
+		const w = new World();
+		await w.baseline("n.md", "base");
+		await w.baseline("n (server).md", "an older server copy");
+		w.server.set("n (server 2).md", "a copy only the server has");
+		w.disk.set("n.md", "local edit");
+		w.server.set("n.md", "server edit");
+		w.resolution = "keep_both";
+
+		await w.sync();
+		await w.sync();
+
+		expect(w.disk.get("n (server).md")).toBe("an older server copy");
+		expect(w.server.get("n (server).md")).toBe("an older server copy");
+		expect(w.disk.get("n (server 2).md")).toBe("a copy only the server has");
+		expect(w.server.get("n (server 2).md")).toBe("a copy only the server has");
+		expect(w.disk.get("n (server 3).md")).toBe("server edit");
+		expect(w.server.get("n (server 3).md")).toBe("server edit");
+		expect(w.disk.get("n.md")).toBe("local edit");
+		expect(w.server.get("n.md")).toBe("local edit");
+	});
+
+	for (const [path, copy] of [
+		["notes.v2/n", "notes.v2/n (server)"],
+		["notes.v2/n.md", "notes.v2/n (server).md"],
+		["notes/.n", "notes/.n (server)"],
+	] as const) {
+		it(`names the copy of ${path} ${copy}`, async () => {
+			const w = new World();
+			await w.baseline(path, "base");
+			w.disk.set(path, "local edit");
+			w.server.set(path, "server edit");
+			w.resolution = "keep_both";
+
+			await w.sync();
+
+			expect(w.disk.get(copy)).toBe("server edit");
+			expect(w.server.get(copy)).toBe("server edit");
+			expect(w.disk.get(path)).toBe("local edit");
+		});
+	}
+
 	it("records nothing when the push fails, so the local edit is not pulled over", async () => {
 		const w = new World();
 		await w.baseline("n.md", "base");

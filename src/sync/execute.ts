@@ -87,7 +87,8 @@ export async function executePlan(
 	// Stryker disable next-line ConditionalExpression,EqualityOperator: optimization - handleConflicts handles empty array
 	// 3. Handle conflicts (show UI, let user decide)
 	if (plan.conflicts.length > 0) {
-		const conflictResult = await handleConflicts(env, plan.conflicts, syncState);
+		const serverPaths = new Set(plan.classifications.filter((c) => c.remoteHash !== null).map((c) => c.path));
+		const conflictResult = await handleConflicts(env, plan.conflicts, syncState, serverPaths);
 		result.conflictsResolved = conflictResult.resolved;
 		result.errors.push(...conflictResult.errors);
 	}
@@ -386,7 +387,8 @@ async function executePushes(
 async function handleConflicts(
 	env: SyncEnv,
 	conflicts: FileClassification[],
-	syncState: SyncState
+	syncState: SyncState,
+	serverPaths: Set<string>
 ): Promise<{ resolved: number; errors: string[] }> {
 	// Stryker disable all
 	// optimization - caller already filters empty
@@ -441,7 +443,7 @@ async function handleConflicts(
 		const resolution = resolutions[i] || "skip";
 
 		try {
-			await resolveConflict(env, info, resolution, syncState);
+			await resolveConflict(env, info, resolution, syncState, serverPaths);
 			if (resolution !== "skip") {
 				resolved++;
 			}
@@ -460,7 +462,8 @@ async function resolveConflict(
 	env: SyncEnv,
 	conflict: ConflictInfo,
 	resolution: ConflictResolution,
-	syncState: SyncState
+	syncState: SyncState,
+	serverPaths: Set<string>
 ): Promise<void> {
 	switch (resolution) {
 		case "keep_local":
@@ -476,10 +479,7 @@ async function resolveConflict(
 			break;
 
 		case "keep_both": {
-			// Create copy with server version
-			const ext = conflict.path.substring(conflict.path.lastIndexOf("."));
-			const baseName = conflict.path.substring(0, conflict.path.lastIndexOf("."));
-			const newPath = `${baseName} (server)${ext}`;
+			const newPath = await freeServerCopyPath(env, conflict.path, serverPaths);
 
 			await env.writeFile(newPath, conflict.remoteContent);
 
@@ -503,6 +503,33 @@ async function resolveConflict(
 			// Do nothing - will show as conflict again next sync
 			break;
 	}
+}
+
+/**
+ * The first of "n (server).md", "n (server 2).md", ... that exists neither
+ * locally nor on the server, so keep_both never overwrites an earlier copy.
+ */
+async function freeServerCopyPath(env: SyncEnv, path: string, serverPaths: Set<string>): Promise<string> {
+	const { stem, ext } = splitExtension(path);
+	for (let n = 1; ; n++) {
+		const candidate = `${stem} (server${n === 1 ? "" : ` ${n}`})${ext}`;
+		if (!serverPaths.has(candidate) && !(await env.fileExists(candidate))) {
+			return candidate;
+		}
+	}
+}
+
+/**
+ * Split at the last "." of the file name, never of a directory, and treat a
+ * leading "." (a dotfile) as part of the name.
+ */
+function splitExtension(path: string): { stem: string; ext: string } {
+	const nameStart = path.lastIndexOf("/") + 1;
+	const dot = path.lastIndexOf(".");
+	if (dot <= nameStart) {
+		return { stem: path, ext: "" };
+	}
+	return { stem: path.slice(0, dot), ext: path.slice(dot) };
 }
 
 /**
