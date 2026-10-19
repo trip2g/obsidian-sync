@@ -35,7 +35,8 @@ export interface ApplyLiveChangesResult {
  * Decision logic (mirrors autoPull in main.ts):
  * - NoteUpsertEvent: classify via classifyFile; write only when action is "pull"
  *   or when it is a "create" event with no local copy. On conflict, increment
- *   conflictCount but do NOT write. On push/unchanged, skip.
+ *   conflictCount but do NOT write. On unchanged, record the shared hash in
+ *   syncState when it is missing. On push, skip.
  * - NoteHideEvent: collect paths that exist locally AND are tracked in syncState
  *   as `hiddenPaths`. The caller is responsible for user confirmation and the
  *   actual delete+syncState mutation. applyLiveChanges does NOT auto-delete.
@@ -123,8 +124,10 @@ export async function applyLiveChanges(
 			await writeAndRecord(env, syncState, change.path, content, remoteHash, pulledPaths);
 		} else if (action === "conflict") {
 			conflictCount++;
+		} else if (action === "unchanged" && localHash !== null) {
+			syncState.files[change.path] = localHash;
 		}
-		// unchanged / push / others: skip — no write, no syncState mutation.
+		// push / others: skip — no write, no syncState mutation.
 	}
 
 	return { pulledPaths, conflictCount, hiddenPaths };

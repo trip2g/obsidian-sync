@@ -219,6 +219,18 @@ describe("applyLiveChanges", () => {
 			expect(result.conflictCount).toBe(0);
 			expect(env.writeFile).not.toHaveBeenCalled();
 		});
+
+		it("records the shared hash when the file has no syncState entry", async () => {
+			const content = "same content";
+
+			const env = makeEnv({ localFiles: { "note.md": content } });
+			const syncState = makeSyncState({});
+
+			await applyLiveChanges(env, [upsertChange("note.md", "update", content)], syncState);
+
+			expect(env.writeFile).not.toHaveBeenCalled();
+			expect(syncState.files["note.md"]).toBe(makeHash(content));
+		});
 	});
 
 	describe("hide – eligible paths returned (caller performs deletion)", () => {
