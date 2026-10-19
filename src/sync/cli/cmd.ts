@@ -428,6 +428,7 @@ async function main(): Promise<void> {
 			verbose: args.verbose,
 			dataInclude: dataJson.livePullIncludePatterns,
 			dataExclude: dataJson.livePullExcludePatterns,
+			stateFile: args.stateFile || undefined,
 		});
 		process.exit(exitCode);
 	}

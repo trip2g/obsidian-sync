@@ -116,6 +116,8 @@ export interface WatchArgs {
 	dataInclude?: string[];
 	/** livePullExcludePatterns from data.json (fallback when no --exclude). */
 	dataExclude?: string[];
+	/** --state-file: the same state a one-shot run with this flag reads and writes. */
+	stateFile?: string;
 }
 
 /** Result of a watch run — resolves only after the daemon drains and exits. */
@@ -200,17 +202,7 @@ export async function runWatch(args: WatchArgs, deps: WatchDeps = {}): Promise<W
 	const clock = deps.clock ?? realClock;
 	const now = deps.now ?? Date.now;
 
-	const env: WatchEnv =
-		deps.envFactory?.(args) ??
-		new NodeEnv({
-			folder: args.folder,
-			apiUrl: args.apiUrl,
-			apiKey: args.apiKey,
-			twoWaySync: true,
-			verbose: args.verbose,
-			conflictResolution: args.conflictResolution,
-			meta: args.meta,
-		});
+	const env: WatchEnv = deps.envFactory?.(args) ?? createWatchEnv(args);
 
 	const isExcluded = makeExcludeMatcher(args.exclude);
 	const lock = createLock();
@@ -435,6 +427,20 @@ function resolveWatchPatterns(args: WatchArgs): { include: string[]; exclude: st
 				? args.dataExclude
 				: [];
 	return { include, exclude };
+}
+
+/** The real env watch syncs through: a two-way NodeEnv built from the CLI args. */
+export function createWatchEnv(args: WatchArgs): NodeEnv {
+	return new NodeEnv({
+		folder: args.folder,
+		apiUrl: args.apiUrl,
+		apiKey: args.apiKey,
+		twoWaySync: true,
+		verbose: args.verbose,
+		conflictResolution: args.conflictResolution,
+		meta: args.meta,
+		stateFile: args.stateFile,
+	});
 }
 
 /** Run one two-way one-shot sync (classify -> filter -> execute). */
