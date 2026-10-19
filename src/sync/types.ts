@@ -63,6 +63,11 @@ export interface SyncResult {
 	assetsUploaded: number;
 	assetsDownloaded: number;
 	errors: string[];
+	/**
+	 * The subset of errors from a note push or hide the server did not take.
+	 * Those notes stay unsynced; an asset or pull failure leaves them unaffected.
+	 */
+	pushErrors: string[];
 	updatedUrls: Array<{ path: string; url: string }>;
 	warnings: Array<{ path: string; level: string; message: string }>;
 }

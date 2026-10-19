@@ -37,6 +37,7 @@ export async function executePlan(
 		assetsUploaded: 0,
 		assetsDownloaded: 0,
 		errors: [],
+		pushErrors: [],
 		updatedUrls: [],
 		warnings: [],
 	};
@@ -103,6 +104,7 @@ export async function executePlan(
 			const pushResult = await executePushes(env, toPush, syncState);
 			result.pushed = pushResult.count;
 			result.errors.push(...pushResult.errors);
+			result.pushErrors.push(...pushResult.pushErrors);
 			pushedNotes = pushResult.pushedNotes;
 			result.warnings.push(...pushResult.warnings);
 		}
@@ -113,6 +115,7 @@ export async function executePlan(
 	if (plan.localDeleted.length > 0) {
 		const hideErrors = await handleLocalDeleted(env, plan.localDeleted, syncState);
 		result.errors.push(...hideErrors);
+		result.pushErrors.push(...hideErrors);
 	}
 
 	// 6. Reconcile assets for pushed notes
@@ -290,6 +293,7 @@ async function executePushes(
 ): Promise<{
 	count: number;
 	errors: string[];
+	pushErrors: string[];
 	pushedNotes: PushedNote[];
 	urls: Array<{ path: string; url: string }>;
 	warnings: SyncResult["warnings"];
@@ -297,11 +301,12 @@ async function executePushes(
 	// Stryker disable all
 	// optimization - caller already filters empty
 	if (pushes.length === 0) {
-		return { count: 0, errors: [], pushedNotes: [], urls: [], warnings: [] };
+		return { count: 0, errors: [], pushErrors: [], pushedNotes: [], urls: [], warnings: [] };
 	}
 	// Stryker restore all
 
 	const errors: string[] = [];
+	const pushErrors: string[] = [];
 	const updates: NoteUpdate[] = [];
 
 	// Read all file contents
@@ -323,7 +328,7 @@ async function executePushes(
 
 	// Stryker disable next-line ConditionalExpression,BlockStatement: optimization when all reads fail
 	if (updates.length === 0) {
-		return { count: 0, errors, pushedNotes: [], urls: [], warnings: [] };
+		return { count: 0, errors, pushErrors: [], pushedNotes: [], urls: [], warnings: [] };
 	}
 
 	// Track which paths we're pushing
@@ -340,7 +345,9 @@ async function executePushes(
 		try {
 			batchNotes = await env.pushNotes(batch, true);
 		} catch (e) {
-			errors.push(`Failed to push ${batch.map((u) => u.path).join(", ")}: ${e}`);
+			const error = `Failed to push ${batch.map((u) => u.path).join(", ")}: ${e}`;
+			errors.push(error);
+			pushErrors.push(error);
 			continue;
 		}
 		pushedNotes.push(...batchNotes);
@@ -378,7 +385,7 @@ async function executePushes(
 		}
 	}
 
-	return { count: pushedCount, errors, pushedNotes: filteredNotes, urls, warnings };
+	return { count: pushedCount, errors, pushErrors, pushedNotes: filteredNotes, urls, warnings };
 }
 
 /**

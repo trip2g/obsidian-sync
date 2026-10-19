@@ -2,7 +2,16 @@ import { describe, it, expect } from "vitest";
 import { classifySync } from "./classify";
 import { filterPlan } from "./filter";
 import { executePlan } from "./execute";
-import type { SyncEnv, SyncState, SyncResult, NoteUpdate, PushedNote, ConflictInfo, ConflictResolution } from "./types";
+import type {
+	SyncEnv,
+	SyncState,
+	SyncResult,
+	NoteUpdate,
+	PushedNote,
+	ConflictInfo,
+	ConflictResolution,
+	NoteAssetInfo,
+} from "./types";
 
 const h = (c: string) => `hash:${c}`;
 
@@ -21,6 +30,7 @@ class World {
 	failPush: (batch: NoteUpdate[]) => boolean = () => false;
 	pushFailure: PushFailure = "throw";
 	failHide = false;
+	noteAssets: NoteAssetInfo[] = [];
 	batchSize = 100;
 
 	env(): SyncEnv {
@@ -61,7 +71,7 @@ class World {
 			},
 			fetchNoteContents: async (paths: string[]) =>
 				paths.filter((p) => this.server.has(p)).map((p) => ({ path: p, content: this.server.get(p) as string })),
-			fetchNoteAssets: async () => [],
+			fetchNoteAssets: async (paths: string[]) => this.noteAssets.filter((n) => paths.includes(n.path)),
 			uploadAsset: async () => true,
 			downloadAsset: async () => null,
 			commitNotes: async () => ({ updated: [] }),
@@ -258,5 +268,41 @@ describe("a local delete whose hide fails", () => {
 		expect(w.disk.has("n.md")).toBe(false);
 		expect(w.server.has("n.md")).toBe(false);
 		expect(w.state.files["n.md"]).toBe(undefined);
+	});
+});
+
+describe("push errors", () => {
+	it("hold a failed push and a failed hide", async () => {
+		const w = new World();
+		await w.baseline("a.md", "a0");
+		await w.baseline("gone.md", "g0");
+		w.disk.set("a.md", "a1 local");
+		w.disk.delete("gone.md");
+		w.failPush = () => true;
+		w.failHide = true;
+
+		const result = await w.sync();
+
+		expect(result.pushErrors).toHaveLength(2);
+		expect(result.pushErrors.some((e) => e.includes("a.md"))).toBe(true);
+		expect(result.pushErrors.some((e) => e.includes("gone.md"))).toBe(true);
+		expect(result.errors).toEqual(expect.arrayContaining(result.pushErrors));
+	});
+
+	it("leave out a failed asset, so it does not mark a successful push as failed", async () => {
+		const w = new World();
+		await w.baseline("a.md", "a0");
+		await w.baseline("b.md", "b0");
+		w.disk.set("a.md", "a1 local");
+		w.server.set("b.md", "b1 server ![[img.png]]");
+		w.noteAssets = [
+			{ path: "b.md", noteId: "b", assets: [{ id: "img.png", url: "u", hash: "x", absolutePath: "img.png" }] },
+		];
+
+		const result = await w.sync();
+
+		expect(result.pushed).toBe(1);
+		expect(result.errors.some((e) => e.includes("img.png"))).toBe(true);
+		expect(result.pushErrors).toEqual([]);
 	});
 });

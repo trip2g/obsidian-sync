@@ -10,6 +10,7 @@ function result(over: Partial<SyncResult> = {}): SyncResult {
 		assetsUploaded: 0,
 		assetsDownloaded: 0,
 		errors: [],
+		pushErrors: [],
 		updatedUrls: [],
 		warnings: [],
 		...over,

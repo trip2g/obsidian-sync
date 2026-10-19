@@ -356,8 +356,15 @@ export default class Trip2gSyncPlugin extends Plugin {
 		for (const { syncDir, folder } of targets) {
 			const key = this.liveKey(syncDir.apiUrl, syncDir.path);
 			try {
-				for (const c of await this.pushSyncDir(syncDir, folder, paths)) confirmed.add(c);
-				this.syncFailures.recordSuccess(key);
+				const pushed = await this.pushSyncDir(syncDir, folder, paths);
+				for (const c of pushed.confirmed) confirmed.add(c);
+				if (pushed.pushErrors.length > 0) {
+					failed = true;
+					console.warn("[Trip2g Sync] autoPush errors:", pushed.pushErrors);
+					this.notifySyncFailure(key, new Error(pushed.pushErrors.join("; ")));
+				} else {
+					this.syncFailures.recordSuccess(key);
+				}
 			} catch (e) {
 				failed = true;
 				// One dir's failure must not block the others; surface it to the user
@@ -429,12 +436,16 @@ export default class Trip2gSyncPlugin extends Plugin {
 	 * synced (server now holds the current on-disk content). A path whose disk
 	 * write landed AFTER classify read it stays unconfirmed so the scheduler
 	 * retries it — this is the fix for saves silently missing a push.
+	 *
+	 * A failed note push or hide comes back in pushErrors for the caller to treat
+	 * as an auto-push failure. Any other error, such as a failed asset, is
+	 * reported here and leaves the auto-push status alone.
 	 */
 	private async pushSyncDir(
 		syncDir: SyncDir,
 		folder: TFolder,
 		requested: string[]
-	): Promise<string[]> {
+	): Promise<{ confirmed: string[]; pushErrors: string[] }> {
 		const syncState = this.getSyncState(syncDir.apiUrl);
 		const publishField = syncDir.publishField || "";
 		const env = this.buildPushEnv(syncDir, folder, syncState);
@@ -451,11 +462,6 @@ export default class Trip2gSyncPlugin extends Plugin {
 		// so it must be confirmed rather than retried in a hot loop.
 		const attempted = new Set(filteredPlan.pushes.map((p) => p.path));
 		const result = await executePlan(env, filteredPlan, { twoWaySync: true });
-		// executePlan reports a failed push or hide in result.errors instead of
-		// throwing; the auto-push status and failure notice depend on a throw.
-		if (result.errors.length > 0) {
-			throw new Error(result.errors.join("; "));
-		}
 
 		const base = this.basePrefix(folder);
 		let pushedHost = "";
@@ -475,7 +481,10 @@ export default class Trip2gSyncPlugin extends Plugin {
 			);
 		}
 
-		return this.confirmSyncedPaths(env, syncState, folder, base, requested, attempted);
+		const confirmed = await this.confirmSyncedPaths(env, syncState, folder, base, requested, attempted);
+		const pushErrors = new Set(result.pushErrors);
+		this.reportSyncErrors(result.errors.filter((e) => !pushErrors.has(e)));
+		return { confirmed, pushErrors: result.pushErrors };
 	}
 
 	/**
