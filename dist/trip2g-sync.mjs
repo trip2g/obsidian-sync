@@ -750,9 +750,9 @@ var init_handler = __esm({
         if (this.fsw.closed) {
           return;
         }
-        const dirname4 = sysPath.dirname(file);
+        const dirname5 = sysPath.dirname(file);
         const basename4 = sysPath.basename(file);
-        const parent = this.fsw._getWatchedDir(dirname4);
+        const parent = this.fsw._getWatchedDir(dirname5);
         let prevStats = stats;
         if (parent.has(basename4))
           return;
@@ -779,7 +779,7 @@ var init_handler = __esm({
                 prevStats = newStats2;
               }
             } catch (error) {
-              this.fsw._remove(dirname4, basename4);
+              this.fsw._remove(dirname5, basename4);
             }
           } else if (parent.has(basename4)) {
             const at = newStats.atimeMs;
@@ -1749,7 +1749,7 @@ var init_esm2 = __esm({
 });
 
 // src/sync/cli/cmd.ts
-import * as fs4 from "fs";
+import * as fs5 from "fs";
 import * as path4 from "path";
 
 // src/sync/cli/env.ts
@@ -2454,9 +2454,12 @@ function writeFileAtomic(filePath, data) {
   const tmp = path.join(dir, `.${path.basename(target)}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`);
   const mode = existingMode(target);
   try {
-    const fd = fs.openSync(tmp, "wx", mode);
+    const fd = fs.openSync(tmp, "wx");
     try {
-      fs.writeFileSync(fd, data, "utf-8");
+      if (mode !== null) {
+        fs.fchmodSync(fd, mode);
+      }
+      fs.writeFileSync(fd, data);
       fs.fsyncSync(fd);
     } finally {
       fs.closeSync(fd);
@@ -2481,7 +2484,7 @@ function existingMode(target) {
   try {
     return fs.statSync(target).mode & 4095;
   } catch {
-    return 438;
+    return null;
   }
 }
 __name(existingMode, "existingMode");
@@ -2500,6 +2503,38 @@ function syncDirectory(dir) {
   }
 }
 __name(syncDirectory, "syncDirectory");
+var TEMP_NAME = /^\..+\.(\d+)\.[0-9a-f]{12}\.tmp$/;
+function sweepStaleTempFiles(dir, recursive) {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (recursive && !entry.name.startsWith(".") && entry.name !== "node_modules") {
+        sweepStaleTempFiles(fullPath, true);
+      }
+      continue;
+    }
+    const match = TEMP_NAME.exec(entry.name);
+    if (match && entry.isFile() && !processAlive(Number(match[1]))) {
+      fs.rmSync(fullPath, { force: true });
+    }
+  }
+}
+__name(sweepStaleTempFiles, "sweepStaleTempFiles");
+function processAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === "EPERM";
+  }
+}
+__name(processAlive, "processAlive");
 
 // src/sync/cli/env.ts
 var LEGACY_STATE_FILE = ".sync-state.json";
@@ -2545,6 +2580,8 @@ var NodeEnv = class {
     } else {
       this.statePath = path2.join(this.folder, stateFileNameForApiUrl(options.apiUrl));
     }
+    sweepStaleTempFiles(this.folder, true);
+    sweepStaleTempFiles(path2.dirname(this.statePath), false);
     this.syncState = this.loadSyncState();
     this.sdk = createClient({ apiUrl: options.apiUrl, apiKey: options.apiKey });
   }
@@ -2662,7 +2699,7 @@ var NodeEnv = class {
   }
   async writeBinaryFile(filePath, data) {
     const fullPath = path2.join(this.folder, filePath);
-    fs2.writeFileSync(fullPath, Buffer.from(data));
+    writeFileAtomic(fullPath, Buffer.from(data));
   }
   async readBinaryFile(filePath) {
     const fullPath = path2.join(this.folder, filePath);
@@ -3371,6 +3408,7 @@ async function executePlan(env, plan, options = { twoWaySync: false }) {
     assetsUploaded: 0,
     assetsDownloaded: 0,
     errors: [],
+    pushErrors: [],
     updatedUrls: [],
     warnings: []
   };
@@ -3401,7 +3439,8 @@ async function executePlan(env, plan, options = { twoWaySync: false }) {
     await handleServerDeleted(env, plan.serverDeleted, syncState);
   }
   if (plan.conflicts.length > 0) {
-    const conflictResult = await handleConflicts(env, plan.conflicts, syncState);
+    const serverPaths = new Set(plan.classifications.filter((c) => c.remoteHash !== null).map((c) => c.path));
+    const conflictResult = await handleConflicts(env, plan.conflicts, syncState, serverPaths);
     result.conflictsResolved = conflictResult.resolved;
     result.errors.push(...conflictResult.errors);
   }
@@ -3413,6 +3452,7 @@ async function executePlan(env, plan, options = { twoWaySync: false }) {
       const pushResult = await executePushes(env, toPush, syncState);
       result.pushed = pushResult.count;
       result.errors.push(...pushResult.errors);
+      result.pushErrors.push(...pushResult.pushErrors);
       pushedNotes = pushResult.pushedNotes;
       result.warnings.push(...pushResult.warnings);
     }
@@ -3420,6 +3460,7 @@ async function executePlan(env, plan, options = { twoWaySync: false }) {
   if (plan.localDeleted.length > 0) {
     const hideErrors = await handleLocalDeleted(env, plan.localDeleted, syncState);
     result.errors.push(...hideErrors);
+    result.pushErrors.push(...hideErrors);
   }
   if (pushedNotes.length > 0) {
     const notes = pushedNotes.map((note) => ({
@@ -3533,9 +3574,10 @@ async function executePulls(env, pulls, syncState) {
 __name(executePulls, "executePulls");
 async function executePushes(env, pushes, syncState) {
   if (pushes.length === 0) {
-    return { count: 0, errors: [], pushedNotes: [], urls: [], warnings: [] };
+    return { count: 0, errors: [], pushErrors: [], pushedNotes: [], urls: [], warnings: [] };
   }
   const errors = [];
+  const pushErrors = [];
   const updates = [];
   const total = pushes.length;
   let current = 0;
@@ -3550,7 +3592,7 @@ async function executePushes(env, pushes, syncState) {
     }
   }
   if (updates.length === 0) {
-    return { count: 0, errors, pushedNotes: [], urls: [], warnings: [] };
+    return { count: 0, errors, pushErrors: [], pushedNotes: [], urls: [], warnings: [] };
   }
   const updatePaths = new Set(updates.map((u) => u.path));
   const batchSize = env.pushBatchSize || 100;
@@ -3562,7 +3604,9 @@ async function executePushes(env, pushes, syncState) {
     try {
       batchNotes = await env.pushNotes(batch, true);
     } catch (e) {
-      errors.push(`Failed to push ${batch.map((u) => u.path).join(", ")}: ${e}`);
+      const error = `Failed to push ${batch.map((u) => u.path).join(", ")}: ${e}`;
+      errors.push(error);
+      pushErrors.push(error);
       continue;
     }
     pushedNotes.push(...batchNotes);
@@ -3586,10 +3630,10 @@ async function executePushes(env, pushes, syncState) {
       warnings.push({ path: note.path, level: w.level, message: w.message });
     }
   }
-  return { count: pushedCount, errors, pushedNotes: filteredNotes, urls, warnings };
+  return { count: pushedCount, errors, pushErrors, pushedNotes: filteredNotes, urls, warnings };
 }
 __name(executePushes, "executePushes");
-async function handleConflicts(env, conflicts, syncState) {
+async function handleConflicts(env, conflicts, syncState, serverPaths) {
   if (conflicts.length === 0) {
     return { resolved: 0, errors: [] };
   }
@@ -3626,7 +3670,7 @@ async function handleConflicts(env, conflicts, syncState) {
     const info = conflictInfos[i];
     const resolution = resolutions[i] || "skip";
     try {
-      await resolveConflict(env, info, resolution, syncState);
+      await resolveConflict(env, info, resolution, syncState, serverPaths);
       if (resolution !== "skip") {
         resolved++;
       }
@@ -3637,7 +3681,7 @@ async function handleConflicts(env, conflicts, syncState) {
   return { resolved, errors };
 }
 __name(handleConflicts, "handleConflicts");
-async function resolveConflict(env, conflict, resolution, syncState) {
+async function resolveConflict(env, conflict, resolution, syncState, serverPaths) {
   switch (resolution) {
     case "keep_local":
       await pushConfirmed(env, [{ path: conflict.path, content: conflict.localContent }]);
@@ -3648,9 +3692,7 @@ async function resolveConflict(env, conflict, resolution, syncState) {
       syncState.files[conflict.path] = conflict.remoteHash;
       break;
     case "keep_both": {
-      const ext = conflict.path.substring(conflict.path.lastIndexOf("."));
-      const baseName = conflict.path.substring(0, conflict.path.lastIndexOf("."));
-      const newPath = `${baseName} (server)${ext}`;
+      const newPath = await freeServerCopyPath(env, conflict.path, serverPaths);
       await env.writeFile(newPath, conflict.remoteContent);
       await pushConfirmed(env, [
         { path: conflict.path, content: conflict.localContent },
@@ -3667,6 +3709,25 @@ async function resolveConflict(env, conflict, resolution, syncState) {
   }
 }
 __name(resolveConflict, "resolveConflict");
+async function freeServerCopyPath(env, path5, serverPaths) {
+  const { stem, ext } = splitExtension(path5);
+  for (let n = 1; ; n++) {
+    const candidate = `${stem} (server${n === 1 ? "" : ` ${n}`})${ext}`;
+    if (!serverPaths.has(candidate) && !await env.fileExists(candidate)) {
+      return candidate;
+    }
+  }
+}
+__name(freeServerCopyPath, "freeServerCopyPath");
+function splitExtension(path5) {
+  const nameStart = path5.lastIndexOf("/") + 1;
+  const dot = path5.lastIndexOf(".");
+  if (dot <= nameStart) {
+    return { stem: path5, ext: "" };
+  }
+  return { stem: path5.slice(0, dot), ext: path5.slice(dot) };
+}
+__name(splitExtension, "splitExtension");
 async function pushConfirmed(env, updates) {
   const pushed = await env.pushNotes(updates, true);
   const confirmed = new Set(pushed.map((n) => n.path));
@@ -4587,11 +4648,88 @@ function formatPlanSummary(plan, conflictResolution) {
 }
 __name(formatPlanSummary, "formatPlanSummary");
 
+// src/sync/cli/sync-report.ts
+import * as fs4 from "fs";
+var EXIT_FAILURE = 1;
+function printSyncResult(result, totalActions, updatedOutput) {
+  const upToDate = totalActions === 0 && result.assetsUploaded === 0 && result.assetsDownloaded === 0 && result.errors.length === 0;
+  if (upToDate) {
+    console.log("\n\u2705 Everything is up to date!");
+    return 0;
+  }
+  console.log("\n" + "=".repeat(60));
+  console.log("\u{1F4CA} SYNC RESULTS:");
+  console.log("=".repeat(60));
+  console.log(`  Pushed:             ${result.pushed}`);
+  console.log(`  Pulled:             ${result.pulled}`);
+  console.log(`  Conflicts resolved: ${result.conflictsResolved}`);
+  console.log(`  Assets uploaded:    ${result.assetsUploaded}`);
+  console.log(`  Assets downloaded:  ${result.assetsDownloaded}`);
+  if (result.errors.length > 0) {
+    console.log(`  Errors:             ${result.errors.length}`);
+    for (const err of result.errors) {
+      console.log(`    \u274C ${err}`);
+    }
+  }
+  if (result.warnings.length > 0) {
+    console.log(`  Warnings:           ${result.warnings.length}`);
+  }
+  console.log("=".repeat(60));
+  let hasCritical = false;
+  if (result.warnings.length > 0) {
+    const RED = "\x1B[31m";
+    const YELLOW = "\x1B[33m";
+    const RESET = "\x1B[0m";
+    const byPath = /* @__PURE__ */ new Map();
+    for (const w of result.warnings) {
+      const forPath = byPath.get(w.path) ?? [];
+      forPath.push(w);
+      byPath.set(w.path, forPath);
+    }
+    console.log("\n\u26A0\uFE0F  Warnings:");
+    for (const [path5, warnings] of byPath) {
+      console.log(`  ${path5}`);
+      for (const w of warnings) {
+        const isCritical = w.level === "CRITICAL";
+        hasCritical = hasCritical || isCritical;
+        const color = isCritical ? RED : YELLOW;
+        console.log(`    ${color}[${w.level}]${RESET} ${w.message}`);
+      }
+    }
+  }
+  const updatedUrls = result.updatedUrls ?? [];
+  if (updatedUrls.length > 0) {
+    console.log("\n\u{1F4CE} Published:");
+    if (updatedUrls.length <= 20) {
+      for (const { path: path5, url } of updatedUrls) {
+        console.log(`  ${path5} \u2192 ${url}`);
+      }
+    }
+    if (updatedOutput) {
+      fs4.writeFileSync(updatedOutput, JSON.stringify(updatedUrls, null, 2));
+      console.log(`\u{1F4BE} Saved to ${updatedOutput}`);
+    } else {
+      console.log(`\u{1F4A1} --updated-output $(mktemp /tmp/updated-XXXXXX.json)`);
+    }
+  }
+  if (hasCritical) {
+    console.error("\n\u274C Critical warnings detected, aborting.");
+    return EXIT_FAILURE;
+  }
+  if (result.errors.length > 0) {
+    console.error(`
+\u274C ${result.errors.length} operation(s) failed; they stay unsynced and are retried on the next run.`);
+    return EXIT_FAILURE;
+  }
+  return 0;
+}
+__name(printSyncResult, "printSyncResult");
+
 // src/sync/cli/cmd.ts
 function readDataJson() {
   try {
     const dataPath = path4.join(process.cwd(), ".obsidian", "plugins", "trip2g", "data.json");
-    const data = JSON.parse(fs4.readFileSync(dataPath, "utf8"));
+    const data = JSON.parse(fs5.readFileSync(dataPath, "utf8"));
     const dir = data?.syncDirs?.[0];
     if (!dir) return {};
     return {
@@ -4808,6 +4946,13 @@ Deletions:
   A note deleted on the server is reported as "Server deleted"; the CLI keeps
   the local copy.
 
+Exit status:
+  0  every operation succeeded
+  1  the run failed, wholly or in part: a push, pull, hide or asset transfer
+     failed, a layout has a critical warning, or the CLI could not start.
+     A partial failure exits 1 after the results are printed; what failed
+     stays unsynced and is retried on the next run.
+
 Subcommands:
   warnings                 Print note warnings as JSON
   graphql '<query>' ['<variables json>']
@@ -4929,7 +5074,7 @@ async function main() {
   }
   if (args.watch) {
     const dataJson = readDataJson();
-    const { exitCode } = await runWatch({
+    const { exitCode: exitCode2 } = await runWatch({
       folder: args.folder,
       apiUrl: args.apiUrl,
       apiKey: args.apiKey,
@@ -4942,7 +5087,7 @@ async function main() {
       dataExclude: dataJson.livePullExcludePatterns,
       stateFile: args.stateFile || void 0
     });
-    process.exit(exitCode);
+    process.exit(exitCode2);
   }
   if (args.dryRun) {
     console.log(`[dry-run] folder=${args.folder}${args.prefix ? ` prefix=${args.prefix}` : ""}`);
@@ -5033,68 +5178,9 @@ async function main() {
   const totalActions = filteredPlan.pushes.length + filteredPlan.localOnly.length + filteredPlan.pulls.length + filteredPlan.remoteOnly.length + filteredPlan.conflicts.length + filteredPlan.localDeleted.length + filteredPlan.serverDeleted.length;
   console.log("\n\u{1F680} Executing sync...");
   const result = await executePlan(env, filteredPlan, { twoWaySync: args.twoWaySync });
-  if (totalActions === 0 && result.assetsUploaded === 0 && result.assetsDownloaded === 0) {
-    console.log("\n\u2705 Everything is up to date!");
-    return;
-  }
-  console.log("\n" + "=".repeat(60));
-  console.log("\u{1F4CA} SYNC RESULTS:");
-  console.log("=".repeat(60));
-  console.log(`  Pushed:             ${result.pushed}`);
-  console.log(`  Pulled:             ${result.pulled}`);
-  console.log(`  Conflicts resolved: ${result.conflictsResolved}`);
-  console.log(`  Assets uploaded:    ${result.assetsUploaded}`);
-  console.log(`  Assets downloaded:  ${result.assetsDownloaded}`);
-  if (result.errors.length > 0) {
-    console.log(`  Errors:             ${result.errors.length}`);
-    for (const err of result.errors) {
-      console.log(`    \u274C ${err}`);
-    }
-  }
-  if (result.warnings.length > 0) {
-    console.log(`  Warnings:           ${result.warnings.length}`);
-  }
-  console.log("=".repeat(60));
-  let hasCritical = false;
-  if (result.warnings.length > 0) {
-    const RED = "\x1B[31m";
-    const YELLOW = "\x1B[33m";
-    const RESET = "\x1B[0m";
-    const byPath = /* @__PURE__ */ new Map();
-    for (const w of result.warnings) {
-      const forPath = byPath.get(w.path) ?? [];
-      forPath.push(w);
-      byPath.set(w.path, forPath);
-    }
-    console.log("\n\u26A0\uFE0F  Warnings:");
-    for (const [path5, warnings] of byPath) {
-      console.log(`  ${path5}`);
-      for (const w of warnings) {
-        const isCritical = w.level === "CRITICAL";
-        hasCritical = hasCritical || isCritical;
-        const color = isCritical ? RED : YELLOW;
-        console.log(`    ${color}[${w.level}]${RESET} ${w.message}`);
-      }
-    }
-  }
-  const updatedUrls = result.updatedUrls ?? [];
-  if (updatedUrls.length > 0) {
-    console.log("\n\u{1F4CE} Published:");
-    if (updatedUrls.length <= 20) {
-      for (const { path: path5, url } of updatedUrls) {
-        console.log(`  ${path5} \u2192 ${url}`);
-      }
-    }
-    if (args.updatedOutput) {
-      fs4.writeFileSync(args.updatedOutput, JSON.stringify(updatedUrls, null, 2));
-      console.log(`\u{1F4BE} Saved to ${args.updatedOutput}`);
-    } else {
-      console.log(`\u{1F4A1} --updated-output $(mktemp /tmp/updated-XXXXXX.json)`);
-    }
-  }
-  if (hasCritical) {
-    console.error("\n\u274C Critical warnings detected, aborting.");
-    process.exit(1);
+  const exitCode = printSyncResult(result, totalActions, args.updatedOutput);
+  if (exitCode !== 0) {
+    process.exit(exitCode);
   }
 }
 __name(main, "main");
