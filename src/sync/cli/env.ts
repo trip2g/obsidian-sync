@@ -261,7 +261,7 @@ export class NodeEnv implements SyncEnv {
 
 	async writeBinaryFile(filePath: string, data: ArrayBuffer): Promise<void> {
 		const fullPath = path.join(this.folder, filePath);
-		fs.writeFileSync(fullPath, Buffer.from(data));
+		writeFileAtomic(fullPath, Buffer.from(data));
 	}
 
 	async readBinaryFile(filePath: string): Promise<ArrayBuffer> {

@@ -63,6 +63,21 @@ describe("a crash while the CLI writes", () => {
 		expect(fs.readdirSync(dir)).toEqual(["n.md"]);
 	});
 
+	it("leaves the previous asset intact, never a truncated one, and no stray file", async () => {
+		fs.writeFileSync(path.join(dir, "img.png"), "the asset as it was before the download");
+		const env = makeEnv();
+		const data = new TextEncoder().encode("the asset as the server holds it now");
+
+		crash.armed = true;
+		await expect(env.writeBinaryFile("img.png", data.buffer)).rejects.toThrow("ENOSPC");
+
+		expect(fs.readFileSync(path.join(dir, "img.png"), "utf-8")).toBe("the asset as it was before the download");
+		expect(fs.readdirSync(dir)).toEqual(["img.png"]);
+
+		await env.writeBinaryFile("img.png", data.buffer);
+		expect(fs.readFileSync(path.join(dir, "img.png"), "utf-8")).toBe("the asset as the server holds it now");
+	});
+
 	it("leaves the previous state file intact, never a truncated one", async () => {
 		const stateFile = path.join(dir, ".sync-state.localhost_8081.json");
 		fs.writeFileSync(stateFile, JSON.stringify({ files: { "n.md": "hash_n" } }));

@@ -11,7 +11,7 @@ import * as crypto from "crypto";
  * temporary name starts with "." so the vault walk never picks it up as a note.
  * A symlinked target is resolved first, so the link itself survives.
  */
-export function writeFileAtomic(filePath: string, data: string): void {
+export function writeFileAtomic(filePath: string, data: string | Uint8Array): void {
 	const target = resolveTarget(filePath);
 	const dir = path.dirname(target);
 	const tmp = path.join(dir, `.${path.basename(target)}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`);
@@ -20,7 +20,7 @@ export function writeFileAtomic(filePath: string, data: string): void {
 	try {
 		const fd = fs.openSync(tmp, "wx", mode);
 		try {
-			fs.writeFileSync(fd, data, "utf-8");
+			fs.writeFileSync(fd, data);
 			fs.fsyncSync(fd);
 		} finally {
 			fs.closeSync(fd);
