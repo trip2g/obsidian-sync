@@ -23,6 +23,7 @@ import type {
 import { resolveAssetPath } from "../resolve";
 import { uploadWithRetry, AssetTooLargeError } from "../upload-retry";
 import { createClient, type ClientOptions } from "./client";
+import { writeFileAtomic } from "./atomic-write";
 import type { Sdk } from "../../graphql";
 
 /** CLI conflict resolution strategy */
@@ -236,7 +237,7 @@ export class NodeEnv implements SyncEnv {
 
 	async writeFile(filePath: string, content: string): Promise<void> {
 		const fullPath = path.join(this.folder, filePath);
-		fs.writeFileSync(fullPath, content, "utf-8");
+		writeFileAtomic(fullPath, content);
 	}
 
 	async writeBinaryFile(filePath: string, data: ArrayBuffer): Promise<void> {
@@ -545,7 +546,7 @@ export class NodeEnv implements SyncEnv {
 
 	async saveSyncState(state: SyncState): Promise<void> {
 		state.lastSyncedAt = Date.now();
-		fs.writeFileSync(this.statePath, JSON.stringify(state, null, 2), "utf-8");
+		writeFileAtomic(this.statePath, JSON.stringify(state, null, 2));
 		this.syncState = state;
 	}
 
