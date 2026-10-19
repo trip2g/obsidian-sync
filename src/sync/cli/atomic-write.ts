@@ -18,8 +18,11 @@ export function writeFileAtomic(filePath: string, data: string | Uint8Array): vo
 	const mode = existingMode(target);
 
 	try {
-		const fd = fs.openSync(tmp, "wx", mode);
+		const fd = fs.openSync(tmp, "wx");
 		try {
+			if (mode !== null) {
+				fs.fchmodSync(fd, mode);
+			}
 			fs.writeFileSync(fd, data);
 			fs.fsyncSync(fd);
 		} finally {
@@ -42,11 +45,11 @@ function resolveTarget(filePath: string): string {
 	}
 }
 
-function existingMode(target: string): number {
+function existingMode(target: string): number | null {
 	try {
 		return fs.statSync(target).mode & 0o7777;
 	} catch {
-		return 0o666;
+		return null;
 	}
 }
 

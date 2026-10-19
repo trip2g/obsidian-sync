@@ -106,6 +106,16 @@ describe("a crash while the CLI writes", () => {
 		expect(makeEnv().getSyncState().files).toEqual({ "link.md": "h" });
 	});
 
+	it("keeps the exact mode of the file it replaces, whatever the umask", async () => {
+		fs.writeFileSync(path.join(dir, "n.md"), "old");
+		fs.chmodSync(path.join(dir, "n.md"), 0o666);
+		const env = makeEnv();
+
+		await env.writeFile("n.md", "new");
+
+		expect(fs.statSync(path.join(dir, "n.md")).mode & 0o777).toBe(0o666);
+	});
+
 	it("removes the temporary files of a write whose process died, and keeps those of a live one", () => {
 		fs.mkdirSync(path.join(dir, "sub"));
 		fs.mkdirSync(path.join(dir, ".git"));
