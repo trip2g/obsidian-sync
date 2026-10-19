@@ -22,7 +22,7 @@ import {
 	type SyncStatusModel,
 } from "./sync/sync-status";
 import { ObsidianSyncEnv } from "./env";
-import { isAlwaysPublishable } from "./sync/utils";
+import { isAlwaysPublishable, syncErrorNotice } from "./sync/utils";
 import type {
 	PluginSettings,
 	SyncDir,
@@ -1301,8 +1301,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 			return;
 		}
 		console.error("[Trip2g Sync] Errors:", errors);
-		const more = errors.length > 1 ? ` (+${errors.length - 1})` : "";
-		new Notice(`${t().syncError}: ${errors[0]}${more}`);
+		new Notice(`${t().syncError}: ${syncErrorNotice(errors)}`);
 	}
 
 	/**

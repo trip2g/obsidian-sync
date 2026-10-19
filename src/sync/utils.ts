@@ -85,3 +85,16 @@ export function resolveAssetUrl(apiUrl: string, url: string): string {
 		return url;
 	}
 }
+
+const NOTICE_ERROR_LENGTH = 200;
+
+/**
+ * The text of a Notice for a sync's errors: the first one, cut short so a
+ * batch failure that names a hundred notes still fits, and how many others
+ * there are. The full list goes to the console.
+ */
+export function syncErrorNotice(errors: string[]): string {
+	const first = errors[0] ?? "";
+	const shown = first.length > NOTICE_ERROR_LENGTH ? `${first.slice(0, NOTICE_ERROR_LENGTH)}…` : first;
+	return errors.length > 1 ? `${shown} (+${errors.length - 1} more)` : shown;
+}
