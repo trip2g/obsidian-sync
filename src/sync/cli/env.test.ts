@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -157,5 +157,45 @@ describe("NodeEnv.getServerHashes", () => {
 		};
 
 		await expect(env.getServerHashes()).resolves.toEqual([{ path: "wiki/note.md", hash: "abc" }]);
+	});
+});
+
+describe("NodeEnv push and hide failures", () => {
+	// Swallowed, a failed push looked like a push that confirmed nothing and a
+	// failed hide like one that succeeded; the sync summary never mentioned either.
+	const makeEnv = (sdk: unknown) => {
+		const folder = fs.mkdtempSync(path.join(os.tmpdir(), "sync-env-push-"));
+		const env = new NodeEnv({
+			folder,
+			apiUrl: "http://localhost:8081/graphql",
+			apiKey: "test-key",
+			twoWaySync: true,
+		});
+		(env as unknown as { sdk: unknown }).sdk = sdk;
+		return env;
+	};
+
+	it("rejects when the server refuses a push batch", async () => {
+		const env = makeEnv({
+			PushNotes: () => Promise.resolve({ pushNotes: { message: "File content must be UTF-8 text" } }),
+		});
+		const silence = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			await expect(env.pushNotes([{ path: "a.md", content: "a" }], true)).rejects.toThrow("UTF-8");
+		} finally {
+			silence.mockRestore();
+		}
+	});
+
+	it("rejects when a hide fails", async () => {
+		const env = makeEnv({
+			HideNotes: () => Promise.reject(new Error("HTTP 502: Bad Gateway")),
+		});
+		const silence = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			await expect(env.hideNotes(["a.md"])).rejects.toThrow("HTTP 502");
+		} finally {
+			silence.mockRestore();
+		}
 	});
 });

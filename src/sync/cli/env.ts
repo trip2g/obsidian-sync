@@ -340,7 +340,7 @@ export class NodeEnv implements SyncEnv {
 				console.error("   request:", JSON.stringify(anyE.request, null, 2));
 			}
 			console.error("   own props:", Object.getOwnPropertyNames(e as object));
-			return [];
+			throw e;
 		}
 	}
 
@@ -361,6 +361,7 @@ export class NodeEnv implements SyncEnv {
 			console.log(`✅ Hidden ${paths.length} notes`);
 		} catch (e) {
 			console.error(`❌ Failed to hide notes: ${e}`);
+			throw e;
 		}
 	}
 

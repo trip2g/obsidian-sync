@@ -451,6 +451,11 @@ export default class Trip2gSyncPlugin extends Plugin {
 		// so it must be confirmed rather than retried in a hot loop.
 		const attempted = new Set(filteredPlan.pushes.map((p) => p.path));
 		const result = await executePlan(env, filteredPlan, { twoWaySync: true });
+		// executePlan reports a failed push or hide in result.errors instead of
+		// throwing; the auto-push status and failure notice depend on a throw.
+		if (result.errors.length > 0) {
+			throw new Error(result.errors.join("; "));
+		}
 
 		const base = this.basePrefix(folder);
 		let pushedHost = "";
@@ -1242,9 +1247,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 				if (result.assetsDownloaded > 0) {
 					new Notice(t().assetDownloaded(result.assetsDownloaded));
 				}
-				if (result.errors.length > 0) {
-					console.error("[Trip2g Sync] Errors:", result.errors);
-				}
+				this.reportSyncErrors(result.errors);
 				if (result.warnings.length > 0) {
 					new Notice(t().syncWarningsCount(result.warnings.length));
 					// Attach url from updatedUrls for context
@@ -1278,6 +1281,19 @@ export default class Trip2gSyncPlugin extends Plugin {
 			// Apply any live-pull events that queued behind this sync.
 			await this.drainPendingLivePull();
 		}
+	}
+
+	/**
+	 * A push or hide that failed stays unsynced and is retried next time; the
+	 * user still has to hear about it, as they did when the failure aborted the sync.
+	 */
+	private reportSyncErrors(errors: string[]): void {
+		if (errors.length === 0) {
+			return;
+		}
+		console.error("[Trip2g Sync] Errors:", errors);
+		const more = errors.length > 1 ? ` (+${errors.length - 1})` : "";
+		new Notice(`${t().syncError}: ${errors[0]}${more}`);
 	}
 
 	/**
@@ -1345,6 +1361,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 					if (result.pushed > 0) {
 						new Notice(t().pushedFiles(result.pushed));
 					}
+					this.reportSyncErrors(result.errors);
 				}
 
 				await this.saveSyncStates();

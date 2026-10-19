@@ -441,7 +441,10 @@ function resolveWatchPatterns(args: WatchArgs): { include: string[]; exclude: st
 async function runOneShot(env: SyncEnv, isExcluded: (p: string) => boolean): Promise<void> {
 	const plan = await classifySync(env);
 	const filtered = filterPlan(plan, { twoWaySync: true, isExcluded });
-	await executePlan(env, filtered, { twoWaySync: true });
+	const result = await executePlan(env, filtered, { twoWaySync: true });
+	for (const err of result.errors) {
+		console.error(`❌ watch: ${err}`);
+	}
 }
 
 /**
