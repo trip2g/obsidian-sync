@@ -44,12 +44,12 @@ The server stores the note text, its frontmatter and its attachments. A note is 
 
 The plugin talks to the server URL you enter in its settings and sends no telemetry.
 
-- The plugin sends notes from the folder you pick in settings (the vault root by default): `.md` files, plus `.canvas`, `.base`, `.excalidraw`, `.html` and `.html.json` files. Attachments go only when a pushed note links to them and they sit inside that folder. Nothing outside the folder is sent.
+- The plugin sends notes from the folder you pick in settings (the vault root by default): `.md` files, plus `.canvas`, `.base`, `.excalidraw`, `.html` and `.html.json` files. Attachments go when a pushed note links to them, or when an already synced note links to one the server doesn't have yet. Either way they must sit inside that folder. Nothing outside the folder is sent.
 - Uploads go to `<your server>/_system/graphql`, with your API key and the plugin version in the request headers.
 - Before a manual sync pushes notes, the plugin lists them and waits for you to confirm. Attachments are not in that list. The list is skipped when you turn on "Skip push confirmation" or tick "don't ask again", and auto-sync on save never shows it.
-- At startup the plugin asks the server for the published URL of each note. Every 5 minutes and when the window gets focus it asks the server for note hashes, to show pending changes on the ribbon icon (unless you hide the sync status). Nothing is uploaded by these requests.
+- At startup the plugin asks the server for the published URL of each note. A few seconds after startup, every 5 minutes and when the window gets focus it asks the server for note hashes, to show pending changes on the ribbon icon (unless you hide the sync status). Nothing is uploaded by these requests.
 - Two-way sync downloads changed notes and their attachments. An attachment URL can point to the storage your server uses (for example S3); the API key is only sent when that URL is on your server.
-- Live pull keeps one event stream open to `/_system/graphql` on the same server.
+- Live pull keeps one event stream open to `/_system/graphql` for each sync folder that has it on.
 
 ## How sync works
 
@@ -72,7 +72,7 @@ flowchart TD
 6. Deleted locally: the note is hidden on the server.
 7. Deleted on the server (two-way sync): the plugin lists the files and asks whether to delete them locally. Deleted files go to the trash.
 8. Live pull is off by default. It needs two-way sync and at least one include pattern in the folder settings. It writes a note only when it is new or you have not edited it since the last sync. A note edited on both sides is left alone and flagged for the next manual sync, and deletions on the server still ask first.
-9. Auto-sync on save is off by default. It pushes a few seconds after you save and skips conflicts.
+9. Auto-sync on save is off by default. It runs a few seconds after you save. In a one-way folder it only pushes; in a two-way folder it also pulls server edits. Conflicts are skipped either way.
 
 ## Limitations
 
@@ -80,7 +80,7 @@ flowchart TD
 - The API key is stored in plain text in the plugin's `data.json`. Don't share that file.
 - Two sync folders that point to the same server URL share one sync state.
 - Attachments outside the sync folder are not uploaded.
-- Without two-way sync, a note edited both on the server and in the vault is pushed, and the vault version replaces the server one.
+- Without two-way sync, a manual sync pushes a note edited both on the server and in the vault, and the vault version replaces the server one.
 
 ## Installation
 
