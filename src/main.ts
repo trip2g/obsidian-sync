@@ -114,7 +114,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 		// Status bar: show published URL hostname for the active file
 		this.statusBarItem = this.addStatusBarItem();
-		this.statusBarItem.style.cursor = "pointer";
+		this.statusBarItem.addClass("trip2g-status-bar-url");
 		this.statusBarItem.setAttribute("aria-label", t().statusBarTooltip);
 		this.statusBarItem.addEventListener("click", () => {
 			const url = this.activeFileUrl();
@@ -1782,12 +1782,10 @@ class SyncSettingTab extends PluginSettingTab {
 			});
 
 			if (dir.error) {
-				const errorEl = containerEl.createEl("div", {
-					cls: "setting-item-description",
+				containerEl.createEl("div", {
+					cls: "setting-item-description trip2g-sync-dir-error",
 					text: `${i18n.error}: ${dir.error}`,
 				});
-				errorEl.style.color = "var(--text-error)";
-				errorEl.style.marginBottom = "10px";
 			}
 
 			// API URL
