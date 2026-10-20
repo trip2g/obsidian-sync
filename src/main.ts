@@ -10,7 +10,7 @@ import { applyLiveChanges } from "./sync/live-apply";
 import { filterPlan } from "./sync/filter";
 import { executePlan, executePulls, downloadAssetsForNotes } from "./sync/execute";
 import { LivePullConnection, type NoteChangeItem } from "./sync/LivePullConnection";
-import { AutoPushScheduler } from "./sync/auto-push";
+import { AutoPushScheduler, autoPushPlan } from "./sync/auto-push";
 import { SyncFailureTracker } from "./sync/failure-tracker";
 import {
 	initialSyncStatus,
@@ -451,18 +451,18 @@ export default class Trip2gSyncPlugin extends Plugin {
 		const publishField = syncDir.publishField || "";
 		const env = this.buildPushEnv(syncDir, folder, syncState);
 
+		const twoWaySync = syncDir.twoWaySync ?? false;
 		const plan = await classifySync(env);
-		const filteredPlan = filterPlan(plan, {
-			twoWaySync: true,
-			hasPublishFields: publishField
-				? (path: string) => this.hasPublishFieldByPath(path, folder, publishField)
-				: undefined,
-		});
+		const filteredPlan = autoPushPlan(
+			plan,
+			twoWaySync,
+			publishField ? (path: string) => this.hasPublishFieldByPath(path, folder, publishField) : undefined
+		);
 		// Paths this push actually attempted to upload. A requested path outside
 		// this set (conflict, publish-field-filtered, or unchanged) will never push,
 		// so it must be confirmed rather than retried in a hot loop.
 		const attempted = new Set(filteredPlan.pushes.map((p) => p.path));
-		const result = await executePlan(env, filteredPlan, { twoWaySync: true });
+		const result = await executePlan(env, filteredPlan, { twoWaySync });
 
 		const base = this.basePrefix(folder);
 		let pushedHost = "";
@@ -540,9 +540,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 	 * buildPullEnv but approves pushes and SKIPS every conflict (onConflict -> [],
 	 * which executePlan resolves as "skip") so a file edited both locally and on
 	 * the server is never clobbered — it stays a conflict for the badge / manual
-	 * sync. twoWaySync stays true so filterPlan keeps conflicts in the conflict
-	 * bucket (instead of converting them to pushes) and publish-field protection
-	 * still applies.
+	 * sync. A one-way folder gets a one-way env, so a stray vault write throws.
 	 */
 	private buildPushEnv(syncDir: SyncDir, folder: TFolder, syncState: SyncState): ObsidianSyncEnv {
 		const sdk = createSdk(syncDir.apiUrl, syncDir.apiKey, this.manifest.version);
@@ -555,7 +553,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 			apiKey: syncDir.apiKey,
 			pluginVersion: this.manifest.version,
 			publishField: syncDir.publishField || "",
-			twoWaySync: true,
+			twoWaySync: syncDir.twoWaySync ?? false,
 			onProgressCallback: () => {},
 			onConflictCallback: async () => [],
 			onAssetConflictCallback: async () => [],
