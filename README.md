@@ -4,6 +4,8 @@ This plugin syncs a folder of your Obsidian vault with your own [trip2g](https:/
 
 ## Caution
 
+**Two-way sync is off by default.** Until you turn it on for a folder, the plugin only sends notes to the server and never changes files in your vault.
+
 **Back up your vault before you turn on two-way sync.** With two-way sync on, the plugin writes files into your vault and can move files to the trash when they are gone from the server (it asks you first).
 
 We have not tested two-way sync next to another sync tool (Obsidian Sync, iCloud, Git) on the same folder. If you try it, back up first.
@@ -73,6 +75,15 @@ flowchart TD
 7. Deleted on the server (two-way sync): the plugin lists the files and asks whether to delete them locally. Deleted files go to the trash.
 8. Live pull is off by default. It needs two-way sync and at least one include pattern in the folder settings. It writes a note only when it is new or you have not edited it since the last sync. A note edited on both sides is left alone and flagged for the next manual sync, and deletions on the server still ask first.
 9. Auto-sync on save is off by default. It runs a few seconds after you save. In a one-way folder it only pushes; in a two-way folder it also pulls server edits. Conflicts are skipped either way.
+
+## Using git instead
+
+Your trip2g server is also a git repository: you can clone it, and a push to `master` updates the site (see [Git Sync](https://trip2g.com/en/user/git)). So the [Obsidian Git](https://github.com/Vinzent03/obsidian-git) plugin can do part of this plugin's job. The tradeoffs:
+
+- You need git installed on your computer, plus a git token from the admin panel.
+- The server only applies `.md` and `.html` changes from a push. Attachments still have to go through this plugin or the sync CLI.
+- Obsidian Git's own README calls its mobile support very unstable.
+- The trip2g docs suggest this plugin for day-to-day writing and git for tooling and bulk edits.
 
 ## Limitations
 
