@@ -1415,7 +1415,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 			const count = applyToAll ? remaining.length : 1;
 			for (let i = 0; i < count; i++) {
-				resolutions.push(resolution as AssetConflictResolution);
+				resolutions.push(resolution);
 			}
 
 			remaining = applyToAll ? [] : remaining.slice(1);

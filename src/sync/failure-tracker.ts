@@ -21,10 +21,20 @@ function errorStatus(error: unknown): number | undefined {
 	return typeof status === "number" ? status : undefined;
 }
 
+function errorMessage(error: unknown): string {
+	if (error instanceof Error) return error.message;
+	if (typeof error === "string") return error;
+	try {
+		return JSON.stringify(error) ?? "";
+	} catch {
+		return "";
+	}
+}
+
 export function classifyFailure(error: unknown): FailureKind {
 	const status = errorStatus(error);
 	if (status === 401 || status === 403) return "auth";
-	const msg = (error instanceof Error ? error.message : String(error ?? "")).toLowerCase();
+	const msg = errorMessage(error).toLowerCase();
 	if (msg.includes("401") || msg.includes("403") || msg.includes("unauthorized") || msg.includes("api key")) {
 		return "auth";
 	}
@@ -49,7 +59,7 @@ export class SyncFailureTracker {
 		this.failing.set(key, kind);
 		// Notify on transition into failure, or when the failure kind escalates/changes.
 		if (prev === kind) return null;
-		const message = error instanceof Error ? error.message : String(error ?? "");
+		const message = errorMessage(error);
 		return { kind, message };
 	}
 
