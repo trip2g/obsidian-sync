@@ -103,7 +103,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 			if (this.settings.syncDirs.length === 0) {
 				new Notice(t().noSyncDirsConfigured);
 			} else if (this.settings.syncDirs.length === 1) {
-				this.syncDirectory(this.settings.syncDirs[0]);
+				void this.syncDirectory(this.settings.syncDirs[0]);
 			} else {
 				new SyncDirectoryModal(this.app, this).open();
 			}
@@ -144,7 +144,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 				if (this.settings.syncDirs.length === 0) {
 					new Notice(t().noSyncDirsConfigured);
 				} else if (this.settings.syncDirs.length === 1) {
-					this.syncDirectory(this.settings.syncDirs[0]);
+					void this.syncDirectory(this.settings.syncDirs[0]);
 				} else {
 					new SyncDirectoryModal(this.app, this).open();
 				}
@@ -159,7 +159,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 					new Notice("No warnings from last sync");
 					return;
 				}
-				this.openWarningsView();
+				void this.openWarningsView();
 			},
 		});
 
@@ -205,12 +205,12 @@ export default class Trip2gSyncPlugin extends Plugin {
 		// Live-pull drives the badge in between; the bus is lossy so a rare
 		// full reconcile catches anything missed.
 		this.checkInterval = window.setInterval(() => {
-			this.checkForPendingChanges();
+			void this.checkForPendingChanges();
 		}, 300000);
 
 		// Check on window focus, and revive any dead live connections.
 		this.boundCheckOnFocus = () => {
-			this.checkForPendingChanges();
+			void this.checkForPendingChanges();
 			for (const conn of this.liveConnections.values()) {
 				conn.reconnectIfDead();
 			}
@@ -218,10 +218,10 @@ export default class Trip2gSyncPlugin extends Plugin {
 		window.addEventListener("focus", this.boundCheckOnFocus);
 
 		// Initial check after a short delay
-		window.setTimeout(() => this.checkForPendingChanges(), 3000);
+		window.setTimeout(() => void this.checkForPendingChanges(), 3000);
 
 		// Fetch all published URLs for status bar
-		window.setTimeout(() => this.fetchAllPublishedUrls(), 5000);
+		window.setTimeout(() => void this.fetchAllPublishedUrls(), 5000);
 
 		// Start live-pull connections.
 		this.reconcileLiveConnections();
@@ -653,7 +653,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 	async openWarningsView(): Promise<void> {
 		const existing = this.app.workspace.getLeavesOfType(WARNINGS_VIEW_TYPE);
 		if (existing.length > 0) {
-			this.app.workspace.revealLeaf(existing[0]);
+			void this.app.workspace.revealLeaf(existing[0]);
 			// A deferred leaf (Obsidian 1.7+) has a placeholder view without
 			// render(); it renders itself via onOpen once loaded, so skip here.
 			const view = existing[0].view;
@@ -1321,8 +1321,8 @@ export default class Trip2gSyncPlugin extends Plugin {
 		twoWaySync: boolean,
 		publishField: string
 	): Promise<void> {
-		return new Promise((resolve) => {
-			new MigrationModal(this.app, plan.conflicts.length, async (trustServer) => {
+		return new Promise((resolve, reject) => {
+			const applyChoice = async (trustServer: boolean): Promise<void> => {
 				if (trustServer) {
 					// Trust server: update lastSyncedHash to remote for all files
 					for (const c of plan.classifications) {
@@ -1369,7 +1369,9 @@ export default class Trip2gSyncPlugin extends Plugin {
 				}
 
 				await this.saveSyncStates();
-				resolve();
+			};
+			new MigrationModal(this.app, plan.conflicts.length, (trustServer) => {
+				applyChoice(trustServer).then(resolve, reject);
 			}).open();
 		});
 	}
@@ -1434,13 +1436,14 @@ export default class Trip2gSyncPlugin extends Plugin {
 			return true;
 		}
 
-		return new Promise((resolve) => {
-			new PushConfirmModal(this.app, paths, async (proceed, dontAskAgain) => {
-				if (dontAskAgain) {
-					this.settings.skipPushConfirmation = true;
-					await this.saveSettings();
+		return new Promise((resolve, reject) => {
+			new PushConfirmModal(this.app, paths, (proceed, dontAskAgain) => {
+				if (!dontAskAgain) {
+					resolve(proceed);
+					return;
 				}
-				resolve(proceed);
+				this.settings.skipPushConfirmation = true;
+				this.saveSettings().then(() => resolve(proceed), reject);
 			}).open();
 		});
 	}
@@ -1525,9 +1528,9 @@ class SyncDirectoryModal extends Modal {
 			dirEl.createEl("p", { text: `API URL: ${dir.apiUrl}` });
 
 			const syncBtn = dirEl.createEl("button", { text: i18n.syncThisDirectory });
-			syncBtn.addEventListener("click", async () => {
+			syncBtn.addEventListener("click", () => {
 				this.close();
-				await this.plugin.syncDirectory(dir);
+				void this.plugin.syncDirectory(dir);
 			});
 		});
 	}
@@ -1568,12 +1571,12 @@ class SyncWarningsView extends ItemView {
 		});
 		if (!this.allWarningsLoaded) {
 			const loadBtn = toolbar.createEl("button", { text: "Load All", cls: "trip2g-warnings-action-btn" });
-			loadBtn.addEventListener("click", () => this.loadAllWarnings());
+			loadBtn.addEventListener("click", () => void this.loadAllWarnings());
 		}
 		if (data.length > 0) {
 			const copyAllBtn = toolbar.createEl("button", { text: "Copy All (JSON)", cls: "trip2g-warnings-action-btn" });
 			copyAllBtn.addEventListener("click", () => {
-				navigator.clipboard.writeText(JSON.stringify(data, null, 2)).then(() => new Notice("Copied"));
+				void navigator.clipboard.writeText(JSON.stringify(data, null, 2)).then(() => new Notice("Copied"));
 			});
 		}
 		// Mobile has no tab close button in reach, so the view carries its own.
@@ -1607,7 +1610,7 @@ class SyncWarningsView extends ItemView {
 
 			// Open file in Obsidian tab
 			const openFileBtn = actionsTd.createEl("button", { text: "Open in Tab" });
-			openFileBtn.addEventListener("click", async () => {
+			openFileBtn.addEventListener("click", () => {
 				const syncDir = this.plugin.settings.syncDirs[0];
 				if (!syncDir) return;
 				const base = syncDir.path && syncDir.path !== "/" ? syncDir.path + "/" : "";
@@ -1615,7 +1618,7 @@ class SyncWarningsView extends ItemView {
 				const file = this.plugin.app.vault.getAbstractFileByPath(fullPath);
 				if (file instanceof TFile) {
 					const leaf = this.plugin.app.workspace.getLeaf("tab");
-					await leaf.openFile(file);
+					void leaf.openFile(file);
 				} else {
 					new Notice(`File not found: ${w.path}`);
 				}
@@ -1631,7 +1634,7 @@ class SyncWarningsView extends ItemView {
 			const copyBtn = actionsTd.createEl("button", { text: "Copy Warning" });
 			copyBtn.addEventListener("click", () => {
 				const text = `[${w.level}] ${w.path}: ${w.message}${w.url ? `\n${w.url}` : ""}`;
-				navigator.clipboard.writeText(text).then(() => new Notice("Copied"));
+				void navigator.clipboard.writeText(text).then(() => new Notice("Copied"));
 			});
 		}
 	}
@@ -1701,7 +1704,7 @@ class SyncSettingTab extends PluginSettingTab {
 						apiUrl: "",
 						error: undefined,
 					});
-					this.plugin.saveSettings();
+					void this.plugin.saveSettings();
 					this.display();
 				});
 		});
@@ -1723,7 +1726,7 @@ class SyncSettingTab extends PluginSettingTab {
 						}
 					}
 
-					this.plugin.saveSettings();
+					void this.plugin.saveSettings();
 					this.display();
 
 					new Notice(i18n.successfulConnections(successCount, failCount));
@@ -1744,7 +1747,7 @@ class SyncSettingTab extends PluginSettingTab {
 					.onClick(async () => {
 						const error = await this.plugin.testConnection(dir);
 						this.plugin.settings.syncDirs[dirIndex].error = error;
-						this.plugin.saveSettings();
+						void this.plugin.saveSettings();
 						this.display();
 
 						if (error === null) {
@@ -1775,7 +1778,7 @@ class SyncSettingTab extends PluginSettingTab {
 					.onClick(() => {
 						if (confirm(i18n.removeDirectoryConfirm)) {
 							this.plugin.settings.syncDirs.splice(dirIndex, 1);
-							this.plugin.saveSettings();
+							void this.plugin.saveSettings();
 							this.display();
 						}
 					});
@@ -1798,7 +1801,7 @@ class SyncSettingTab extends PluginSettingTab {
 						.onChange((newApiUrl) => {
 							this.plugin.settings.syncDirs[dirIndex].apiUrl = newApiUrl;
 							this.plugin.settings.syncDirs[dirIndex].error = undefined;
-							this.plugin.saveSettings();
+							void this.plugin.saveSettings();
 						});
 				});
 
@@ -1812,7 +1815,7 @@ class SyncSettingTab extends PluginSettingTab {
 						.onChange((newApiKey) => {
 							this.plugin.settings.syncDirs[dirIndex].apiKey = newApiKey;
 							this.plugin.settings.syncDirs[dirIndex].error = undefined;
-							this.plugin.saveSettings();
+							void this.plugin.saveSettings();
 						});
 					text.inputEl.type = "password";
 				});
@@ -1828,7 +1831,7 @@ class SyncSettingTab extends PluginSettingTab {
 						.onChange((newPath) => {
 							this.plugin.settings.syncDirs[dirIndex].path = newPath;
 							this.plugin.settings.syncDirs[dirIndex].error = undefined;
-							this.plugin.saveSettings();
+							void this.plugin.saveSettings();
 						});
 				});
 
@@ -1841,7 +1844,7 @@ class SyncSettingTab extends PluginSettingTab {
 						.setValue(dir.publishField || "")
 						.onChange((newField) => {
 							this.plugin.settings.syncDirs[dirIndex].publishField = newField || undefined;
-							this.plugin.saveSettings();
+							void this.plugin.saveSettings();
 						});
 				});
 
