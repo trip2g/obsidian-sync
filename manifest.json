@@ -3,7 +3,7 @@
 	"name": "trip2g sync",
 	"version": "1.0.0",
 	"minAppVersion": "1.8.7",
-	"description": "Upload your notes to trip2g system.",
+	"description": "Make a website from your vault. Landing pages, digital gardens, dashboards and RAG for AI agents, live on your own server.",
 	"author": "Alexey Yurchenko",
 	"authorUrl": "https://trip2g.com",
 	"isDesktopOnly": false

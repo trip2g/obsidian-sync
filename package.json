@@ -1,7 +1,7 @@
 {
 	"name": "obsidian-trip2g",
 	"version": "1.0.0",
-	"description": "This is a sample plugin for Obsidian (https://obsidian.md)",
+	"description": "Make a website from your vault. Landing pages, digital gardens, dashboards and RAG for AI agents, live on your own server.",
 	"engines": {
 		"node": ">=20"
 	},
