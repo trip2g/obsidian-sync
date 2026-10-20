@@ -38,7 +38,6 @@ import type {
 } from "./sync/types";
 import { DEFAULT_SETTINGS, DEFAULT_SYNC_STATE } from "./types";
 import { splitLegacySyncState } from "./sync/legacy-sync-state";
-import { trustServerBase } from "./sync/trust-server";
 
 const SYNC_STATE_KEY = "sync-state";
 const PUBLISHED_URLS_KEY = "published-urls";
@@ -1224,9 +1223,10 @@ export default class Trip2gSyncPlugin extends Plugin {
 			// Step 2: Check if this is first sync (migration scenario)
 			const isFirstSync = Object.keys(syncState.files).length === 0;
 
-			if (isFirstSync && plan.conflicts.length > 0) {
-				// Show migration modal and handle specially
-				await this.handleMigrationNew(env, plan, syncState, twoWaySync, publishField);
+			// Only a two-way folder can take the server's side, so a one-way folder
+			// skips the choice and pushes its local versions after the usual confirm.
+			if (isFirstSync && plan.conflicts.length > 0 && twoWaySync) {
+				await this.handleMigrationNew(env, plan, syncState, publishField);
 			} else {
 				// Normal sync flow: filter and execute
 				const filteredPlan = filterPlan(plan, {
@@ -1328,19 +1328,21 @@ export default class Trip2gSyncPlugin extends Plugin {
 		env: ObsidianSyncEnv,
 		plan: import("./sync/types").SyncPlan,
 		syncState: SyncState,
-		twoWaySync: boolean,
 		publishField: string
 	): Promise<void> {
 		return new Promise((resolve, reject) => {
 			const applyChoice = async (trustServer: boolean): Promise<void> => {
 				if (trustServer) {
-					Object.assign(syncState.files, trustServerBase(plan.classifications, twoWaySync));
+					for (const c of plan.classifications) {
+						if (c.remoteHash) {
+							syncState.files[c.path] = c.remoteHash;
+						}
+					}
 
-					// Create a plan that only pulls (conflicts become pulls). A one-way
-					// folder never writes to the vault, so it pulls nothing.
+					// Conflicts and server-only files become pulls.
 					const pullPlan: import("./sync/types").SyncPlan = {
 						classifications: [],
-						pulls: twoWaySync ? [...plan.conflicts, ...plan.remoteOnly] : [],
+						pulls: [...plan.conflicts, ...plan.remoteOnly],
 						pushes: [],
 						conflicts: [],
 						localOnly: [],
@@ -1350,20 +1352,20 @@ export default class Trip2gSyncPlugin extends Plugin {
 						unchanged: plan.unchanged,
 					};
 
-					const result = await executePlan(env, pullPlan, { twoWaySync });
+					const result = await executePlan(env, pullPlan, { twoWaySync: true });
 					new Notice(t().pulledFiles(result.pulled));
 					this.reportSyncErrors(result.errors);
 				} else {
 					// Review each conflict - run normal flow
 					const folder = (env as unknown as { folder: TFolder }).folder;
 					const filteredPlan = filterPlan(plan, {
-						twoWaySync,
+						twoWaySync: true,
 						hasPublishFields: publishField
 							? (path: string) => this.hasPublishFieldByPath(path, folder, publishField)
 							: undefined,
 					});
 
-					const result = await executePlan(env, filteredPlan, { twoWaySync });
+					const result = await executePlan(env, filteredPlan, { twoWaySync: true });
 
 					if (result.pulled > 0) {
 						new Notice(t().pulledFiles(result.pulled));
