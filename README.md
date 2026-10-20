@@ -70,7 +70,7 @@ flowchart TD
 2. Changed only locally, or new locally: pushed to the server.
 3. Changed only on the server, or new on the server: pulled into the vault. This needs two-way sync, which is off by default. Without it nothing is written to your vault, and a note changed on both sides is pushed, so the local version wins.
 4. Changed on both sides (two-way sync): the conflict view shows both versions and lets you pick "Keep local", "Use server", "Keep both" (the server version is saved as `note (server).md`) or "Skip".
-5. On the first sync, when local and server copies differ, you choose "Trust server for all" or "Review each conflict".
+5. On the first sync of a two-way folder, when local and server copies differ, you choose "Trust server for all" (take the server versions) or "Review each conflict". A one-way folder never takes the server side: the local versions are pushed, after the usual confirm list.
 6. Deleted locally: the note is hidden on the server.
 7. Deleted on the server (two-way sync): the plugin lists the files and asks whether to delete them locally. Deleted files go to the trash.
 8. Live pull is off by default. It needs two-way sync and at least one include pattern in the folder settings. It writes a note only when it is new or you have not edited it since the last sync. A note edited on both sides is left alone and flagged for the next manual sync, and deletions on the server still ask first.

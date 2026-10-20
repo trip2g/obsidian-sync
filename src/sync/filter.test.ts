@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { filterPlan } from "./filter";
+import { classifyFile } from "./classify";
 import type { SyncPlan, FileClassification } from "./types";
 
 // Helper to create a classification
@@ -445,5 +446,32 @@ describe("filterPlan", () => {
 			// unchanged files are not filtered by publishFields
 			expect(filtered.unchanged).toBe(2);
 		});
+	});
+});
+
+describe("one-way first sync", () => {
+	// Empty sync state: nothing synced before on this device.
+	const files: [string, string | null, string | null][] = [
+		["both.md", "L", "R"],
+		["server-only.md", null, "R2"],
+		["local-only.md", "L3", null],
+	];
+	const classifications = files.map(([path, local, remote]) => ({
+		path,
+		action: classifyFile(local, remote, null),
+		localHash: local,
+		remoteHash: remote,
+		lastSyncedHash: null,
+	}));
+
+	it("pushes local versions and never pulls, writes or hides", () => {
+		const filtered = filterPlan(makePlan(classifications), { twoWaySync: false });
+
+		expect(filtered.pushes.map((c) => c.path).sort()).toEqual(["both.md"]);
+		expect(filtered.localOnly.map((c) => c.path)).toEqual(["local-only.md"]);
+		expect(filtered.pulls).toHaveLength(0);
+		expect(filtered.remoteOnly).toHaveLength(0);
+		expect(filtered.serverDeleted).toHaveLength(0);
+		expect(filtered.localDeleted).toHaveLength(0);
 	});
 });
