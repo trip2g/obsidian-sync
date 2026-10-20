@@ -711,7 +711,6 @@ export default class Trip2gSyncPlugin extends Plugin {
 	 */
 	openExternalUrl(url: string): void {
 		try {
-			// eslint-disable-next-line @typescript-eslint/no-var-requires
 			const electron = (window as unknown as { require?: (m: string) => unknown }).require?.("electron") as
 				| { shell?: { openExternal?: (u: string) => Promise<void> } }
 				| undefined;
