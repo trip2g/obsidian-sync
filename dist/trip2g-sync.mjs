@@ -1749,8 +1749,7 @@ var init_esm2 = __esm({
 });
 
 // src/sync/cli/cmd.ts
-import * as fs5 from "fs";
-import * as path4 from "path";
+import * as fs6 from "fs";
 
 // src/sync/cli/env.ts
 import * as fs2 from "fs";
@@ -1935,6 +1934,7 @@ var en = {
   pushed: "Pushed",
   livePulledFiles: /* @__PURE__ */ __name((count) => `Live-pulled ${count} file${count === 1 ? "" : "s"} from server`, "livePulledFiles"),
   livePullConflict: /* @__PURE__ */ __name((count) => `${count} note${count === 1 ? "" : "s"} changed on server but also edited locally \u2014 sync to resolve`, "livePullConflict"),
+  legacyPluginEnabled: "trip2g sync moved to the id ttgsync. Turn off the old \u201Ctrip2g sync\u201D in Settings \u2192 Community plugins, then sync again.",
   syncFailedAuth: "Trip2g: your changes aren't syncing \u2014 check your API key and site URL in settings.",
   syncFailedGeneric: "Trip2g: sync failed \u2014 couldn't reach the server. Your changes are saved locally and will retry.",
   // Status bar
@@ -2078,6 +2078,7 @@ var ru = {
   pushed: "\u041E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u043E",
   livePulledFiles: /* @__PURE__ */ __name((count) => `Live-pull: \u043F\u043E\u043B\u0443\u0447\u0435\u043D\u043E ${count} \u0444\u0430\u0439\u043B\u043E\u0432 \u0441 \u0441\u0435\u0440\u0432\u0435\u0440\u0430`, "livePulledFiles"),
   livePullConflict: /* @__PURE__ */ __name((count) => `${count} \u0437\u0430\u043C\u0435\u0442\u043E\u043A \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u044B \u043D\u0430 \u0441\u0435\u0440\u0432\u0435\u0440\u0435 \u0438 \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u043E \u2014 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u0443\u0439\u0442\u0435 \u0434\u043B\u044F \u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043D\u0438\u044F`, "livePullConflict"),
+  legacyPluginEnabled: "trip2g sync \u043F\u0435\u0440\u0435\u0435\u0445\u0430\u043B \u043D\u0430 id ttgsync. \u0412\u044B\u043A\u043B\u044E\u0447\u0438\u0442\u0435 \u0441\u0442\u0430\u0440\u044B\u0439 \xABtrip2g sync\xBB \u0432 \u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u2192 \u0421\u0442\u043E\u0440\u043E\u043D\u043D\u0438\u0435 \u043F\u043B\u0430\u0433\u0438\u043D\u044B \u0438 \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044E \u0441\u043D\u043E\u0432\u0430.",
   syncFailedAuth: "Trip2g: \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F \u043D\u0435 \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u0443\u044E\u0442\u0441\u044F \u2014 \u043F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 API-\u043A\u043B\u044E\u0447 \u0438 URL \u0441\u0430\u0439\u0442\u0430 \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445.",
   syncFailedGeneric: "Trip2g: \u0441\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0430\u0446\u0438\u044F \u043D\u0435 \u0443\u0434\u0430\u043B\u0430\u0441\u044C \u2014 \u0441\u0435\u0440\u0432\u0435\u0440 \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D. \u0418\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u044B \u043B\u043E\u043A\u0430\u043B\u044C\u043D\u043E, \u043F\u043E\u043F\u0440\u043E\u0431\u0443\u0435\u043C \u0435\u0449\u0451 \u0440\u0430\u0437.",
   // Status bar
@@ -3173,6 +3174,82 @@ async function runIntrospectCommand(opts) {
 }
 __name(runIntrospectCommand, "runIntrospectCommand");
 
+// src/sync/cli/data-json.ts
+import * as fs3 from "fs";
+import * as path3 from "path";
+var PLUGIN_IDS = ["ttgsync", "trip2g"];
+function findDataJsonPath(vaultRoot, exists) {
+  for (const id of PLUGIN_IDS) {
+    const p = path3.join(vaultRoot, ".obsidian", "plugins", id, "data.json");
+    if (exists(p)) return p;
+  }
+  return null;
+}
+__name(findDataJsonPath, "findDataJsonPath");
+function validateServerUrl(url) {
+  if (!url) return "url is required";
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return `not a valid URL, expected http or https: ${url}`;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return `expected http or https: ${url}`;
+  }
+  if (parsed.search || parsed.hash || url.includes("?") || url.includes("#")) {
+    return `no query or fragment allowed: ${url}`;
+  }
+  if (/\/_system(\/|$)/.test(parsed.pathname)) {
+    return `give the server base, without /_system/graphql: ${url}`;
+  }
+  if (url.endsWith("/")) {
+    return `remove the trailing slash: ${url}`;
+  }
+  return null;
+}
+__name(validateServerUrl, "validateServerUrl");
+function setApiUrl(data, url) {
+  const dirs = Array.isArray(data.syncDirs) ? data.syncDirs : [];
+  let changed = 0;
+  const syncDirs = dirs.map((dir) => {
+    if (dir.apiUrl === url) return dir;
+    changed++;
+    return { ...dir, apiUrl: url };
+  });
+  return { data: { ...data, syncDirs }, changed, total: dirs.length };
+}
+__name(setApiUrl, "setApiUrl");
+function runUpdateApiUrl(opts) {
+  const url = opts.url ?? "";
+  const invalid = validateServerUrl(url);
+  if (invalid) {
+    return { stdout: "", stderr: `usage: trip2g-sync.mjs update-api-url <url>
+${invalid}`, exitCode: 2 };
+  }
+  const file = findDataJsonPath(opts.cwd, (p) => fs3.existsSync(p));
+  if (!file) {
+    return {
+      stdout: "",
+      stderr: `no data.json found: looked in .obsidian/plugins/ttgsync/ and .obsidian/plugins/trip2g/ under ${opts.cwd}. Run from the vault root.`,
+      exitCode: 1
+    };
+  }
+  let data;
+  try {
+    data = JSON.parse(fs3.readFileSync(file, "utf8"));
+  } catch (e) {
+    return { stdout: "", stderr: `cannot read ${file}: ${e.message}`, exitCode: 1 };
+  }
+  const res = setApiUrl(data, url);
+  if (res.changed === 0) {
+    return { stdout: `apiUrl already ${url} in all ${res.total} syncDirs (${file})`, stderr: "", exitCode: 0 };
+  }
+  writeFileAtomic(file, JSON.stringify(res.data, null, 2));
+  return { stdout: `apiUrl set to ${url} in ${res.changed} of ${res.total} syncDirs (${file})`, stderr: "", exitCode: 0 };
+}
+__name(runUpdateApiUrl, "runUpdateApiUrl");
+
 // src/sync/classify.ts
 function classifyFile(localHash, remoteHash, lastSyncedHash) {
   if (localHash === null && remoteHash === null) {
@@ -4076,8 +4153,8 @@ function pruneNeedsForce(summary) {
 __name(pruneNeedsForce, "pruneNeedsForce");
 
 // src/sync/cli/watch.ts
-import * as fs3 from "fs";
-import * as path3 from "path";
+import * as fs4 from "fs";
+import * as path4 from "path";
 
 // src/sync/live-apply.ts
 async function applyLiveChanges(env, changes, syncState) {
@@ -4343,12 +4420,12 @@ function log(message) {
 __name(log, "log");
 function readPluginVersion() {
   const candidates = [
-    path3.join(process.cwd(), "manifest.json"),
-    path3.join(__dirname, "..", "..", "..", "manifest.json")
+    path4.join(process.cwd(), "manifest.json"),
+    path4.join(__dirname, "..", "..", "..", "manifest.json")
   ];
   for (const file of candidates) {
     try {
-      const data = JSON.parse(fs3.readFileSync(file, "utf-8"));
+      const data = JSON.parse(fs4.readFileSync(file, "utf-8"));
       if (typeof data?.version === "string" && data.version) {
         return data.version;
       }
@@ -4359,7 +4436,7 @@ function readPluginVersion() {
 }
 __name(readPluginVersion, "readPluginVersion");
 function isWatchablePath(relPath) {
-  const norm = relPath.split(path3.sep).join("/");
+  const norm = relPath.split(path4.sep).join("/");
   if (norm.startsWith(".trip2g-memory/") || norm === ".trip2g-memory") {
     return false;
   }
@@ -4512,7 +4589,7 @@ async function runWatch(args, deps = {}) {
     if (draining) {
       return;
     }
-    const rel = path3.isAbsolute(filePath) ? path3.relative(path3.resolve(args.folder), filePath) : filePath;
+    const rel = path4.isAbsolute(filePath) ? path4.relative(path4.resolve(args.folder), filePath) : filePath;
     if (!isWatchablePath(rel)) {
       return;
     }
@@ -4601,9 +4678,9 @@ async function createWatcher(folder, deps) {
     };
     return { watcher, usingFallback: false };
   } catch {
-    const resolved = path3.resolve(folder);
+    const resolved = path4.resolve(folder);
     const listeners = [];
-    const fsWatcher = fs3.watch(resolved, { recursive: true }, (_event, filename) => {
+    const fsWatcher = fs4.watch(resolved, { recursive: true }, (_event, filename) => {
       if (!filename) return;
       const rel = typeof filename === "string" ? filename : filename.toString();
       for (const l of listeners) {
@@ -4649,7 +4726,7 @@ function formatPlanSummary(plan, conflictResolution) {
 __name(formatPlanSummary, "formatPlanSummary");
 
 // src/sync/cli/sync-report.ts
-import * as fs4 from "fs";
+import * as fs5 from "fs";
 var EXIT_FAILURE = 1;
 function printSyncResult(result, totalActions, updatedOutput) {
   const upToDate = totalActions === 0 && result.assetsUploaded === 0 && result.assetsDownloaded === 0 && result.errors.length === 0;
@@ -4706,7 +4783,7 @@ function printSyncResult(result, totalActions, updatedOutput) {
       }
     }
     if (updatedOutput) {
-      fs4.writeFileSync(updatedOutput, JSON.stringify(updatedUrls, null, 2));
+      fs5.writeFileSync(updatedOutput, JSON.stringify(updatedUrls, null, 2));
       console.log(`\u{1F4BE} Saved to ${updatedOutput}`);
     } else {
       console.log(`\u{1F4A1} --updated-output $(mktemp /tmp/updated-XXXXXX.json)`);
@@ -4728,8 +4805,9 @@ __name(printSyncResult, "printSyncResult");
 // src/sync/cli/cmd.ts
 function readDataJson() {
   try {
-    const dataPath = path4.join(process.cwd(), ".obsidian", "plugins", "trip2g", "data.json");
-    const data = JSON.parse(fs5.readFileSync(dataPath, "utf8"));
+    const dataPath = findDataJsonPath(process.cwd(), (p) => fs6.existsSync(p));
+    if (!dataPath) return {};
+    const data = JSON.parse(fs6.readFileSync(dataPath, "utf8"));
     const dir = data?.syncDirs?.[0];
     if (!dir) return {};
     return {
@@ -4888,8 +4966,11 @@ Arguments:
                            Not supported together with --two-way.
 
 Options:
-  -u, --api-url <url>      GraphQL endpoint (default: $ENDPOINT or .obsidian/plugins/trip2g/data.json or http://localhost:8081/_system/graphql)
-  -k, --api-key <key>      API key (default: $API_KEY)
+  -u, --api-url <url>      GraphQL endpoint (default: $ENDPOINT, then data.json, then http://localhost:8081/_system/graphql)
+  -k, --api-key <key>      API key (default: $API_KEY, then data.json)
+
+  data.json is read from the current directory:
+  .obsidian/plugins/ttgsync/data.json, else .obsidian/plugins/trip2g/data.json.
   -2, --two-way            Enable two-way sync (pull changes from server).
                            Notes that exist on the server but not locally are
                            DOWNLOADED as new local files; they are reported on
@@ -4962,6 +5043,11 @@ Subcommands:
   graphql --introspect '<pattern>'
                            Show schema types matching the pattern, with their
                            fields and input fields (e.g. AdminMutation, CreateUser).
+  update-api-url <url>     Set apiUrl on every syncDirs entry of data.json to
+                           <url>, the server base (http or https, no trailing
+                           slash, no /_system/graphql), e.g. http://127.0.0.1:8080.
+                           Run from the vault root. apiKey is left as it is.
+                           An invalid URL is rejected, not rewritten.
 
 Environment Variables:
   TRIP2G_ENDPOINT    GraphQL endpoint URL
@@ -5056,6 +5142,13 @@ async function main() {
   }
   if (process.argv[2] === "graphql") {
     await cmdGraphQL();
+    return;
+  }
+  if (process.argv[2] === "update-api-url") {
+    const result2 = runUpdateApiUrl({ cwd: process.cwd(), url: process.argv[3] });
+    if (result2.stdout) console.log(result2.stdout);
+    if (result2.stderr) console.error(result2.stderr);
+    if (result2.exitCode !== 0) process.exit(result2.exitCode);
     return;
   }
   const args = parseArgs();
