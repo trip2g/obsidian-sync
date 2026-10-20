@@ -81,7 +81,7 @@ flowchart TD
 Your trip2g server is also a git repository: you can clone it, and a push to `master` updates the site (see [Git Sync](https://trip2g.com/en/user/git)). So the [Obsidian Git](https://github.com/Vinzent03/obsidian-git) plugin can do part of this plugin's job. The tradeoffs:
 
 - You need git installed on your computer, plus a git token from the admin panel.
-- The server only applies `.md` and `.html` changes from a push. Attachments still have to go through this plugin or the sync CLI.
+- The server only applies `.md` and `.html` files from a push. Attachments and `.canvas`, `.base`, `.excalidraw` and `.html.json` files still have to go through this plugin or the sync CLI.
 - Obsidian Git's own README calls its mobile support very unstable.
 - The trip2g docs suggest this plugin for day-to-day writing and git for tooling and bulk edits.
 
