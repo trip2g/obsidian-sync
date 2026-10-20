@@ -47,6 +47,24 @@ export ENDPOINT=https://yoursite.com/graphql
 node dist/trip2g-sync.mjs --folder ./vault
 ```
 
+### Credentials from the plugin
+
+Run from a vault root, the CLI needs no flags: it reads `apiUrl` and `apiKey`
+from the plugin's `data.json`, in `.obsidian/plugins/ttgsync/` or, under the
+plugin's old id, `.obsidian/plugins/trip2g/`. When both exist, `ttgsync` wins.
+Flags and environment variables still take priority.
+
+To point a vault at another server without touching the key:
+
+```bash
+node trip2g-sync.mjs update-api-url http://127.0.0.1:8080
+```
+
+It sets `apiUrl` on every `syncDirs` entry of that same `data.json`. The URL is
+the server base: http or https, no trailing slash, no `/_system/graphql`. A URL
+that breaks these rules is rejected, not rewritten. It exits 0 when the value
+was already set, and 1 when there is no `data.json`.
+
 ## Options
 
 | Option | Short | Description |

@@ -106,6 +106,14 @@ This plugin is not yet available in the official Obsidian Community Plugins dire
 5. Click "Add Plugin"
 6. Enable "trip2g sync" in Obsidian Settings → Community Plugins
 
+### Moving from the old plugin id
+
+The plugin used to have the id `trip2g`; it is now `ttgsync`, because the Obsidian directory only accepts letters and hyphens. If you installed it with BRAT before, the next update lands in a new folder, `.obsidian/plugins/ttgsync/`, and you see "trip2g sync" twice in Community plugins.
+
+The new copy takes your settings from the old one on first start, so there is nothing to set up again. While the old copy is still on, the new one won't sync and tells you so, because two copies syncing the same notes would get in each other's way. Turn off the old "trip2g sync" in Settings → Community plugins, and that's it.
+
+The old folder `.obsidian/plugins/trip2g/` can be deleted once nothing else reads it. The sync CLI looks for its settings in `plugins/ttgsync/` first and falls back to `plugins/trip2g/`.
+
 ## Configuration
 
 1. Open Obsidian Settings → trip2g sync.
@@ -146,7 +154,7 @@ npm run build
 1. Clone this repository to your vault's plugins folder:
    ```bash
    cd /path/to/vault/.obsidian/plugins
-   git clone https://github.com/trip2g/obsidian-sync trip2g
+   git clone https://github.com/trip2g/obsidian-sync ttgsync
    ```
 2. Install dependencies: `npm install`
 3. Build the plugin: `npm run dev`
