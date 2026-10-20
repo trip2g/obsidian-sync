@@ -235,7 +235,7 @@ export class LivePullConnection {
 			data?: { noteChanges?: { changes?: NoteChangeItem[] } };
 		};
 		try {
-			parsed = JSON.parse(payload);
+			parsed = JSON.parse(payload) as typeof parsed;
 		} catch (e) {
 			console.warn("[Trip2g Sync] Live-pull bad payload:", e);
 			return;
