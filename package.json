@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-trip2g",
-	"version": "1.0.4",
+	"version": "1.0.5",
 	"description": "Publish a website from your vault and share the parts you choose with friends, colleagues or subscribers. Link your vaults into a knowledge network with them. Landing pages, digital gardens, dashboards and RAG for AI agents, live on your own server.",
 	"engines": {
 		"node": ">=20"
