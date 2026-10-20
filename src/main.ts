@@ -37,6 +37,7 @@ import type {
 	Progress,
 } from "./sync/types";
 import { DEFAULT_SETTINGS, DEFAULT_SYNC_STATE } from "./types";
+import { splitLegacySyncState } from "./sync/legacy-sync-state";
 
 const SYNC_STATE_KEY = "sync-state";
 const PUBLISHED_URLS_KEY = "published-urls";
@@ -589,17 +590,20 @@ export default class Trip2gSyncPlugin extends Plugin {
 	async loadSyncStates() {
 		let parsed = this.app.loadLocalStorage(SYNC_STATE_KEY) as Record<string, SyncState> | null;
 		if (!parsed) {
-			// Older versions kept the state in a global key shared by all vaults. The
-			// first vault to load after the upgrade takes it over.
+			// Older versions kept the state in a global key shared by all vaults. Take
+			// only this vault's servers; two vaults on one server: the first to load wins.
 			const legacy = localStorage.getItem(SYNC_STATE_KEY);
-			if (legacy) {
-				try {
-					parsed = JSON.parse(legacy) as Record<string, SyncState>;
-					this.app.saveLocalStorage(SYNC_STATE_KEY, parsed);
-				} catch {
-					// Ignore parsing errors
+			const split = legacy
+				? splitLegacySyncState(legacy, this.settings.syncDirs.map((d) => d.apiUrl))
+				: null;
+			if (split && Object.keys(split.adopted).length > 0) {
+				parsed = split.adopted;
+				this.app.saveLocalStorage(SYNC_STATE_KEY, parsed);
+				if (Object.keys(split.remainder).length > 0) {
+					localStorage.setItem(SYNC_STATE_KEY, JSON.stringify(split.remainder));
+				} else {
+					localStorage.removeItem(SYNC_STATE_KEY);
 				}
-				localStorage.removeItem(SYNC_STATE_KEY);
 			}
 		}
 		for (const [key, value] of Object.entries(parsed ?? {})) {
