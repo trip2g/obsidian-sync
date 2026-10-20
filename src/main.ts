@@ -618,14 +618,11 @@ export default class Trip2gSyncPlugin extends Plugin {
 	}
 
 	loadPublishedUrls(): void {
-		const stored = localStorage.getItem(PUBLISHED_URLS_KEY);
-		if (stored) {
-			try {
-				const parsed = JSON.parse(stored) as Record<string, string>;
-				this.publishedUrls = new Map(Object.entries(parsed));
-			} catch {
-				// ignore
-			}
+		// The old global cache mixed every vault's URLs; drop it, startup refetches.
+		localStorage.removeItem(PUBLISHED_URLS_KEY);
+		const stored = this.app.loadLocalStorage(PUBLISHED_URLS_KEY) as Record<string, string> | null;
+		if (stored && typeof stored === "object") {
+			this.publishedUrls = new Map(Object.entries(stored));
 		}
 	}
 
@@ -656,7 +653,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 		for (const [path, url] of this.publishedUrls) {
 			obj[path] = url;
 		}
-		localStorage.setItem(PUBLISHED_URLS_KEY, JSON.stringify(obj));
+		this.app.saveLocalStorage(PUBLISHED_URLS_KEY, obj);
 	}
 
 	async openWarningsView(): Promise<void> {
