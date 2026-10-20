@@ -1209,9 +1209,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 			});
 
 			// Step 1: Classify all files
-			console.time("[Trip2g Sync] Classify files");
 			const plan = await classifySync(env);
-			console.timeEnd("[Trip2g Sync] Classify files");
 
 			// Step 2: Check if this is first sync (migration scenario)
 			const isFirstSync = Object.keys(syncState.files).length === 0;
@@ -1227,8 +1225,6 @@ export default class Trip2gSyncPlugin extends Plugin {
 						? (path: string) => this.hasPublishFieldByPath(path, folder, publishField)
 						: undefined,
 				});
-
-				console.log(`[Trip2g Sync] Plan: pulls=${filteredPlan.pulls.length}, pushes=${filteredPlan.pushes.length}, conflicts=${filteredPlan.conflicts.length}, localOnly=${filteredPlan.localOnly.length}, unchanged=${filteredPlan.unchanged}`);
 
 				const result = await executePlan(env, filteredPlan, { twoWaySync });
 
