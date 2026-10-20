@@ -8,7 +8,7 @@
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
-		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"build": "tsc -p tsconfig.build.json -noEmit -skipLibCheck && node esbuild.config.mjs production",
 		"build:cli": "node esbuild.cli.mjs",
 		"build:browser": "node esbuild.browser.mjs",
 		"build:browser:watch": "node esbuild.browser.mjs --watch",

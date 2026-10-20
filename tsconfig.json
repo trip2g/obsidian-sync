@@ -24,8 +24,6 @@
     "**/*.ts"
   ],
   "exclude": [
-    "src/sync/browser",
-    "src/sync/cli",
-    "**/*.test.ts"
+    "src/sync/browser"
   ]
 }
