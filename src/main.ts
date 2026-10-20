@@ -1340,10 +1340,11 @@ export default class Trip2gSyncPlugin extends Plugin {
 						}
 					}
 
-					// Create a plan that only pulls (conflicts become pulls)
+					// Create a plan that only pulls (conflicts become pulls). A one-way
+					// folder never writes to the vault, so it pulls nothing.
 					const pullPlan: import("./sync/types").SyncPlan = {
 						classifications: [],
-						pulls: [...plan.conflicts, ...plan.remoteOnly],
+						pulls: twoWaySync ? [...plan.conflicts, ...plan.remoteOnly] : [],
 						pushes: [],
 						conflicts: [],
 						localOnly: [],
