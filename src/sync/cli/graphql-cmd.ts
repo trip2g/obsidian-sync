@@ -7,7 +7,8 @@
  * carries admin rights over MCP, so this is the lane where admin queries and
  * mutations actually work.
  *
- * Exists for agents: the credentials are in .obsidian/plugins/trip2g/data.json
+ * Exists for agents: the credentials are in the plugin's data.json
+ * (.obsidian/plugins/ttgsync/ or, under the old id, .obsidian/plugins/trip2g/)
  * and the endpoint is derived from it, so nothing has to be assembled by hand.
  */
 

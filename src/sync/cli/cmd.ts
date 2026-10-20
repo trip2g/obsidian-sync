@@ -10,13 +10,17 @@
  *   TRIP2G_ENDPOINT  - GraphQL endpoint (alternative to --api-url)
  *   API_KEY          - fallback for TRIP2G_API_KEY
  *   ENDPOINT         - fallback for TRIP2G_ENDPOINT
+ *
+ * Without flags or env, credentials come from the plugin's data.json under the
+ * current directory: .obsidian/plugins/ttgsync/data.json, else
+ * .obsidian/plugins/trip2g/data.json (the plugin's old id).
  */
 
 import * as fs from "fs";
-import * as path from "path";
 import { NodeEnv, type CliConflictResolution } from "./env";
 import { createClient } from "./client";
 import { runGraphQLCommand, runIntrospectCommand, type MCPTransport } from "./graphql-cmd";
+import { findDataJsonPath, runUpdateApiUrl } from "./data-json";
 import { classifySync } from "../classify";
 import { filterPlan } from "../filter";
 import { executePlan } from "../execute";
@@ -52,7 +56,8 @@ function readDataJson(): {
 	livePullExcludePatterns?: string[];
 } {
 	try {
-		const dataPath = path.join(process.cwd(), ".obsidian", "plugins", "trip2g", "data.json");
+		const dataPath = findDataJsonPath(process.cwd(), (p) => fs.existsSync(p));
+		if (!dataPath) return {};
 		const data = JSON.parse(fs.readFileSync(dataPath, "utf8"));
 		const dir = data?.syncDirs?.[0];
 		if (!dir) return {};
@@ -221,8 +226,11 @@ Arguments:
                            Not supported together with --two-way.
 
 Options:
-  -u, --api-url <url>      GraphQL endpoint (default: $ENDPOINT or .obsidian/plugins/trip2g/data.json or http://localhost:8081/_system/graphql)
-  -k, --api-key <key>      API key (default: $API_KEY)
+  -u, --api-url <url>      GraphQL endpoint (default: $ENDPOINT, then data.json, then http://localhost:8081/_system/graphql)
+  -k, --api-key <key>      API key (default: $API_KEY, then data.json)
+
+  data.json is read from the current directory:
+  .obsidian/plugins/ttgsync/data.json, else .obsidian/plugins/trip2g/data.json.
   -2, --two-way            Enable two-way sync (pull changes from server).
                            Notes that exist on the server but not locally are
                            DOWNLOADED as new local files; they are reported on
@@ -295,6 +303,11 @@ Subcommands:
   graphql --introspect '<pattern>'
                            Show schema types matching the pattern, with their
                            fields and input fields (e.g. AdminMutation, CreateUser).
+  update-api-url <url>     Set apiUrl on every syncDirs entry of data.json to
+                           <url>, the server base (http or https, no trailing
+                           slash, no /_system/graphql), e.g. http://127.0.0.1:8080.
+                           Run from the vault root. apiKey is left as it is.
+                           An invalid URL is rejected, not rewritten.
 
 Environment Variables:
   TRIP2G_ENDPOINT    GraphQL endpoint URL
@@ -401,6 +414,14 @@ async function main(): Promise<void> {
 
 	if (process.argv[2] === "graphql") {
 		await cmdGraphQL();
+		return;
+	}
+
+	if (process.argv[2] === "update-api-url") {
+		const result = runUpdateApiUrl({ cwd: process.cwd(), url: process.argv[3] });
+		if (result.stdout) console.log(result.stdout);
+		if (result.stderr) console.error(result.stderr);
+		if (result.exitCode !== 0) process.exit(result.exitCode);
 		return;
 	}
 
