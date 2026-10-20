@@ -17,7 +17,6 @@ export function createClient(options: ClientOptions): Sdk {
 			"X-API-Key": options.apiKey,
 		},
 	});
-	// Cast to any - our minimal client implements the same interface
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	return getSdk(client as any);
+	// Our minimal client implements the subset of GraphQLClient that getSdk calls.
+	return getSdk(client as unknown as Parameters<typeof getSdk>[0]);
 }
