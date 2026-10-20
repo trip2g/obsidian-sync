@@ -38,6 +38,7 @@ import type {
 } from "./sync/types";
 import { DEFAULT_SETTINGS, DEFAULT_SYNC_STATE } from "./types";
 import { splitLegacySyncState } from "./sync/legacy-sync-state";
+import { trustServerBase } from "./sync/trust-server";
 
 const SYNC_STATE_KEY = "sync-state";
 const PUBLISHED_URLS_KEY = "published-urls";
@@ -1333,12 +1334,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 		return new Promise((resolve, reject) => {
 			const applyChoice = async (trustServer: boolean): Promise<void> => {
 				if (trustServer) {
-					// Trust server: update lastSyncedHash to remote for all files
-					for (const c of plan.classifications) {
-						if (c.remoteHash) {
-							syncState.files[c.path] = c.remoteHash;
-						}
-					}
+					Object.assign(syncState.files, trustServerBase(plan.classifications, twoWaySync));
 
 					// Create a plan that only pulls (conflicts become pulls). A one-way
 					// folder never writes to the vault, so it pulls nothing.
