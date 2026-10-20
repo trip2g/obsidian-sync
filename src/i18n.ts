@@ -64,6 +64,7 @@ export interface Translations {
 	livePullConflict: (count: number) => string;
 	syncFailedAuth: string;
 	syncFailedGeneric: string;
+	legacyPluginEnabled: string;
 
 	// Status bar
 	statusBarTooltip: string;
@@ -220,6 +221,8 @@ const en: Translations = {
 	pushed: "Pushed",
 	livePulledFiles: (count) => `Live-pulled ${count} file${count === 1 ? "" : "s"} from server`,
 	livePullConflict: (count) => `${count} note${count === 1 ? "" : "s"} changed on server but also edited locally — sync to resolve`,
+	legacyPluginEnabled:
+		"trip2g sync moved to the id ttgsync. Turn off the old “trip2g sync” in Settings → Community plugins, then sync again.",
 	syncFailedAuth: "Trip2g: your changes aren't syncing — check your API key and site URL in settings.",
 	syncFailedGeneric: "Trip2g: sync failed — couldn't reach the server. Your changes are saved locally and will retry.",
 
@@ -381,6 +384,8 @@ const ru: Translations = {
 	pushed: "Отправлено",
 	livePulledFiles: (count) => `Live-pull: получено ${count} файлов с сервера`,
 	livePullConflict: (count) => `${count} заметок изменены на сервере и локально — синхронизируйте для разрешения`,
+	legacyPluginEnabled:
+		"trip2g sync переехал на id ttgsync. Выключите старый «trip2g sync» в Настройки → Сторонние плагины и запустите синхронизацию снова.",
 	syncFailedAuth: "Trip2g: изменения не синхронизируются — проверьте API-ключ и URL сайта в настройках.",
 	syncFailedGeneric: "Trip2g: синхронизация не удалась — сервер недоступен. Изменения сохранены локально, попробуем ещё раз.",
 

@@ -1,4 +1,4 @@
-import { App, ItemView, Menu, Modal, Notice, Plugin, PluginSettingTab, Setting, TAbstractFile, TFile, TFolder, WorkspaceLeaf } from "obsidian";
+import { App, ItemView, Menu, Modal, Notice, normalizePath, Plugin, PluginSettingTab, Setting, TAbstractFile, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { GraphQLClient } from "graphql-request";
 import { FolderSuggest } from "./FolderSuggest";
 import { MigrationModal, ServerDeletedModal, PushConfirmModal, AssetConflictModal, type AssetConflict, type AssetConflictResolution as UIAssetConflictResolution } from "./ui/ConflictModal";
@@ -38,6 +38,7 @@ import type {
 } from "./sync/types";
 import { DEFAULT_SETTINGS, DEFAULT_SYNC_STATE } from "./types";
 import { splitLegacySyncState } from "./sync/legacy-sync-state";
+import { LEGACY_PLUGIN_ID, LegacyPluginGuard, parseLegacyData, type SyncTrigger } from "./legacy-plugin";
 
 const SYNC_STATE_KEY = "sync-state";
 const PUBLISHED_URLS_KEY = "published-urls";
@@ -84,11 +85,22 @@ export default class Trip2gSyncPlugin extends Plugin {
 	// healthy->failing transition (see failure-tracker).
 	private syncFailures: SyncFailureTracker = new SyncFailureTracker();
 
+	private legacyGuard!: LegacyPluginGuard;
+
 	async onload() {
 		// Initialize locale
 		setLocale(detectLocale());
 
+		this.legacyGuard = new LegacyPluginGuard({
+			selfId: this.manifest.id,
+			read: async () => {
+				const file = normalizePath(`${this.app.vault.configDir}/community-plugins.json`);
+				return (await this.app.vault.adapter.exists(file)) ? this.app.vault.adapter.read(file) : null;
+			},
+		});
+
 		await this.loadSettings();
+		void this.legacyBlocks("background");
 		await this.loadSyncStates();
 		this.loadPublishedUrls();
 
@@ -335,6 +347,8 @@ export default class Trip2gSyncPlugin extends Plugin {
 	 * events afterwards.
 	 */
 	private async runAutoPush(paths: string[]): Promise<string[]> {
+		// Left queued: the scheduler retries once the old copy is off.
+		if (await this.legacyBlocks("background")) return [];
 		// belt-and-suspenders; scheduler also gates on isBusy. Confirm nothing so the
 		// batch stays queued and retries once we're free.
 		if (this.isSyncing) return [];
@@ -577,8 +591,38 @@ export default class Trip2gSyncPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		const data = (await this.loadData()) as Partial<PluginSettings> | null;
+		let data = (await this.loadData()) as Partial<PluginSettings> | null;
+		if (data === null) {
+			data = await this.adoptLegacyData();
+		}
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
+	}
+
+	/**
+	 * First load under the new id: take over the settings of the old `trip2g`
+	 * folder. The old file stays, since headless tools still read it.
+	 */
+	private async adoptLegacyData(): Promise<Partial<PluginSettings> | null> {
+		if (this.manifest.id === LEGACY_PLUGIN_ID) return null;
+		const file = normalizePath(`${this.app.vault.configDir}/plugins/${LEGACY_PLUGIN_ID}/data.json`);
+		try {
+			if (!(await this.app.vault.adapter.exists(file))) return null;
+			const data = parseLegacyData(await this.app.vault.adapter.read(file)) as Partial<PluginSettings> | null;
+			if (data) await this.saveData(data);
+			return data;
+		} catch (e) {
+			console.warn("[Trip2g Sync] could not adopt old settings:", e);
+			return null;
+		}
+	}
+
+	/** Whether the old `trip2g` copy is enabled, which stops this one from syncing. */
+	private async legacyBlocks(trigger: SyncTrigger): Promise<boolean> {
+		if (!(await this.legacyGuard.isBlocked())) return false;
+		if (this.legacyGuard.shouldNotify(trigger)) {
+			new LegacyPluginModal(this.app).open();
+		}
+		return true;
 	}
 
 	async saveSettings() {
@@ -940,6 +984,8 @@ export default class Trip2gSyncPlugin extends Plugin {
 	 *   echo (same hash) classifies as unchanged and is a no-op.
 	 */
 	private async autoPull(syncDir: SyncDir, folder: TFolder, changes: NoteChangeItem[]): Promise<void> {
+		if (await this.legacyBlocks("background")) return;
+
 		const key = this.liveKey(syncDir.apiUrl, syncDir.path);
 
 		// Serialize against manual syncs: queue and drain after the sync finishes.
@@ -1026,6 +1072,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 	 * the pulls via the safe direct path, then release the lock and drain the queue.
 	 */
 	private async catchUpPull(syncDir: SyncDir, folder: TFolder): Promise<void> {
+		if (await this.legacyBlocks("background")) return;
 		if (this.isSyncing) {
 			return; // a sync (or another catch-up) is already serializing events
 		}
@@ -1153,6 +1200,10 @@ export default class Trip2gSyncPlugin extends Plugin {
 	async syncDirectory(syncDir: SyncDir): Promise<void> {
 		if (!syncDir.path || !syncDir.apiUrl || !syncDir.apiKey) {
 			new Notice(t().syncError);
+			return;
+		}
+
+		if (await this.legacyBlocks("manual")) {
 			return;
 		}
 
@@ -1510,6 +1561,16 @@ export default class Trip2gSyncPlugin extends Plugin {
 		}
 
 		return filePath;
+	}
+}
+
+class LegacyPluginModal extends Modal {
+	onOpen() {
+		this.contentEl.createEl("p", { text: t().legacyPluginEnabled });
+	}
+
+	onClose() {
+		this.contentEl.empty();
 	}
 }
 
