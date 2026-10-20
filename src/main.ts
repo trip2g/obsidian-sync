@@ -587,16 +587,23 @@ export default class Trip2gSyncPlugin extends Plugin {
 	}
 
 	async loadSyncStates() {
-		const stored = localStorage.getItem(SYNC_STATE_KEY);
-		if (stored) {
-			try {
-				const parsed = JSON.parse(stored) as Record<string, SyncState>;
-				for (const [key, value] of Object.entries(parsed)) {
-					this.syncStates.set(key, value);
+		let parsed = this.app.loadLocalStorage(SYNC_STATE_KEY) as Record<string, SyncState> | null;
+		if (!parsed) {
+			// Older versions kept the state in a global key shared by all vaults. The
+			// first vault to load after the upgrade takes it over.
+			const legacy = localStorage.getItem(SYNC_STATE_KEY);
+			if (legacy) {
+				try {
+					parsed = JSON.parse(legacy) as Record<string, SyncState>;
+					this.app.saveLocalStorage(SYNC_STATE_KEY, parsed);
+				} catch {
+					// Ignore parsing errors
 				}
-			} catch {
-				// Ignore parsing errors
+				localStorage.removeItem(SYNC_STATE_KEY);
 			}
+		}
+		for (const [key, value] of Object.entries(parsed ?? {})) {
+			this.syncStates.set(key, value);
 		}
 	}
 
@@ -605,7 +612,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 		for (const [key, value] of this.syncStates) {
 			obj[key] = value;
 		}
-		localStorage.setItem(SYNC_STATE_KEY, JSON.stringify(obj));
+		this.app.saveLocalStorage(SYNC_STATE_KEY, obj);
 	}
 
 	loadPublishedUrls(): void {
