@@ -1,7 +1,7 @@
 {
 	"name": "obsidian-trip2g",
 	"version": "1.0.1",
-	"description": "Make a website from your vault. Landing pages, digital gardens, dashboards and RAG for AI agents, live on your own server.",
+	"description": "Make a website from your vault and share the parts you choose with friends, colleagues or subscribers. Landing pages, digital gardens, dashboards and RAG for AI agents, live on your own server.",
 	"engines": {
 		"node": ">=20"
 	},

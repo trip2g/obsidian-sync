@@ -3,7 +3,7 @@
 	"name": "trip2g sync",
 	"version": "1.0.1",
 	"minAppVersion": "1.8.7",
-	"description": "Make a website from your vault. Landing pages, digital gardens, dashboards and RAG for AI agents, live on your own server.",
+	"description": "Make a website from your vault and share the parts you choose with friends, colleagues or subscribers. Landing pages, digital gardens, dashboards and RAG for AI agents, live on your own server.",
 	"author": "Alexey Yurchenko",
 	"authorUrl": "https://trip2g.com",
 	"isDesktopOnly": false
