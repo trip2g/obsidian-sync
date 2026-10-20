@@ -10,7 +10,7 @@ import { applyLiveChanges } from "./sync/live-apply";
 import { filterPlan } from "./sync/filter";
 import { executePlan, executePulls, downloadAssetsForNotes } from "./sync/execute";
 import { LivePullConnection, type NoteChangeItem } from "./sync/LivePullConnection";
-import { AutoPushScheduler } from "./sync/auto-push";
+import { AutoPushScheduler, autoPushPlan } from "./sync/auto-push";
 import { SyncFailureTracker } from "./sync/failure-tracker";
 import {
 	initialSyncStatus,
@@ -37,6 +37,8 @@ import type {
 	Progress,
 } from "./sync/types";
 import { DEFAULT_SETTINGS, DEFAULT_SYNC_STATE } from "./types";
+import { splitLegacySyncState } from "./sync/legacy-sync-state";
+import { trustServerBase } from "./sync/trust-server";
 
 const SYNC_STATE_KEY = "sync-state";
 const PUBLISHED_URLS_KEY = "published-urls";
@@ -103,7 +105,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 			if (this.settings.syncDirs.length === 0) {
 				new Notice(t().noSyncDirsConfigured);
 			} else if (this.settings.syncDirs.length === 1) {
-				this.syncDirectory(this.settings.syncDirs[0]);
+				void this.syncDirectory(this.settings.syncDirs[0]);
 			} else {
 				new SyncDirectoryModal(this.app, this).open();
 			}
@@ -114,7 +116,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 		// Status bar: show published URL hostname for the active file
 		this.statusBarItem = this.addStatusBarItem();
-		this.statusBarItem.style.cursor = "pointer";
+		this.statusBarItem.addClass("trip2g-status-bar-url");
 		this.statusBarItem.setAttribute("aria-label", t().statusBarTooltip);
 		this.statusBarItem.addEventListener("click", () => {
 			const url = this.activeFileUrl();
@@ -144,7 +146,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 				if (this.settings.syncDirs.length === 0) {
 					new Notice(t().noSyncDirsConfigured);
 				} else if (this.settings.syncDirs.length === 1) {
-					this.syncDirectory(this.settings.syncDirs[0]);
+					void this.syncDirectory(this.settings.syncDirs[0]);
 				} else {
 					new SyncDirectoryModal(this.app, this).open();
 				}
@@ -159,7 +161,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 					new Notice("No warnings from last sync");
 					return;
 				}
-				this.openWarningsView();
+				void this.openWarningsView();
 			},
 		});
 
@@ -205,12 +207,12 @@ export default class Trip2gSyncPlugin extends Plugin {
 		// Live-pull drives the badge in between; the bus is lossy so a rare
 		// full reconcile catches anything missed.
 		this.checkInterval = window.setInterval(() => {
-			this.checkForPendingChanges();
+			void this.checkForPendingChanges();
 		}, 300000);
 
 		// Check on window focus, and revive any dead live connections.
 		this.boundCheckOnFocus = () => {
-			this.checkForPendingChanges();
+			void this.checkForPendingChanges();
 			for (const conn of this.liveConnections.values()) {
 				conn.reconnectIfDead();
 			}
@@ -218,10 +220,10 @@ export default class Trip2gSyncPlugin extends Plugin {
 		window.addEventListener("focus", this.boundCheckOnFocus);
 
 		// Initial check after a short delay
-		window.setTimeout(() => this.checkForPendingChanges(), 3000);
+		window.setTimeout(() => void this.checkForPendingChanges(), 3000);
 
 		// Fetch all published URLs for status bar
-		window.setTimeout(() => this.fetchAllPublishedUrls(), 5000);
+		window.setTimeout(() => void this.fetchAllPublishedUrls(), 5000);
 
 		// Start live-pull connections.
 		this.reconcileLiveConnections();
@@ -450,18 +452,18 @@ export default class Trip2gSyncPlugin extends Plugin {
 		const publishField = syncDir.publishField || "";
 		const env = this.buildPushEnv(syncDir, folder, syncState);
 
+		const twoWaySync = syncDir.twoWaySync ?? false;
 		const plan = await classifySync(env);
-		const filteredPlan = filterPlan(plan, {
-			twoWaySync: true,
-			hasPublishFields: publishField
-				? (path: string) => this.hasPublishFieldByPath(path, folder, publishField)
-				: undefined,
-		});
+		const filteredPlan = autoPushPlan(
+			plan,
+			twoWaySync,
+			publishField ? (path: string) => this.hasPublishFieldByPath(path, folder, publishField) : undefined
+		);
 		// Paths this push actually attempted to upload. A requested path outside
 		// this set (conflict, publish-field-filtered, or unchanged) will never push,
 		// so it must be confirmed rather than retried in a hot loop.
 		const attempted = new Set(filteredPlan.pushes.map((p) => p.path));
-		const result = await executePlan(env, filteredPlan, { twoWaySync: true });
+		const result = await executePlan(env, filteredPlan, { twoWaySync });
 
 		const base = this.basePrefix(folder);
 		let pushedHost = "";
@@ -539,9 +541,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 	 * buildPullEnv but approves pushes and SKIPS every conflict (onConflict -> [],
 	 * which executePlan resolves as "skip") so a file edited both locally and on
 	 * the server is never clobbered — it stays a conflict for the badge / manual
-	 * sync. twoWaySync stays true so filterPlan keeps conflicts in the conflict
-	 * bucket (instead of converting them to pushes) and publish-field protection
-	 * still applies.
+	 * sync. A one-way folder gets a one-way env, so a stray vault write throws.
 	 */
 	private buildPushEnv(syncDir: SyncDir, folder: TFolder, syncState: SyncState): ObsidianSyncEnv {
 		const sdk = createSdk(syncDir.apiUrl, syncDir.apiKey, this.manifest.version);
@@ -554,7 +554,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 			apiKey: syncDir.apiKey,
 			pluginVersion: this.manifest.version,
 			publishField: syncDir.publishField || "",
-			twoWaySync: true,
+			twoWaySync: syncDir.twoWaySync ?? false,
 			onProgressCallback: () => {},
 			onConflictCallback: async () => [],
 			onAssetConflictCallback: async () => [],
@@ -587,16 +587,26 @@ export default class Trip2gSyncPlugin extends Plugin {
 	}
 
 	async loadSyncStates() {
-		const stored = localStorage.getItem(SYNC_STATE_KEY);
-		if (stored) {
-			try {
-				const parsed = JSON.parse(stored) as Record<string, SyncState>;
-				for (const [key, value] of Object.entries(parsed)) {
-					this.syncStates.set(key, value);
+		let parsed = this.app.loadLocalStorage(SYNC_STATE_KEY) as Record<string, SyncState> | null;
+		if (!parsed) {
+			// Older versions kept the state in a global key shared by all vaults. Take
+			// only this vault's servers; two vaults on one server: the first to load wins.
+			const legacy = localStorage.getItem(SYNC_STATE_KEY);
+			const split = legacy
+				? splitLegacySyncState(legacy, this.settings.syncDirs.map((d) => d.apiUrl))
+				: null;
+			if (split && Object.keys(split.adopted).length > 0) {
+				parsed = split.adopted;
+				this.app.saveLocalStorage(SYNC_STATE_KEY, parsed);
+				if (Object.keys(split.remainder).length > 0) {
+					localStorage.setItem(SYNC_STATE_KEY, JSON.stringify(split.remainder));
+				} else {
+					localStorage.removeItem(SYNC_STATE_KEY);
 				}
-			} catch {
-				// Ignore parsing errors
 			}
+		}
+		for (const [key, value] of Object.entries(parsed ?? {})) {
+			this.syncStates.set(key, value);
 		}
 	}
 
@@ -605,7 +615,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 		for (const [key, value] of this.syncStates) {
 			obj[key] = value;
 		}
-		localStorage.setItem(SYNC_STATE_KEY, JSON.stringify(obj));
+		this.app.saveLocalStorage(SYNC_STATE_KEY, obj);
 	}
 
 	loadPublishedUrls(): void {
@@ -653,7 +663,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 	async openWarningsView(): Promise<void> {
 		const existing = this.app.workspace.getLeavesOfType(WARNINGS_VIEW_TYPE);
 		if (existing.length > 0) {
-			this.app.workspace.revealLeaf(existing[0]);
+			void this.app.workspace.revealLeaf(existing[0]);
 			// A deferred leaf (Obsidian 1.7+) has a placeholder view without
 			// render(); it renders itself via onOpen once loaded, so skip here.
 			const view = existing[0].view;
@@ -711,7 +721,6 @@ export default class Trip2gSyncPlugin extends Plugin {
 	 */
 	openExternalUrl(url: string): void {
 		try {
-			// eslint-disable-next-line @typescript-eslint/no-var-requires
 			const electron = (window as unknown as { require?: (m: string) => unknown }).require?.("electron") as
 				| { shell?: { openExternal?: (u: string) => Promise<void> } }
 				| undefined;
@@ -1210,9 +1219,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 			});
 
 			// Step 1: Classify all files
-			console.time("[Trip2g Sync] Classify files");
 			const plan = await classifySync(env);
-			console.timeEnd("[Trip2g Sync] Classify files");
 
 			// Step 2: Check if this is first sync (migration scenario)
 			const isFirstSync = Object.keys(syncState.files).length === 0;
@@ -1228,8 +1235,6 @@ export default class Trip2gSyncPlugin extends Plugin {
 						? (path: string) => this.hasPublishFieldByPath(path, folder, publishField)
 						: undefined,
 				});
-
-				console.log(`[Trip2g Sync] Plan: pulls=${filteredPlan.pulls.length}, pushes=${filteredPlan.pushes.length}, conflicts=${filteredPlan.conflicts.length}, localOnly=${filteredPlan.localOnly.length}, unchanged=${filteredPlan.unchanged}`);
 
 				const result = await executePlan(env, filteredPlan, { twoWaySync });
 
@@ -1326,20 +1331,16 @@ export default class Trip2gSyncPlugin extends Plugin {
 		twoWaySync: boolean,
 		publishField: string
 	): Promise<void> {
-		return new Promise((resolve) => {
-			new MigrationModal(this.app, plan.conflicts.length, async (trustServer) => {
+		return new Promise((resolve, reject) => {
+			const applyChoice = async (trustServer: boolean): Promise<void> => {
 				if (trustServer) {
-					// Trust server: update lastSyncedHash to remote for all files
-					for (const c of plan.classifications) {
-						if (c.remoteHash) {
-							syncState.files[c.path] = c.remoteHash;
-						}
-					}
+					Object.assign(syncState.files, trustServerBase(plan.classifications, twoWaySync));
 
-					// Create a plan that only pulls (conflicts become pulls)
+					// Create a plan that only pulls (conflicts become pulls). A one-way
+					// folder never writes to the vault, so it pulls nothing.
 					const pullPlan: import("./sync/types").SyncPlan = {
 						classifications: [],
-						pulls: [...plan.conflicts, ...plan.remoteOnly],
+						pulls: twoWaySync ? [...plan.conflicts, ...plan.remoteOnly] : [],
 						pushes: [],
 						conflicts: [],
 						localOnly: [],
@@ -1374,7 +1375,9 @@ export default class Trip2gSyncPlugin extends Plugin {
 				}
 
 				await this.saveSyncStates();
-				resolve();
+			};
+			new MigrationModal(this.app, plan.conflicts.length, (trustServer) => {
+				applyChoice(trustServer).then(resolve, reject);
 			}).open();
 		});
 	}
@@ -1411,7 +1414,7 @@ export default class Trip2gSyncPlugin extends Plugin {
 
 			const count = applyToAll ? remaining.length : 1;
 			for (let i = 0; i < count; i++) {
-				resolutions.push(resolution as AssetConflictResolution);
+				resolutions.push(resolution);
 			}
 
 			remaining = applyToAll ? [] : remaining.slice(1);
@@ -1439,13 +1442,14 @@ export default class Trip2gSyncPlugin extends Plugin {
 			return true;
 		}
 
-		return new Promise((resolve) => {
-			new PushConfirmModal(this.app, paths, async (proceed, dontAskAgain) => {
-				if (dontAskAgain) {
-					this.settings.skipPushConfirmation = true;
-					await this.saveSettings();
+		return new Promise((resolve, reject) => {
+			new PushConfirmModal(this.app, paths, (proceed, dontAskAgain) => {
+				if (!dontAskAgain) {
+					resolve(proceed);
+					return;
 				}
-				resolve(proceed);
+				this.settings.skipPushConfirmation = true;
+				this.saveSettings().then(() => resolve(proceed), reject);
 			}).open();
 		});
 	}
@@ -1530,9 +1534,9 @@ class SyncDirectoryModal extends Modal {
 			dirEl.createEl("p", { text: `API URL: ${dir.apiUrl}` });
 
 			const syncBtn = dirEl.createEl("button", { text: i18n.syncThisDirectory });
-			syncBtn.addEventListener("click", async () => {
+			syncBtn.addEventListener("click", () => {
 				this.close();
-				await this.plugin.syncDirectory(dir);
+				void this.plugin.syncDirectory(dir);
 			});
 		});
 	}
@@ -1573,12 +1577,12 @@ class SyncWarningsView extends ItemView {
 		});
 		if (!this.allWarningsLoaded) {
 			const loadBtn = toolbar.createEl("button", { text: "Load All", cls: "trip2g-warnings-action-btn" });
-			loadBtn.addEventListener("click", () => this.loadAllWarnings());
+			loadBtn.addEventListener("click", () => void this.loadAllWarnings());
 		}
 		if (data.length > 0) {
 			const copyAllBtn = toolbar.createEl("button", { text: "Copy All (JSON)", cls: "trip2g-warnings-action-btn" });
 			copyAllBtn.addEventListener("click", () => {
-				navigator.clipboard.writeText(JSON.stringify(data, null, 2)).then(() => new Notice("Copied"));
+				void navigator.clipboard.writeText(JSON.stringify(data, null, 2)).then(() => new Notice("Copied"));
 			});
 		}
 		// Mobile has no tab close button in reach, so the view carries its own.
@@ -1612,7 +1616,7 @@ class SyncWarningsView extends ItemView {
 
 			// Open file in Obsidian tab
 			const openFileBtn = actionsTd.createEl("button", { text: "Open in Tab" });
-			openFileBtn.addEventListener("click", async () => {
+			openFileBtn.addEventListener("click", () => {
 				const syncDir = this.plugin.settings.syncDirs[0];
 				if (!syncDir) return;
 				const base = syncDir.path && syncDir.path !== "/" ? syncDir.path + "/" : "";
@@ -1620,7 +1624,7 @@ class SyncWarningsView extends ItemView {
 				const file = this.plugin.app.vault.getAbstractFileByPath(fullPath);
 				if (file instanceof TFile) {
 					const leaf = this.plugin.app.workspace.getLeaf("tab");
-					await leaf.openFile(file);
+					void leaf.openFile(file);
 				} else {
 					new Notice(`File not found: ${w.path}`);
 				}
@@ -1636,7 +1640,7 @@ class SyncWarningsView extends ItemView {
 			const copyBtn = actionsTd.createEl("button", { text: "Copy Warning" });
 			copyBtn.addEventListener("click", () => {
 				const text = `[${w.level}] ${w.path}: ${w.message}${w.url ? `\n${w.url}` : ""}`;
-				navigator.clipboard.writeText(text).then(() => new Notice("Copied"));
+				void navigator.clipboard.writeText(text).then(() => new Notice("Copied"));
 			});
 		}
 	}
@@ -1706,7 +1710,7 @@ class SyncSettingTab extends PluginSettingTab {
 						apiUrl: "",
 						error: undefined,
 					});
-					this.plugin.saveSettings();
+					void this.plugin.saveSettings();
 					this.display();
 				});
 		});
@@ -1728,7 +1732,7 @@ class SyncSettingTab extends PluginSettingTab {
 						}
 					}
 
-					this.plugin.saveSettings();
+					void this.plugin.saveSettings();
 					this.display();
 
 					new Notice(i18n.successfulConnections(successCount, failCount));
@@ -1749,7 +1753,7 @@ class SyncSettingTab extends PluginSettingTab {
 					.onClick(async () => {
 						const error = await this.plugin.testConnection(dir);
 						this.plugin.settings.syncDirs[dirIndex].error = error;
-						this.plugin.saveSettings();
+						void this.plugin.saveSettings();
 						this.display();
 
 						if (error === null) {
@@ -1780,19 +1784,17 @@ class SyncSettingTab extends PluginSettingTab {
 					.onClick(() => {
 						if (confirm(i18n.removeDirectoryConfirm)) {
 							this.plugin.settings.syncDirs.splice(dirIndex, 1);
-							this.plugin.saveSettings();
+							void this.plugin.saveSettings();
 							this.display();
 						}
 					});
 			});
 
 			if (dir.error) {
-				const errorEl = containerEl.createEl("div", {
-					cls: "setting-item-description",
+				containerEl.createEl("div", {
+					cls: "setting-item-description trip2g-sync-dir-error",
 					text: `${i18n.error}: ${dir.error}`,
 				});
-				errorEl.style.color = "var(--text-error)";
-				errorEl.style.marginBottom = "10px";
 			}
 
 			// API URL
@@ -1805,7 +1807,7 @@ class SyncSettingTab extends PluginSettingTab {
 						.onChange((newApiUrl) => {
 							this.plugin.settings.syncDirs[dirIndex].apiUrl = newApiUrl;
 							this.plugin.settings.syncDirs[dirIndex].error = undefined;
-							this.plugin.saveSettings();
+							void this.plugin.saveSettings();
 						});
 				});
 
@@ -1819,7 +1821,7 @@ class SyncSettingTab extends PluginSettingTab {
 						.onChange((newApiKey) => {
 							this.plugin.settings.syncDirs[dirIndex].apiKey = newApiKey;
 							this.plugin.settings.syncDirs[dirIndex].error = undefined;
-							this.plugin.saveSettings();
+							void this.plugin.saveSettings();
 						});
 					text.inputEl.type = "password";
 				});
@@ -1835,7 +1837,7 @@ class SyncSettingTab extends PluginSettingTab {
 						.onChange((newPath) => {
 							this.plugin.settings.syncDirs[dirIndex].path = newPath;
 							this.plugin.settings.syncDirs[dirIndex].error = undefined;
-							this.plugin.saveSettings();
+							void this.plugin.saveSettings();
 						});
 				});
 
@@ -1848,7 +1850,7 @@ class SyncSettingTab extends PluginSettingTab {
 						.setValue(dir.publishField || "")
 						.onChange((newField) => {
 							this.plugin.settings.syncDirs[dirIndex].publishField = newField || undefined;
-							this.plugin.saveSettings();
+							void this.plugin.saveSettings();
 						});
 				});
 

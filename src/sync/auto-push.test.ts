@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { AutoPushScheduler, type AutoPushClock } from "./auto-push";
+import { AutoPushScheduler, autoPushPlan, type AutoPushClock } from "./auto-push";
 import { classifySync } from "./classify";
-import { filterPlan } from "./filter";
 import { executePlan } from "./execute";
 import type {
 	SyncState,
@@ -184,10 +183,9 @@ function makeFakeEnv(model: FakeEnvModel, syncState: SyncState): SyncEnv {
 }
 
 /** The exact shared pipeline runAutoPush/pushSyncDir uses in main.ts. */
-async function runPush(env: SyncEnv): Promise<void> {
+async function runPush(env: SyncEnv, twoWaySync = true): Promise<void> {
 	const plan = await classifySync(env);
-	const filtered = filterPlan(plan, { twoWaySync: true });
-	await executePlan(env, filtered, { twoWaySync: true });
+	await executePlan(env, autoPushPlan(plan, twoWaySync), { twoWaySync });
 }
 
 // ============ Scheduler tests ============
@@ -332,6 +330,63 @@ describe("AutoPushScheduler", () => {
 		// Non-conflicting bucket still pushed.
 		expect(pushedPaths).toContain("clean.md");
 		expect(model.server.get("clean.md")).toBe("v2");
+	});
+
+	it("in a one-way folder it only pushes: no pulls, no new server notes, no local deletes", async () => {
+		const model: FakeEnvModel = {
+			local: new Map([
+				["edited.md", "v2"],
+				["stale.md", "old"],
+				["gone-on-server.md", "kept"],
+				["conflict.md", "local-edit"],
+			]),
+			server: new Map([
+				["edited.md", "v1"],
+				["stale.md", "new-on-server"],
+				["server-only.md", "remote"],
+				["conflict.md", "remote-edit"],
+			]),
+			pushes: [],
+		};
+		const syncState: SyncState = {
+			files: {
+				"edited.md": hash("v1"),
+				"stale.md": hash("old"),
+				"gone-on-server.md": hash("kept"),
+				"conflict.md": hash("base"),
+			},
+		};
+
+		const plan = autoPushPlan(await classifySync(makeFakeEnv(model, syncState)), false);
+		expect(plan.pulls).toEqual([]);
+		expect(plan.remoteOnly).toEqual([]);
+		expect(plan.serverDeleted).toEqual([]);
+
+		await runPush(makeFakeEnv(model, syncState), false);
+
+		expect(model.pushes.flat().map((u) => u.path)).toEqual(["edited.md"]);
+		expect(model.local.get("stale.md")).toBe("old");
+		expect(model.local.has("server-only.md")).toBe(false);
+		expect(model.local.get("gone-on-server.md")).toBe("kept");
+		expect(model.local.get("conflict.md")).toBe("local-edit");
+		expect(model.server.get("conflict.md")).toBe("remote-edit");
+	});
+
+	it("in a two-way folder it still pulls server edits", async () => {
+		const model: FakeEnvModel = {
+			local: new Map([["stale.md", "old"]]),
+			server: new Map([
+				["stale.md", "new-on-server"],
+				["server-only.md", "remote"],
+			]),
+			pushes: [],
+		};
+		const syncState: SyncState = { files: { "stale.md": hash("old") } };
+
+		await runPush(makeFakeEnv(model, syncState), true);
+
+		expect(model.local.get("stale.md")).toBe("new-on-server");
+		expect(model.local.get("server-only.md")).toBe("remote");
 	});
 
 	it("(bug#3) a path not confirmed by the flush stays dirty and is retried (late disk-write)", async () => {

@@ -18,8 +18,10 @@ class Suggest<T> {
 		this.owner = owner;
 		this.containerEl = containerEl;
 
-		containerEl.on("click", ".suggestion-item", this.onSuggestionClick.bind(this));
-		containerEl.on("mousemove", ".suggestion-item", this.onSuggestionMouseover.bind(this));
+		containerEl.on("click", ".suggestion-item", (event, el) => this.onSuggestionClick(event, el as HTMLDivElement));
+		containerEl.on("mousemove", ".suggestion-item", (event, el) =>
+			this.onSuggestionMouseover(event, el as HTMLDivElement)
+		);
 
 		scope.register([], "ArrowUp", (event) => {
 			if (!event.isComposing) {
@@ -112,11 +114,11 @@ export abstract class TextInputSuggest<T> implements ISuggestOwner<T> {
 		const suggestion = this.suggestEl.createDiv("suggestion");
 		this.suggest = new Suggest(this, suggestion, this.scope);
 
-		this.scope.register([], "Escape", this.close.bind(this));
+		this.scope.register([], "Escape", () => this.close());
 
-		this.inputEl.addEventListener("input", this.onInputChanged.bind(this));
-		this.inputEl.addEventListener("focus", this.onInputChanged.bind(this));
-		this.inputEl.addEventListener("blur", this.close.bind(this));
+		this.inputEl.addEventListener("input", () => this.onInputChanged());
+		this.inputEl.addEventListener("focus", () => this.onInputChanged());
+		this.inputEl.addEventListener("blur", () => this.close());
 		this.suggestEl.on("mousedown", ".suggestion-container", (event: MouseEvent) => {
 			event.preventDefault();
 		});
@@ -159,7 +161,7 @@ export abstract class TextInputSuggest<T> implements ISuggestOwner<T> {
 							return;
 						}
 						state.styles.popper.width = targetWidth;
-						instance.update();
+						void instance.update();
 					},
 					phase: "beforeWrite",
 					requires: ["computeStyles"],

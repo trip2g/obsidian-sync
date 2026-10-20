@@ -13,6 +13,24 @@
  * classify -> filter -> execute push pipeline.
  */
 
+import { filterPlan } from "./filter";
+import type { SyncPlan } from "./types";
+
+/**
+ * The plan auto-sync on save executes. Conflicts stay in the conflict bucket in
+ * both modes, so the non-interactive env skips them instead of pushing over a
+ * server edit. A one-way folder also drops everything that writes to the vault.
+ */
+export function autoPushPlan(
+	plan: SyncPlan,
+	twoWaySync: boolean,
+	hasPublishFields?: (path: string) => boolean
+): SyncPlan {
+	const filtered = filterPlan(plan, { twoWaySync: true, hasPublishFields });
+	if (twoWaySync) return filtered;
+	return { ...filtered, pulls: [], remoteOnly: [], serverDeleted: [] };
+}
+
 /** Timer primitives — injectable so tests can drive a fake clock. */
 export interface AutoPushClock {
 	setTimeout(handler: () => void, ms: number): ReturnType<typeof setTimeout>;
