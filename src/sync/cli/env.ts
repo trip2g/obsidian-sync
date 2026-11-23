@@ -49,6 +49,7 @@ export interface NodeEnvOptions extends ClientOptions {
 	stateFile?: string;
 }
 
+const UNWALKABLE_PATH_CODES = new Set(["ENOTDIR", "ELOOP", "ENAMETOOLONG", "EACCES"]);
 const LEGACY_STATE_FILE = ".sync-state.json";
 
 export class CorruptSyncStateError extends Error {
@@ -200,8 +201,8 @@ export class NodeEnv implements SyncEnv {
 				if (entry.isDirectory()) {
 					walk(fullPath);
 				} else if (entry.isFile()) {
-					const relPath = path.relative(this.folder, fullPath);
-					vaultFiles.push(relPath.split(path.sep).join("/"));
+					const relPath = path.relative(this.folder, fullPath).split(path.sep).join("/");
+					vaultFiles.push(relPath);
 
 					const ext = path.extname(entry.name).toLowerCase();
 					if (ext === ".md" || ext === ".html" || ext === ".canvas" || ext === ".base" || ext === ".excalidraw" || entry.name.endsWith(".html.json")) {
@@ -291,7 +292,7 @@ export class NodeEnv implements SyncEnv {
 		try {
 			return fs.existsSync(safeJoin(this.folder, filePath));
 		} catch (e) {
-			if (e instanceof PathOutsideVaultError) {
+			if (e instanceof PathOutsideVaultError || UNWALKABLE_PATH_CODES.has((e as NodeJS.ErrnoException).code ?? "")) {
 				return false;
 			}
 			throw e;

@@ -341,3 +341,23 @@ describe("DATA LOSS: empty server content must not wipe a non-empty layout", () 
 		expect(syncState.files[path]).toBe(makeHash(""));
 	});
 });
+
+
+describe("applyLiveChanges with an unsafe path in the batch", () => {
+	it("skips that change and applies the rest", async () => {
+		const env = makeEnv({ missingFiles: ["good.md"] });
+		const state = makeSyncState();
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+		const result = await applyLiveChanges(
+			env,
+			[upsertChange("../evil.md", "create", "x"), upsertChange("good.md", "create", "y")],
+			state
+		);
+
+		warn.mockRestore();
+		expect(env.writeFile).toHaveBeenCalledTimes(1);
+		expect(env.writeFile).toHaveBeenCalledWith("good.md", "y");
+		expect(result.pulledPaths).toEqual(["good.md"]);
+	});
+});

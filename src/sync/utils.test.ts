@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import * as nodePath from "path";
 import {
+	isSafeVaultPath,
 	isAlwaysPublishable,
 	syncErrorNotice,
 	sameOrigin,
@@ -213,5 +214,32 @@ describe("syncErrorNotice", () => {
 		expect(text.startsWith("Failed to push notes/note-0.md, ")).toBe(true);
 		expect(text.length).toBeLessThan(260);
 		expect(text.endsWith("… (+1 more)")).toBe(true);
+	});
+});
+
+
+describe("isSafeVaultPath service paths", () => {
+	it.each([".attachments/a.png", ".gitbook/assets/a.png", "a/.hidden/b.png", "./a.png", "a/b.md"])("allows %s", (p) => {
+		expect(isSafeVaultPath(p)).toBe(true);
+	});
+
+	it.each([
+		".obsidian/plugins/x/data.json",
+		"a/.obsidian/x",
+		".git/config",
+		"sub/.git/config",
+		".trash/a.md",
+		".sync-state.example.com.json",
+		".sync-state.json",
+		"..",
+		"a/../b.png",
+		"../a.png",
+		"/a.png",
+		"a\\b.png",
+		"a\0b",
+		"C:/a.png",
+		"",
+	])("rejects %j", (p) => {
+		expect(isSafeVaultPath(p)).toBe(false);
 	});
 });

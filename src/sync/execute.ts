@@ -57,6 +57,7 @@ export async function executePlan(
 		const pullResult = await executePulls(env, toPull, syncState);
 		result.pulled = pullResult.count;
 		result.errors.push(...pullResult.errors);
+		result.warnings.push(...pullResult.warnings);
 		pulledPaths.push(...pullResult.pulledPaths);
 	}
 
@@ -65,6 +66,7 @@ export async function executePlan(
 		const assetResult = await downloadAssetsForNotes(env, pulledPaths);
 		result.assetsDownloaded += assetResult.downloaded;
 		result.errors.push(...assetResult.errors);
+		result.warnings.push(...assetResult.warnings);
 	}
 
 	// 1c. Check assets for unchanged files (may have missing assets from interrupted sync)
@@ -77,6 +79,7 @@ export async function executePlan(
 			const assetResult = await downloadAssetsForNotes(env, unchangedServerPaths);
 			result.assetsDownloaded += assetResult.downloaded;
 			result.errors.push(...assetResult.errors);
+			result.warnings.push(...assetResult.warnings);
 		}
 	}
 
@@ -134,6 +137,7 @@ export async function executePlan(
 		result.assetsUploaded = assetResult.uploaded;
 		result.assetsDownloaded = assetResult.downloaded;
 		result.errors.push(...assetResult.errors);
+		result.warnings.push(...assetResult.warnings);
 	}
 
 	// 6b. Reconcile missing assets for unchanged notes
@@ -145,6 +149,7 @@ export async function executePlan(
 		const assetResult = await reconcileAssetsForUnchangedNotes(env, unchangedPaths);
 		result.assetsUploaded += assetResult.uploaded;
 		result.errors.push(...assetResult.errors);
+		result.warnings.push(...assetResult.warnings);
 	}
 
 	// 7. Commit all changes
@@ -220,15 +225,21 @@ export async function executePulls(
 	env: SyncEnv,
 	pulls: FileClassification[],
 	syncState: SyncState
-): Promise<{ count: number; errors: string[]; pulledPaths: string[] }> {
+): Promise<{ count: number; errors: string[]; warnings: SyncResult["warnings"]; pulledPaths: string[] }> {
 	// Stryker disable all
 	// optimization - caller already filters empty
 	if (pulls.length === 0) {
-		return { count: 0, errors: [], pulledPaths: [] };
+		return { count: 0, errors: [], warnings: [], pulledPaths: [] };
 	}
 	// Stryker restore all
 
-	const paths = pulls.map((p) => p.path);
+	const safePulls = pulls.filter((p) => isSafeVaultPath(p.path));
+	const warnings: SyncResult["warnings"] = [];
+	for (const path of new Set(pulls.filter((p) => !isSafeVaultPath(p.path)).map((p) => p.path))) {
+		warnings.push({ path, level: "WARNING", message: `Skipped ${path}: path is outside the vault` });
+	}
+
+	const paths = safePulls.map((p) => p.path);
 	const errors: string[] = [];
 	const pulledPaths: string[] = [];
 	let count = 0;
@@ -237,17 +248,12 @@ export async function executePulls(
 	const contents = await env.fetchNoteContents(paths);
 	const contentMap = new Map(contents.map((c) => [c.path, c.content]));
 
-	const total = pulls.length;
+	const total = safePulls.length;
 	let current = 0;
 
-	for (const pull of pulls) {
+	for (const pull of safePulls) {
 		current++;
 		env.onProgress({ step: "pull", current, total, path: pull.path });
-
-		if (!isSafeVaultPath(pull.path)) {
-			errors.push(`Refused to write ${pull.path}: path is outside the vault`);
-			continue;
-		}
 
 		const content = contentMap.get(pull.path);
 		if (content === undefined) {
@@ -286,7 +292,7 @@ export async function executePulls(
 		}
 	}
 
-	return { count, errors, pulledPaths };
+	return { count, errors, warnings, pulledPaths };
 }
 
 /**
@@ -676,6 +682,7 @@ async function reconcileAssets(
 		downloaded: 0,
 		conflictsResolved: 0,
 		errors: [],
+		warnings: [],
 	};
 
 	const toUpload: ReconcileUpload[] = [];
@@ -687,6 +694,13 @@ async function reconcileAssets(
 			const localPath = await env.resolveAssetPath(asset.id, note.path);
 			if (!localPath) {
 				// Cannot resolve asset path (e.g., file doesn't exist locally)
+				if (!isSafeVaultPath(asset.id.replace(/^\//, ""))) {
+					result.warnings.push({
+						path: note.path,
+						level: "WARNING",
+						message: `Skipped asset ${asset.id}: path is outside the vault`,
+					});
+				}
 				continue;
 			}
 
@@ -828,6 +842,7 @@ async function handleAssetConflicts(
 		downloaded: 0,
 		conflictsResolved: 0,
 		errors: [],
+		warnings: [],
 	};
 
 	// Stryker disable all
@@ -900,8 +915,8 @@ async function handleAssetConflicts(
 export async function downloadAssetsForNotes(
 	env: SyncEnv,
 	notePaths: string[]
-): Promise<{ downloaded: number; errors: string[] }> {
-	const result = { downloaded: 0, errors: [] as string[] };
+): Promise<{ downloaded: number; errors: string[]; warnings: SyncResult["warnings"] }> {
+	const result = { downloaded: 0, errors: [] as string[], warnings: [] as SyncResult["warnings"] };
 
 	if (notePaths.length === 0) {
 		return result;
@@ -919,8 +934,15 @@ export async function downloadAssetsForNotes(
 		for (const asset of note.assets) {
 			// Strip leading slash - Obsidian paths don't start with /
 			const absolutePath = asset.absolutePath.replace(/^\//, "");
+			if (absolutePath === "") {
+				continue;
+			}
 			if (!isSafeVaultPath(absolutePath)) {
-				result.errors.push(`Refused to write asset ${asset.absolutePath}: path is outside the vault`);
+				result.warnings.push({
+					path: note.path,
+					level: "WARNING",
+					message: `Skipped asset ${asset.absolutePath}: path is outside the vault`,
+				});
 				continue;
 			}
 			if (!toDownload.has(absolutePath)) {
@@ -979,7 +1001,7 @@ async function reconcileAssetsForUnchangedNotes(
 	notePaths: string[]
 ): Promise<AssetSyncResult> {
 	if (notePaths.length === 0) {
-		return { uploaded: 0, downloaded: 0, conflictsResolved: 0, errors: [] };
+		return { uploaded: 0, downloaded: 0, conflictsResolved: 0, errors: [], warnings: [] };
 	}
 
 	const noteAssets = await env.fetchNoteAssets(notePaths);

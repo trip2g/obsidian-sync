@@ -91,4 +91,40 @@ describe("NodeEnv keeps every file operation inside the vault", () => {
 		await env.deleteFile("img/b.png");
 		expect(env.fileExistsSync("img/b.png")).toBe(false);
 	});
+
+	it("answers false instead of throwing for paths the filesystem cannot walk", () => {
+		fs.writeFileSync(path.join(vault, "a.md"), "x");
+		fs.symlinkSync("loop-b", path.join(vault, "loop-a"));
+		fs.symlinkSync("loop-a", path.join(vault, "loop-b"));
+		expect(env.fileExistsSync("a.md/x.png")).toBe(false);
+		expect(env.fileExistsSync("loop-a/x.png")).toBe(false);
+		expect(env.fileExistsSync("loop-a")).toBe(false);
+		expect(env.fileExistsSync(`${"n".repeat(300)}/x.png`)).toBe(false);
+	});
+
+	it("refuses a symlink that resolves into a service folder", async () => {
+		fs.symlinkSync(path.join(vault, ".obsidian"), path.join(vault, "cfg"));
+		expect(env.fileExistsSync("cfg/plugins/trip2g/data.json")).toBe(false);
+		await expect(env.hashBinaryFile("cfg/plugins/trip2g/data.json")).rejects.toThrow();
+		await expect(env.readFileContent("cfg/plugins/trip2g/data.json")).rejects.toThrow();
+		await expect(env.writeBinaryFile("cfg/plugins/trip2g/data.json", new ArrayBuffer(1))).rejects.toThrow();
+		expect(fs.readFileSync(path.join(vault, ".obsidian/plugins/trip2g/data.json"), "utf-8")).toBe('{"apiKey":"k"}');
+	});
+
+	it("resolves and writes assets in ordinary dot folders", async () => {
+		fs.mkdirSync(path.join(vault, ".attachments"));
+		fs.writeFileSync(path.join(vault, ".attachments/a.png"), "png");
+		expect(env.fileExistsSync(".attachments/a.png")).toBe(true);
+		await env.createFolder(".gitbook/assets");
+		await env.writeBinaryFile(".gitbook/assets/b.png", new ArrayBuffer(1));
+		expect(fs.existsSync(path.join(vault, ".gitbook/assets/b.png"))).toBe(true);
+	});
+
+	it("lists notes in subfolders with slash-separated paths", async () => {
+		fs.mkdirSync(path.join(vault, "sub"));
+		fs.writeFileSync(path.join(vault, "sub/a.md"), "x");
+		const { notes, all } = (env as unknown as { walkVault(): { notes: { path: string }[]; all: string[] } }).walkVault();
+		expect(notes.map((n) => n.path)).toContain("sub/a.md");
+		expect(all).toContain("sub/a.md");
+	});
 });
