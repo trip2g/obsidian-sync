@@ -82,11 +82,8 @@ function createMockEnv(options: {
 		// File operations
 		writeFile: vi.fn().mockResolvedValue(undefined),
 		writeBinaryFile: vi.fn().mockResolvedValue(undefined),
-		readBinaryFile: vi.fn().mockImplementation(async (path: string) => {
-			if (binaryContents[path] !== undefined) {
-				return binaryContents[path];
-			}
-			return new ArrayBuffer(0);
+		openBinaryBlob: vi.fn().mockImplementation(async (path: string) => {
+			return new Blob([binaryContents[path] ?? new ArrayBuffer(0)]);
 		}),
 		deleteFile: vi.fn().mockResolvedValue(undefined),
 		createFolder: vi.fn().mockResolvedValue(undefined),
@@ -114,7 +111,7 @@ function createMockEnv(options: {
 		commitNotes: vi.fn().mockResolvedValue({ updated: [] }),
 
 		// Asset operations
-		computeBinaryHash: vi.fn().mockImplementation(async () => "binary_hash"),
+		hashBinaryFile: vi.fn().mockImplementation(async () => "binary_hash"),
 		resolveAssetPath: vi.fn().mockImplementation(async (assetPath: string) => assetPath),
 
 		// State
@@ -797,7 +794,7 @@ describe("executePlan", () => {
 
 			// Asset exists locally with SAME hash
 			(env.fileExists as ReturnType<typeof vi.fn>).mockResolvedValue(true);
-			(env.computeBinaryHash as ReturnType<typeof vi.fn>).mockResolvedValue("abc123");
+			(env.hashBinaryFile as ReturnType<typeof vi.fn>).mockResolvedValue("abc123");
 
 			await executePlan(env, plan, { twoWaySync: false });
 
@@ -838,7 +835,7 @@ describe("executePlan", () => {
 			// Asset exists locally
 			(env.fileExists as ReturnType<typeof vi.fn>).mockResolvedValue(true);
 			// Local file has DIFFERENT hash (user edited the CSS)
-			(env.computeBinaryHash as ReturnType<typeof vi.fn>).mockResolvedValue("new_css_hash");
+			(env.hashBinaryFile as ReturnType<typeof vi.fn>).mockResolvedValue("new_css_hash");
 
 			await executePlan(env, plan, { twoWaySync: false });
 

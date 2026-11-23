@@ -221,7 +221,8 @@ export interface SyncEnv extends ClassifyEnv {
 	// File operations
 	writeFile(path: string, content: string): Promise<void>;
 	writeBinaryFile(path: string, data: ArrayBuffer): Promise<void>;
-	readBinaryFile(path: string): Promise<ArrayBuffer>;
+	/** Open a vault file as a Blob for upload; the Node CLI backs it by the file instead of reading it into memory. */
+	openBinaryBlob(path: string): Promise<Blob>;
 	deleteFile(path: string): Promise<void>;
 	createFolder(path: string): Promise<void>;
 	fileExists(path: string): Promise<boolean>;
@@ -236,8 +237,8 @@ export interface SyncEnv extends ClassifyEnv {
 	commitNotes(): Promise<CommitNotesResult>;
 
 	// Asset operations
-	/** Compute SHA256 hash for binary data (URL-safe base64 with padding) */
-	computeBinaryHash(data: ArrayBuffer): Promise<string>;
+	/** SHA256 of a vault file as lowercase hex; the Node CLI streams the file instead of reading it into memory. */
+	hashBinaryFile(path: string): Promise<string>;
 	/**
 	 * Resolve wikilink asset path to absolute path in vault.
 	 * E.g., "image.png" referenced from "folder/note.md" -> "folder/image.png" or "assets/image.png"

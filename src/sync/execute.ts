@@ -699,8 +699,7 @@ async function reconcileAssets(
 					continue;
 				}
 				try {
-					const localData = await env.readBinaryFile(localPath);
-					const localHash = await env.computeBinaryHash(localData);
+					const localHash = await env.hashBinaryFile(localPath);
 					toUpload.push({ noteId: note.id, assetId: asset.id, localPath, localHash });
 				} catch (e) {
 					result.errors.push(`Failed to read local asset ${localPath}: ${e}`);
@@ -717,8 +716,7 @@ async function reconcileAssets(
 			}
 
 			try {
-				const localData = await env.readBinaryFile(localPath);
-				const localHash = await env.computeBinaryHash(localData);
+				const localHash = await env.hashBinaryFile(localPath);
 				if (localHash === asset.serverHash) {
 					// Hashes match - no action needed
 					continue;
@@ -756,8 +754,7 @@ async function reconcileAssets(
 			env.onProgress({ step: "upload_asset", current: uploadCurrent, total: uploadTotal, path: item.assetId });
 
 			try {
-				const localData = await env.readBinaryFile(item.localPath);
-				const blob = new Blob([localData]);
+				const blob = await env.openBinaryBlob(item.localPath);
 				const fileName = item.localPath.substring(item.localPath.lastIndexOf("/") + 1);
 
 				const success = await env.uploadAsset({
@@ -858,8 +855,7 @@ async function handleAssetConflicts(
 		try {
 			if (resolution === "keep_local") {
 				// Upload local asset to server
-				const localData = await env.readBinaryFile(conflict.absolutePath);
-				const blob = new Blob([localData]);
+				const blob = await env.openBinaryBlob(conflict.absolutePath);
 				const fileName = conflict.absolutePath.substring(conflict.absolutePath.lastIndexOf("/") + 1);
 
 				const success = await env.uploadAsset({

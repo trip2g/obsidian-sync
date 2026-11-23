@@ -348,10 +348,9 @@ export class BrowserEnv implements SyncEnv {
 		await writable.close();
 	}
 
-	async readBinaryFile(path: string): Promise<ArrayBuffer> {
+	async openBinaryBlob(path: string): Promise<Blob> {
 		const handle = await this.getFileHandle(path);
-		const file = await handle.getFile();
-		return file.arrayBuffer();
+		return handle.getFile();
 	}
 
 	async deleteFile(path: string): Promise<void> {
@@ -714,7 +713,9 @@ export class BrowserEnv implements SyncEnv {
 
 	// ============ Asset Operations ============
 
-	async computeBinaryHash(data: ArrayBuffer): Promise<string> {
+	async hashBinaryFile(path: string): Promise<string> {
+		const blob = await this.openBinaryBlob(path);
+		const data = await blob.arrayBuffer();
 		const hashBuffer = await crypto.subtle.digest("SHA-256", data);
 		// Return hex format (server expects hex for asset hash validation)
 		return this.arrayBufferToHex(hashBuffer);

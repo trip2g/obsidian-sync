@@ -157,13 +157,17 @@ export class ObsidianSyncEnv implements SyncEnv {
 		}
 	}
 
-	async readBinaryFile(path: string): Promise<ArrayBuffer> {
+	private async readBinaryFile(path: string): Promise<ArrayBuffer> {
 		const fullPath = this.getFullPath(path);
 		const file = this.app.vault.getAbstractFileByPath(fullPath);
 		if (!(file instanceof TFile)) {
 			throw new Error(`File not found: ${path}`);
 		}
 		return this.app.vault.readBinary(file);
+	}
+
+	async openBinaryBlob(path: string): Promise<Blob> {
+		return new Blob([await this.readBinaryFile(path)]);
 	}
 
 	async deleteFile(path: string): Promise<void> {
@@ -393,7 +397,8 @@ export class ObsidianSyncEnv implements SyncEnv {
 
 	// ============ Asset Operations ============
 
-	async computeBinaryHash(data: ArrayBuffer): Promise<string> {
+	async hashBinaryFile(path: string): Promise<string> {
+		const data = await this.readBinaryFile(path);
 		const hashBuffer = await crypto.subtle.digest("SHA-256", data);
 		const hashArray = new Uint8Array(hashBuffer);
 		return Array.from(hashArray)

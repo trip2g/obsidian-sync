@@ -33,7 +33,7 @@ class FakeVault {
 				this.disk.set(path, content);
 			},
 			writeBinaryFile: async () => {},
-			readBinaryFile: async () => new ArrayBuffer(0),
+			openBinaryBlob: async () => new Blob([]),
 			deleteFile: async (path: string) => {
 				this.disk.delete(path);
 			},
@@ -53,7 +53,7 @@ class FakeVault {
 			uploadAsset: async () => true,
 			downloadAsset: async () => null,
 			commitNotes: async () => ({ updated: [] }),
-			computeBinaryHash: async () => "",
+			hashBinaryFile: async () => "",
 			resolveAssetPath: async () => null,
 			saveSyncState: async (state: SyncState) => {
 				this.state = JSON.parse(JSON.stringify(state)) as SyncState;

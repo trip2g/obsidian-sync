@@ -106,8 +106,8 @@ function makeFakeEnv(model: FakeEnvModel, syncState: SyncState): SyncEnv {
 			model.local.set(path, content);
 		},
 		async writeBinaryFile(): Promise<void> {},
-		async readBinaryFile(): Promise<ArrayBuffer> {
-			return new ArrayBuffer(0);
+		async openBinaryBlob(): Promise<Blob> {
+			return new Blob([]);
 		},
 		async deleteFile(path: string): Promise<void> {
 			model.local.delete(path);
@@ -152,7 +152,7 @@ function makeFakeEnv(model: FakeEnvModel, syncState: SyncState): SyncEnv {
 		},
 
 		// Asset ops
-		async computeBinaryHash(): Promise<string> {
+		async hashBinaryFile(): Promise<string> {
 			return "binhash";
 		},
 		async resolveAssetPath(): Promise<string | null> {
