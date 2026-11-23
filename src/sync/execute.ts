@@ -12,7 +12,7 @@ import type {
 	AssetConflictResolution,
 	AssetSyncResult,
 } from "./types";
-import { isSafeVaultPath } from "./utils";
+import { isSafeVaultPath, PathOutsideVaultError } from "./utils";
 
 export interface ExecuteOptions {
 	twoWaySync: boolean;
@@ -218,6 +218,10 @@ async function localFileIsNonEmpty(env: SyncEnv, path: string): Promise<boolean>
 	}
 }
 
+function outsideVaultWarning(path: string): SyncResult["warnings"][number] {
+	return { path, level: "WARNING", message: `Skipped ${JSON.stringify(path)}: path is outside the vault` };
+}
+
 /**
  * Execute pull operations - download files from server.
  */
@@ -236,7 +240,7 @@ export async function executePulls(
 	const safePulls = pulls.filter((p) => isSafeVaultPath(p.path));
 	const warnings: SyncResult["warnings"] = [];
 	for (const path of new Set(pulls.filter((p) => !isSafeVaultPath(p.path)).map((p) => p.path))) {
-		warnings.push({ path, level: "WARNING", message: `Skipped ${path}: path is outside the vault` });
+		warnings.push({ path, level: "WARNING", message: `Skipped ${JSON.stringify(path)}: path is outside the vault` });
 	}
 
 	const paths = safePulls.map((p) => p.path);
@@ -288,6 +292,10 @@ export async function executePulls(
 			count++;
 			pulledPaths.push(pull.path);
 		} catch (e) {
+			if (e instanceof PathOutsideVaultError) {
+				warnings.push(outsideVaultWarning(pull.path));
+				continue;
+			}
 			errors.push(`Failed to write ${pull.path}: ${e}`);
 		}
 	}
@@ -694,13 +702,6 @@ async function reconcileAssets(
 			const localPath = await env.resolveAssetPath(asset.id, note.path);
 			if (!localPath) {
 				// Cannot resolve asset path (e.g., file doesn't exist locally)
-				if (!isSafeVaultPath(asset.id.replace(/^\//, ""))) {
-					result.warnings.push({
-						path: note.path,
-						level: "WARNING",
-						message: `Skipped asset ${asset.id}: path is outside the vault`,
-					});
-				}
 				continue;
 			}
 
@@ -813,6 +814,10 @@ async function reconcileAssets(
 				await env.writeBinaryFile(item.localPath, data);
 				result.downloaded++;
 			} catch (e) {
+				if (e instanceof PathOutsideVaultError) {
+					result.warnings.push(outsideVaultWarning(item.localPath));
+					continue;
+				}
 				result.errors.push(`Failed to download asset ${item.assetId}: ${e}`);
 			}
 		}
@@ -941,7 +946,7 @@ export async function downloadAssetsForNotes(
 				result.warnings.push({
 					path: note.path,
 					level: "WARNING",
-					message: `Skipped asset ${asset.absolutePath}: path is outside the vault`,
+					message: `Skipped asset ${JSON.stringify(asset.absolutePath)}: path is outside the vault`,
 				});
 				continue;
 			}
@@ -982,6 +987,10 @@ export async function downloadAssetsForNotes(
 			await env.writeBinaryFile(absolutePath, data);
 			result.downloaded++;
 		} catch (e) {
+			if (e instanceof PathOutsideVaultError) {
+				result.warnings.push(outsideVaultWarning(absolutePath));
+				continue;
+			}
 			result.errors.push(`Failed to download asset ${absolutePath}: ${e}`);
 		}
 	}

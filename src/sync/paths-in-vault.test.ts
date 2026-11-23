@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { resolveAssetPath, type ResolveEnv } from "./resolve";
-import { executePulls, downloadAssetsForNotes } from "./execute";
+import { executePulls, downloadAssetsForNotes, executePlan } from "./execute";
+import { PathOutsideVaultError } from "./utils";
 import type { SyncEnv, SyncState } from "./types";
 
 function createResolveEnv(existingFiles: string[]): ResolveEnv {
@@ -144,5 +145,52 @@ describe("executePulls reports an unsafe server path once", () => {
 		expect(result.warnings).toHaveLength(1);
 		expect(result.errors).toHaveLength(0);
 		expect(result.count).toBe(1);
+	});
+});
+
+
+describe("references and writes the user does not control", () => {
+	function planFor(path: string) {
+		const c = { path, action: "unchanged", localHash: "h", remoteHash: "h" };
+		return {
+			classifications: [c],
+			pulls: [],
+			pushes: [],
+			conflicts: [],
+			localOnly: [],
+			remoteOnly: [],
+			localDeleted: [],
+			serverDeleted: [],
+			unchanged: 1,
+		} as never;
+	}
+
+	it("stays silent for the user's own reference that leaves the vault", async () => {
+		const env = pullEnv({});
+		(env as unknown as { resolveAssetPath: unknown }).resolveAssetPath = vi.fn().mockResolvedValue(null);
+		(env as unknown as { saveSyncState: unknown }).saveSyncState = vi.fn().mockResolvedValue(undefined);
+		(env.fetchNoteAssets as ReturnType<typeof vi.fn>).mockResolvedValue([
+			{ noteId: 1, path: "a.md", assets: [{ id: "../img/a.png", hash: "", url: "", absolutePath: "" }] },
+		]);
+		const result = await executePlan(env, planFor("a.md"), { twoWaySync: false });
+		expect(result.warnings).toHaveLength(0);
+		expect(result.errors).toHaveLength(0);
+	});
+
+	it("downgrades a refused write to a warning", async () => {
+		const env = pullEnv({});
+		(env.writeFile as ReturnType<typeof vi.fn>).mockRejectedValue(new PathOutsideVaultError("sub/x.md"));
+		(env.writeBinaryFile as ReturnType<typeof vi.fn>).mockRejectedValue(new PathOutsideVaultError("img/a.png"));
+		(env.fetchNoteAssets as ReturnType<typeof vi.fn>).mockResolvedValue([
+			{ noteId: 1, path: "sub/x.md", assets: [{ id: "x", hash: "h", url: "http://x/a", absolutePath: "img/a.png" }] },
+		]);
+
+		const pulled = await executePulls(env, [{ path: "sub/x.md", remoteHash: "h" }] as never, { files: {} });
+		expect(pulled.errors).toHaveLength(0);
+		expect(pulled.warnings).toHaveLength(1);
+
+		const assets = await downloadAssetsForNotes(env, ["sub/x.md"]);
+		expect(assets.errors).toHaveLength(0);
+		expect(assets.warnings).toHaveLength(1);
 	});
 });

@@ -23,18 +23,44 @@ export function isAlwaysPublishable(path: string): boolean {
  * service segment (`.obsidian`, `.git`, `.trash`, `.sync-state*`). Other dot
  * folders such as `.attachments` are ordinary content.
  */
-export function isSafeVaultPath(p: string): boolean {
+export function isSafeVaultPath(p: string, configDir?: string): boolean {
 	if (p === "" || p.includes("\0") || p.includes("\\") || p.startsWith("/") || /^[A-Za-z]:/.test(p)) {
 		return false;
 	}
-	return p.split("/").every((segment) => segment !== ".." && !isServiceSegment(segment));
+	return p.split("/").every((segment) => segment !== ".." && !isServiceSegment(segment, configDir));
 }
 
-const SERVICE_SEGMENTS = new Set([".obsidian", ".git", ".trash"]);
+const SERVICE_NAMES = new Set([".obsidian", ".git", ".trash"]);
 
-/** Names the sync itself or the editor owns: configuration, repository data, trash, sync state. */
-export function isServiceSegment(segment: string): boolean {
-	return SERVICE_SEGMENTS.has(segment) || segment.startsWith(".sync-state");
+/**
+ * The name a case-insensitive or Unicode-normalising filesystem would give a
+ * path segment: lowercase, NFC, cut at an alternate-data-stream colon, trailing
+ * dots and spaces dropped.
+ */
+function normalizeSegment(segment: string): string {
+	const base = segment.normalize("NFC").toLowerCase();
+	const colon = base.indexOf(":");
+	return (colon < 0 ? base : base.slice(0, colon)).replace(/[. ]+$/, "");
+}
+
+/**
+ * Names the sync itself or the editor owns: configuration (including a custom
+ * `configDir`), repository data, trash, sync state. Compared in every spelling
+ * the filesystem may treat as the same name.
+ */
+export function isServiceSegment(segment: string, configDir?: string): boolean {
+	const name = normalizeSegment(segment);
+	if (SERVICE_NAMES.has(name) || name.startsWith(".sync-state")) {
+		return true;
+	}
+	return configDir !== undefined && configDir !== "" && name === normalizeSegment(configDir);
+}
+
+export class PathOutsideVaultError extends Error {
+	constructor(relativePath: string) {
+		super(`Path is outside the vault: ${JSON.stringify(relativePath)}`);
+		this.name = "PathOutsideVaultError";
+	}
 }
 
 /**

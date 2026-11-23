@@ -243,3 +243,33 @@ describe("isSafeVaultPath service paths", () => {
 		expect(isSafeVaultPath(p)).toBe(false);
 	});
 });
+
+
+describe("isSafeVaultPath service names in any spelling", () => {
+	it.each([
+		".OBSIDIAN/x",
+		".Obsidian/plugins/trip2g/main.js",
+		".GIT/hooks/post-checkout",
+		".Trash/x",
+		".SYNC-STATE.json",
+		".git./config",
+		".git /config",
+		".git::$INDEX_ALLOCATION/config",
+		"a/.Git/config",
+		".obsidian../x",
+	])("rejects %j", (p) => {
+		expect(isSafeVaultPath(p)).toBe(false);
+	});
+
+	it("rejects the configured config folder", () => {
+		expect(isSafeVaultPath(".obsidian-mobile/x", ".obsidian-mobile")).toBe(false);
+		expect(isSafeVaultPath(".Obsidian-Mobile/x", ".obsidian-mobile")).toBe(false);
+		expect(isSafeVaultPath(".obsidian-mobile/x")).toBe(true);
+		expect(isSafeVaultPath(".obsidian/x", ".obsidian-mobile")).toBe(false);
+	});
+
+	it("allows ordinary dot folders spelled like service names", () => {
+		expect(isSafeVaultPath(".github/a.png")).toBe(true);
+		expect(isSafeVaultPath(".gitbook/a.png")).toBe(true);
+	});
+});

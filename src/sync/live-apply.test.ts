@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/unbound-method */
 import { describe, it, expect, vi } from "vitest";
 import { applyLiveChanges } from "./live-apply";
+import { PathOutsideVaultError } from "./utils";
 import type { LiveApplyEnv } from "./live-apply";
 import type { SyncState } from "./types";
 import type { NoteChangeItem } from "./LivePullConnection";
@@ -358,6 +359,26 @@ describe("applyLiveChanges with an unsafe path in the batch", () => {
 		warn.mockRestore();
 		expect(env.writeFile).toHaveBeenCalledTimes(1);
 		expect(env.writeFile).toHaveBeenCalledWith("good.md", "y");
+		expect(result.pulledPaths).toEqual(["good.md"]);
+	});
+});
+
+
+describe("applyLiveChanges when the env refuses a write", () => {
+	it("skips that change and applies the rest", async () => {
+		const env = makeEnv({ missingFiles: ["bad.md", "good.md"] });
+		(env.writeFile as ReturnType<typeof vi.fn>).mockImplementation(async (p: string) => {
+			if (p === "bad.md") throw new PathOutsideVaultError(p);
+		});
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+		const result = await applyLiveChanges(
+			env,
+			[upsertChange("bad.md", "create", "x"), upsertChange("good.md", "create", "y")],
+			makeSyncState()
+		);
+
+		warn.mockRestore();
 		expect(result.pulledPaths).toEqual(["good.md"]);
 	});
 });

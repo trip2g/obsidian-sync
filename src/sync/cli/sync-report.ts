@@ -53,7 +53,7 @@ export function printSyncResult(result: SyncResult, totalActions: number, update
 		}
 		console.log("\n⚠️  Warnings:");
 		for (const [path, warnings] of byPath) {
-			console.log(`  ${path}`);
+			console.log(`  ${JSON.stringify(path)}`);
 			for (const w of warnings) {
 				const isCritical = w.level === "CRITICAL";
 				hasCritical = hasCritical || isCritical;
