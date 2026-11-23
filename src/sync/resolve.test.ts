@@ -135,9 +135,9 @@ describe("resolveAssetPath", () => {
 	});
 
 	describe("edge cases", () => {
-		it("handles empty asset path", () => {
+		it("does not resolve an empty asset path", () => {
 			const env = createEnv([""]);
-			expect(resolveAssetPath(env, "", "note.md")).toBe("");
+			expect(resolveAssetPath(env, "", "note.md")).toBeNull();
 		});
 
 		it("handles asset with spaces", () => {

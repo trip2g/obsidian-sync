@@ -6,7 +6,7 @@
  * [[image.png]] resolves to /image.png even when referenced from /folder/note.md
  */
 
-import { posixBasename, posixDirname, posixJoin } from "./utils";
+import { isSafeVaultPath, posixBasename, posixDirname, posixJoin } from "./utils";
 
 /**
  * Minimal interface for file existence check - easy to mock in tests.
@@ -65,6 +65,11 @@ export function resolveAssetPath(
 	assetPath: string,
 	notePath: string
 ): string | null {
+	const reference = assetPath.startsWith("/") ? assetPath.slice(1) : assetPath;
+	if (!isSafeVaultPath(reference) || !isSafeVaultPath(notePath)) {
+		return null;
+	}
+
 	// Handle explicit paths (contain /)
 	if (assetPath.startsWith("./")) {
 		// Explicit relative: ./image.png -> folder/image.png

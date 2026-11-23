@@ -18,6 +18,19 @@ export function isAlwaysPublishable(path: string): boolean {
 }
 
 /**
+ * True when `p` is a vault-relative, slash-separated path that stays inside the
+ * vault: no empty path, NUL, backslash, leading slash, drive letter, `..` or
+ * hidden (dot-prefixed) segment. Hidden folders such as `.obsidian` hold vault
+ * configuration, not content, and the sync walk never enumerates them.
+ */
+export function isSafeVaultPath(p: string): boolean {
+	if (p === "" || p.includes("\0") || p.includes("\\") || p.startsWith("/") || /^[A-Za-z]:/.test(p)) {
+		return false;
+	}
+	return p.split("/").every((segment) => segment === "" || segment === "." || !segment.startsWith("."));
+}
+
+/**
  * `path.posix` equivalents for vault-relative paths. Node's `path` can't be
  * bundled for the browser build (esbuild has nothing to resolve it to), and on
  * Windows `path.join`/`path.dirname` would treat `\` as a separator — vault

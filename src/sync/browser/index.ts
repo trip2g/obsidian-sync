@@ -4,7 +4,7 @@
  */
 
 import { directoryOpen, fileSave } from "browser-fs-access";
-import { isAlwaysPublishable, sameOrigin, resolveAssetUrl } from "../utils";
+import { isAlwaysPublishable, isSafeVaultPath, sameOrigin, resolveAssetUrl } from "../utils";
 import { AssetTooLargeError } from "../upload-retry";
 import type {
 	SyncEnv,
@@ -721,6 +721,11 @@ export class BrowserEnv implements SyncEnv {
 	}
 
 	async resolveAssetPath(assetPath: string, notePath: string): Promise<string | null> {
+		const reference = assetPath.startsWith("/") ? assetPath.slice(1) : assetPath;
+		if (!isSafeVaultPath(reference) || !isSafeVaultPath(notePath)) {
+			return null;
+		}
+
 		// Handle explicit paths
 		if (assetPath.startsWith("./")) {
 			const noteDir = this.dirname(notePath);
