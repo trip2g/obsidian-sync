@@ -1765,18 +1765,37 @@ function isAlwaysPublishable(path6) {
   return false;
 }
 __name(isAlwaysPublishable, "isAlwaysPublishable");
-function isSafeVaultPath(p) {
+function isSafeVaultPath(p, configDir) {
   if (p === "" || p.includes("\0") || p.includes("\\") || p.startsWith("/") || /^[A-Za-z]:/.test(p)) {
     return false;
   }
-  return p.split("/").every((segment) => segment !== ".." && !isServiceSegment(segment));
+  return p.split("/").every((segment) => segment !== ".." && !isServiceSegment(segment, configDir));
 }
 __name(isSafeVaultPath, "isSafeVaultPath");
-var SERVICE_SEGMENTS = /* @__PURE__ */ new Set([".obsidian", ".git", ".trash"]);
-function isServiceSegment(segment) {
-  return SERVICE_SEGMENTS.has(segment) || segment.startsWith(".sync-state");
+var SERVICE_NAMES = /* @__PURE__ */ new Set([".obsidian", ".git", ".trash"]);
+function normalizeSegment(segment) {
+  const base = segment.normalize("NFC").toLowerCase();
+  const colon = base.indexOf(":");
+  return (colon < 0 ? base : base.slice(0, colon)).replace(/[. ]+$/, "");
+}
+__name(normalizeSegment, "normalizeSegment");
+function isServiceSegment(segment, configDir) {
+  const name = normalizeSegment(segment);
+  if (SERVICE_NAMES.has(name) || name.startsWith(".sync-state")) {
+    return true;
+  }
+  return configDir !== void 0 && configDir !== "" && name === normalizeSegment(configDir);
 }
 __name(isServiceSegment, "isServiceSegment");
+var PathOutsideVaultError = class extends Error {
+  static {
+    __name(this, "PathOutsideVaultError");
+  }
+  constructor(relativePath) {
+    super(`Path is outside the vault: ${JSON.stringify(relativePath)}`);
+    this.name = "PathOutsideVaultError";
+  }
+};
 function posixBasename(p) {
   return p.slice(p.lastIndexOf("/") + 1);
 }
@@ -1893,16 +1912,7 @@ __name(resolveAssetPath, "resolveAssetPath");
 // src/sync/cli/safe-join.ts
 import * as fs from "fs";
 import * as path from "path";
-var PathOutsideVaultError = class extends Error {
-  static {
-    __name(this, "PathOutsideVaultError");
-  }
-  constructor(relativePath) {
-    super(`Path is outside the vault: ${JSON.stringify(relativePath)}`);
-    this.name = "PathOutsideVaultError";
-  }
-};
-var realpath = process.platform === "win32" ? fs.realpathSync.native : fs.realpathSync;
+var realpath = process.platform === "win32" || process.platform === "darwin" ? fs.realpathSync.native : fs.realpathSync;
 function realpathOfDeepestExisting(target) {
   let current = target;
   for (; ; ) {
@@ -1929,7 +1939,7 @@ function isInsideAndNotService(root, target) {
   if (relative6.startsWith("..") || path.isAbsolute(relative6)) {
     return false;
   }
-  return !relative6.split(path.sep).some(isServiceSegment);
+  return !relative6.split(path.sep).some((segment) => isServiceSegment(segment));
 }
 __name(isInsideAndNotService, "isInsideAndNotService");
 function safeJoin(folder, relativePath) {
@@ -3616,6 +3626,10 @@ async function localFileIsNonEmpty(env, path6) {
   }
 }
 __name(localFileIsNonEmpty, "localFileIsNonEmpty");
+function outsideVaultWarning(path6) {
+  return { path: path6, level: "WARNING", message: `Skipped ${JSON.stringify(path6)}: path is outside the vault` };
+}
+__name(outsideVaultWarning, "outsideVaultWarning");
 async function executePulls(env, pulls, syncState) {
   if (pulls.length === 0) {
     return { count: 0, errors: [], warnings: [], pulledPaths: [] };
@@ -3623,7 +3637,7 @@ async function executePulls(env, pulls, syncState) {
   const safePulls = pulls.filter((p) => isSafeVaultPath(p.path));
   const warnings = [];
   for (const path6 of new Set(pulls.filter((p) => !isSafeVaultPath(p.path)).map((p) => p.path))) {
-    warnings.push({ path: path6, level: "WARNING", message: `Skipped ${path6}: path is outside the vault` });
+    warnings.push({ path: path6, level: "WARNING", message: `Skipped ${JSON.stringify(path6)}: path is outside the vault` });
   }
   const paths = safePulls.map((p) => p.path);
   const errors = [];
@@ -3657,6 +3671,10 @@ async function executePulls(env, pulls, syncState) {
       count++;
       pulledPaths.push(pull.path);
     } catch (e) {
+      if (e instanceof PathOutsideVaultError) {
+        warnings.push(outsideVaultWarning(pull.path));
+        continue;
+      }
       errors.push(`Failed to write ${pull.path}: ${e}`);
     }
   }
@@ -3883,13 +3901,6 @@ async function reconcileAssets(env, notes, twoWaySync) {
     for (const asset of note.assets) {
       const localPath = await env.resolveAssetPath(asset.id, note.path);
       if (!localPath) {
-        if (!isSafeVaultPath(asset.id.replace(/^\//, ""))) {
-          result.warnings.push({
-            path: note.path,
-            level: "WARNING",
-            message: `Skipped asset ${asset.id}: path is outside the vault`
-          });
-        }
         continue;
       }
       const exists = await env.fileExists(localPath);
@@ -3982,6 +3993,10 @@ async function reconcileAssets(env, notes, twoWaySync) {
         await env.writeBinaryFile(item.localPath, data);
         result.downloaded++;
       } catch (e) {
+        if (e instanceof PathOutsideVaultError) {
+          result.warnings.push(outsideVaultWarning(item.localPath));
+          continue;
+        }
         result.errors.push(`Failed to download asset ${item.assetId}: ${e}`);
       }
     }
@@ -4069,7 +4084,7 @@ async function downloadAssetsForNotes(env, notePaths) {
         result.warnings.push({
           path: note.path,
           level: "WARNING",
-          message: `Skipped asset ${asset.absolutePath}: path is outside the vault`
+          message: `Skipped asset ${JSON.stringify(asset.absolutePath)}: path is outside the vault`
         });
         continue;
       }
@@ -4102,6 +4117,10 @@ async function downloadAssetsForNotes(env, notePaths) {
       await env.writeBinaryFile(absolutePath, data);
       result.downloaded++;
     } catch (e) {
+      if (e instanceof PathOutsideVaultError) {
+        result.warnings.push(outsideVaultWarning(absolutePath));
+        continue;
+      }
       result.errors.push(`Failed to download asset ${absolutePath}: ${e}`);
     }
   }
@@ -4207,7 +4226,7 @@ async function applyLiveChanges(env, changes, syncState) {
     if (!isSafeVaultPath(change.path)) {
       if (!warnedPaths.has(change.path)) {
         warnedPaths.add(change.path);
-        console.warn(`Skipped ${change.path}: path is outside the vault`);
+        console.warn(`Skipped ${JSON.stringify(change.path)}: path is outside the vault`);
       }
       continue;
     }
@@ -4247,11 +4266,19 @@ async function applyLiveChanges(env, changes, syncState) {
 }
 __name(applyLiveChanges, "applyLiveChanges");
 async function writeAndRecord(env, syncState, path6, content, remoteHash, pulledPaths) {
-  const dirPath = path6.substring(0, path6.lastIndexOf("/"));
-  if (dirPath) {
-    await env.createFolder(dirPath);
+  try {
+    const dirPath = path6.substring(0, path6.lastIndexOf("/"));
+    if (dirPath) {
+      await env.createFolder(dirPath);
+    }
+    await env.writeFile(path6, content);
+  } catch (e) {
+    if (e instanceof PathOutsideVaultError) {
+      console.warn(`Skipped ${JSON.stringify(path6)}: path is outside the vault`);
+      return;
+    }
+    throw e;
   }
-  await env.writeFile(path6, content);
   syncState.files[path6] = remoteHash;
   pulledPaths.push(path6);
 }
@@ -4803,7 +4830,7 @@ function printSyncResult(result, totalActions, updatedOutput) {
     }
     console.log("\n\u26A0\uFE0F  Warnings:");
     for (const [path6, warnings] of byPath) {
-      console.log(`  ${path6}`);
+      console.log(`  ${JSON.stringify(path6)}`);
       for (const w of warnings) {
         const isCritical = w.level === "CRITICAL";
         hasCritical = hasCritical || isCritical;
