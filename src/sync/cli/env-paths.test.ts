@@ -127,4 +127,15 @@ describe("NodeEnv keeps every file operation inside the vault", () => {
 		expect(notes.map((n) => n.path)).toContain("sub/a.md");
 		expect(all).toContain("sub/a.md");
 	});
+
+	it.each([".OBSIDIAN/plugins/trip2g/main.js", ".Git/hooks/post-checkout", ".git./config", ".Trash/x.md"])(
+		"refuses a service folder spelled %s",
+		async (p) => {
+			fs.mkdirSync(path.dirname(path.join(vault, p)), { recursive: true });
+			fs.writeFileSync(path.join(vault, p), "x");
+			await expect(env.writeFile(p, "y")).rejects.toThrow();
+			expect(env.fileExistsSync(p)).toBe(false);
+			expect(fs.readFileSync(path.join(vault, p), "utf-8")).toBe("x");
+		}
+	);
 });

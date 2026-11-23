@@ -1,7 +1,7 @@
 import type { NoteChangeItem } from "./LivePullConnection";
 import type { SyncState } from "./types";
 import { classifyFile } from "./classify";
-import { isAlwaysPublishable, isSafeVaultPath } from "./utils";
+import { isAlwaysPublishable, isSafeVaultPath, PathOutsideVaultError } from "./utils";
 
 /**
  * Minimal env interface for applyLiveChanges.
@@ -77,7 +77,7 @@ export async function applyLiveChanges(
 		if (!isSafeVaultPath(change.path)) {
 			if (!warnedPaths.has(change.path)) {
 				warnedPaths.add(change.path);
-				console.warn(`Skipped ${change.path}: path is outside the vault`);
+				console.warn(`Skipped ${JSON.stringify(change.path)}: path is outside the vault`);
 			}
 			continue;
 		}
@@ -151,11 +151,19 @@ async function writeAndRecord(
 	remoteHash: string,
 	pulledPaths: string[]
 ): Promise<void> {
-	const dirPath = path.substring(0, path.lastIndexOf("/"));
-	if (dirPath) {
-		await env.createFolder(dirPath);
+	try {
+		const dirPath = path.substring(0, path.lastIndexOf("/"));
+		if (dirPath) {
+			await env.createFolder(dirPath);
+		}
+		await env.writeFile(path, content);
+	} catch (e) {
+		if (e instanceof PathOutsideVaultError) {
+			console.warn(`Skipped ${JSON.stringify(path)}: path is outside the vault`);
+			return;
+		}
+		throw e;
 	}
-	await env.writeFile(path, content);
 	syncState.files[path] = remoteHash;
 	pulledPaths.push(path);
 }

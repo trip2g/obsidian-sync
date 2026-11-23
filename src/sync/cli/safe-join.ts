@@ -1,15 +1,10 @@
 import * as fs from "fs";
 import * as path from "path";
-import { isSafeVaultPath, isServiceSegment } from "../utils";
+import { isSafeVaultPath, isServiceSegment, PathOutsideVaultError } from "../utils";
 
-export class PathOutsideVaultError extends Error {
-	constructor(relativePath: string) {
-		super(`Path is outside the vault: ${JSON.stringify(relativePath)}`);
-		this.name = "PathOutsideVaultError";
-	}
-}
+export { PathOutsideVaultError };
 
-const realpath = process.platform === "win32" ? fs.realpathSync.native : fs.realpathSync;
+const realpath = process.platform === "win32" || process.platform === "darwin" ? fs.realpathSync.native : fs.realpathSync;
 
 function realpathOfDeepestExisting(target: string): string {
 	let current = target;
@@ -37,7 +32,7 @@ function isInsideAndNotService(root: string, target: string): boolean {
 	if (relative.startsWith("..") || path.isAbsolute(relative)) {
 		return false;
 	}
-	return !relative.split(path.sep).some(isServiceSegment);
+	return !relative.split(path.sep).some((segment) => isServiceSegment(segment));
 }
 
 /**

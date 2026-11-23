@@ -68,4 +68,11 @@ describe("printSyncResult", () => {
 
 		expect(printSyncResult(result({ pushed: 1, warnings }), 1, "")).toBe(EXIT_FAILURE);
 	});
+
+	it("prints a server-supplied path escaped", () => {
+		const output = capture();
+		const warnings = [{ path: "a\u001b[2Jb.md", level: "WARNING", message: "Skipped" }];
+		printSyncResult(result({ pushed: 1, warnings }), 1, "");
+		expect(output()).not.toContain("\u001b[2J");
+	});
 });

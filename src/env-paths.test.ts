@@ -2,8 +2,9 @@ import { describe, it, expect, vi } from "vitest";
 
 import { ObsidianSyncEnv } from "./env";
 
-function createEnv(folderPath: string) {
+function createEnv(folderPath: string, configDir?: string) {
 	const vault = {
+		configDir,
 		getAbstractFileByPath: vi.fn().mockReturnValue(null),
 		create: vi.fn().mockResolvedValue(undefined),
 		createBinary: vi.fn().mockResolvedValue(undefined),
@@ -37,11 +38,18 @@ describe("ObsidianSyncEnv keeps file operations inside the synced folder", () =>
 		await expect(env.writeBinaryFile("/abs.bin", new ArrayBuffer(1))).rejects.toThrow();
 		await expect(env.writeBinaryFile(".obsidian/plugins/trip2g/data.json", new ArrayBuffer(1))).rejects.toThrow();
 		await expect(env.createFolder("../d")).rejects.toThrow();
-		await expect(env.readBinaryFile("../x.bin")).rejects.toThrow();
+		await expect(env.openBinaryBlob("../x.bin")).rejects.toThrow();
 
 		expect(vault.create).not.toHaveBeenCalled();
 		expect(vault.createBinary).not.toHaveBeenCalled();
 		expect(vault.createFolder).not.toHaveBeenCalled();
+	});
+
+	it("protects the configured config folder", async () => {
+		const { env, vault } = createEnv("sub", ".obsidian-mobile");
+		await expect(env.writeFile(".obsidian-mobile/plugins/x/main.js", "x")).rejects.toThrow();
+		await expect(env.writeFile(".Obsidian/x.md", "x")).rejects.toThrow();
+		expect(vault.create).not.toHaveBeenCalled();
 	});
 
 	it("still writes an ordinary nested path under the folder", async () => {
