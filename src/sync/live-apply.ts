@@ -1,7 +1,7 @@
 import type { NoteChangeItem } from "./LivePullConnection";
 import type { SyncState } from "./types";
 import { classifyFile } from "./classify";
-import { isAlwaysPublishable } from "./utils";
+import { isAlwaysPublishable, isSafeVaultPath } from "./utils";
 
 /**
  * Minimal env interface for applyLiveChanges.
@@ -72,7 +72,16 @@ export async function applyLiveChanges(
 		}
 	}
 
+	const warnedPaths = new Set<string>();
 	for (const change of changes) {
+		if (!isSafeVaultPath(change.path)) {
+			if (!warnedPaths.has(change.path)) {
+				warnedPaths.add(change.path);
+				console.warn(`Skipped ${change.path}: path is outside the vault`);
+			}
+			continue;
+		}
+
 		if (change.__typename === "NoteHideEvent") {
 			// Only consider hiding files we have locally and have synced before.
 			// The caller (e.g. handleLiveHide in main.ts) is responsible for

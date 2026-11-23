@@ -69,7 +69,9 @@ describe("executePulls keeps server paths inside the vault", () => {
 			expect(env.writeFile).not.toHaveBeenCalled();
 			expect(env.createFolder).not.toHaveBeenCalled();
 			expect(result.count).toBe(0);
-			expect(result.errors).toHaveLength(1);
+			expect(result.errors).toHaveLength(0);
+			expect(result.warnings).toHaveLength(1);
+			expect(result.warnings[0].path).toBe(badPath);
 			expect(state.files[badPath]).toBeUndefined();
 		}
 	);
@@ -97,7 +99,50 @@ describe("downloadAssetsForNotes keeps server asset paths inside the vault", () 
 			expect(env.downloadAsset).not.toHaveBeenCalled();
 			expect(env.createFolder).not.toHaveBeenCalled();
 			expect(result.downloaded).toBe(0);
-			expect(result.errors).toHaveLength(1);
+			expect(result.errors).toHaveLength(0);
+			expect(result.warnings).toHaveLength(1);
+			expect(result.warnings[0].message).toContain(absolutePath);
 		}
 	);
+
+	function assetEnv(absolutePath: string): SyncEnv {
+		const env = pullEnv({});
+		(env.fetchNoteAssets as ReturnType<typeof vi.fn>).mockResolvedValue([
+			{ noteId: 1, path: "a.md", assets: [{ id: "x", hash: "h", url: "http://x/asset", absolutePath }] },
+		]);
+		return env;
+	}
+
+	it("skips an asset the server never stored without an error or a warning", async () => {
+		const env = assetEnv("");
+		const result = await downloadAssetsForNotes(env, ["a.md"]);
+		expect(env.downloadAsset).not.toHaveBeenCalled();
+		expect(result.errors).toHaveLength(0);
+		expect(result.warnings).toHaveLength(0);
+	});
+
+	it.each([".attachments/a.png", "/.gitbook/assets/a.png"])("still downloads into the dot folder %s", async (absolutePath) => {
+		const env = assetEnv(absolutePath);
+		const result = await downloadAssetsForNotes(env, ["a.md"]);
+		expect(result.downloaded).toBe(1);
+		expect(env.writeBinaryFile).toHaveBeenCalledWith(absolutePath.replace(/^\//, ""), expect.anything());
+	});
+});
+
+describe("executePulls reports an unsafe server path once", () => {
+	it("warns a single time for a path listed twice", async () => {
+		const env = pullEnv({});
+		const result = await executePulls(
+			env,
+			[
+				{ path: "../x.md", remoteHash: "h" },
+				{ path: "../x.md", remoteHash: "h" },
+				{ path: "ok.md", remoteHash: "h" },
+			] as never,
+			{ files: {} }
+		);
+		expect(result.warnings).toHaveLength(1);
+		expect(result.errors).toHaveLength(0);
+		expect(result.count).toBe(1);
+	});
 });

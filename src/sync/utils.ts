@@ -20,14 +20,21 @@ export function isAlwaysPublishable(path: string): boolean {
 /**
  * True when `p` is a vault-relative, slash-separated path that stays inside the
  * vault: no empty path, NUL, backslash, leading slash, drive letter, `..` or
- * hidden (dot-prefixed) segment. Hidden folders such as `.obsidian` hold vault
- * configuration, not content, and the sync walk never enumerates them.
+ * service segment (`.obsidian`, `.git`, `.trash`, `.sync-state*`). Other dot
+ * folders such as `.attachments` are ordinary content.
  */
 export function isSafeVaultPath(p: string): boolean {
 	if (p === "" || p.includes("\0") || p.includes("\\") || p.startsWith("/") || /^[A-Za-z]:/.test(p)) {
 		return false;
 	}
-	return p.split("/").every((segment) => segment === "" || segment === "." || !segment.startsWith("."));
+	return p.split("/").every((segment) => segment !== ".." && !isServiceSegment(segment));
+}
+
+const SERVICE_SEGMENTS = new Set([".obsidian", ".git", ".trash"]);
+
+/** Names the sync itself or the editor owns: configuration, repository data, trash, sync state. */
+export function isServiceSegment(segment: string): boolean {
+	return SERVICE_SEGMENTS.has(segment) || segment.startsWith(".sync-state");
 }
 
 /**

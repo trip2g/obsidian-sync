@@ -202,6 +202,7 @@ export interface AssetSyncResult {
 	downloaded: number;
 	conflictsResolved: number;
 	errors: string[];
+	warnings: SyncResult["warnings"];
 }
 
 export interface NoteWarning {
