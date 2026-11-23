@@ -5,7 +5,7 @@
 
 import { App, TFile, TFolder, requestUrl } from "obsidian";
 import type { Sdk } from "./graphql";
-import { isAlwaysPublishable, sameOrigin, resolveAssetUrl } from "./sync/utils";
+import { isAlwaysPublishable, isSafeVaultPath, sameOrigin, resolveAssetUrl } from "./sync/utils";
 import { uploadWithRetry, AssetTooLargeError } from "./sync/upload-retry";
 import type {
 	SyncEnv,
@@ -447,6 +447,9 @@ export class ObsidianSyncEnv implements SyncEnv {
 	// ============ Helper Methods ============
 
 	private getFullPath(relativePath: string): string {
+		if (!isSafeVaultPath(relativePath)) {
+			throw new Error(`Path is outside the vault: ${JSON.stringify(relativePath)}`);
+		}
 		if (this.folder.path === "/" || this.folder.path === "") {
 			return relativePath;
 		}

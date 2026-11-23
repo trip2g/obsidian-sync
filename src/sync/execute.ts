@@ -12,6 +12,7 @@ import type {
 	AssetConflictResolution,
 	AssetSyncResult,
 } from "./types";
+import { isSafeVaultPath } from "./utils";
 
 export interface ExecuteOptions {
 	twoWaySync: boolean;
@@ -242,6 +243,11 @@ export async function executePulls(
 	for (const pull of pulls) {
 		current++;
 		env.onProgress({ step: "pull", current, total, path: pull.path });
+
+		if (!isSafeVaultPath(pull.path)) {
+			errors.push(`Refused to write ${pull.path}: path is outside the vault`);
+			continue;
+		}
 
 		const content = contentMap.get(pull.path);
 		if (content === undefined) {
@@ -917,6 +923,10 @@ export async function downloadAssetsForNotes(
 		for (const asset of note.assets) {
 			// Strip leading slash - Obsidian paths don't start with /
 			const absolutePath = asset.absolutePath.replace(/^\//, "");
+			if (!isSafeVaultPath(absolutePath)) {
+				result.errors.push(`Refused to write asset ${asset.absolutePath}: path is outside the vault`);
+				continue;
+			}
 			if (!toDownload.has(absolutePath)) {
 				// Check if asset already exists locally
 				const exists = await env.fileExists(absolutePath);

@@ -21,6 +21,7 @@ import type {
 	AssetConflictResolution,
 } from "../types";
 import { resolveAssetPath } from "../resolve";
+import { PathOutsideVaultError, safeJoin } from "./safe-join";
 import { uploadWithRetry, AssetTooLargeError } from "../upload-retry";
 import { createClient, type ClientOptions } from "./client";
 import { writeFileAtomic, sweepStaleTempFiles } from "./atomic-write";
@@ -250,37 +251,37 @@ export class NodeEnv implements SyncEnv {
 	async readFileContent(filePath: string): Promise<string> {
 		// filePath is remote path, convert to local
 		const localPath = this.toLocalPath(filePath);
-		const fullPath = path.join(this.folder, localPath);
+		const fullPath = safeJoin(this.folder, localPath);
 		return fs.readFileSync(fullPath, "utf-8");
 	}
 
 	// ============ File Operations ============
 
 	async writeFile(filePath: string, content: string): Promise<void> {
-		const fullPath = path.join(this.folder, filePath);
+		const fullPath = safeJoin(this.folder, filePath);
 		writeFileAtomic(fullPath, content);
 	}
 
 	async writeBinaryFile(filePath: string, data: ArrayBuffer): Promise<void> {
-		const fullPath = path.join(this.folder, filePath);
+		const fullPath = safeJoin(this.folder, filePath);
 		writeFileAtomic(fullPath, Buffer.from(data));
 	}
 
 	async readBinaryFile(filePath: string): Promise<ArrayBuffer> {
-		const fullPath = path.join(this.folder, filePath);
+		const fullPath = safeJoin(this.folder, filePath);
 		const buffer = fs.readFileSync(fullPath);
 		return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
 	}
 
 	async deleteFile(filePath: string): Promise<void> {
-		const fullPath = path.join(this.folder, filePath);
+		const fullPath = safeJoin(this.folder, filePath);
 		if (fs.existsSync(fullPath)) {
 			fs.unlinkSync(fullPath);
 		}
 	}
 
 	async createFolder(folderPath: string): Promise<void> {
-		const fullPath = path.join(this.folder, folderPath);
+		const fullPath = safeJoin(this.folder, folderPath);
 		fs.mkdirSync(fullPath, { recursive: true });
 	}
 
@@ -289,8 +290,14 @@ export class NodeEnv implements SyncEnv {
 	}
 
 	fileExistsSync(filePath: string): boolean {
-		const fullPath = path.join(this.folder, filePath);
-		return fs.existsSync(fullPath);
+		try {
+			return fs.existsSync(safeJoin(this.folder, filePath));
+		} catch (e) {
+			if (e instanceof PathOutsideVaultError) {
+				return false;
+			}
+			throw e;
+		}
 	}
 
 	// ============ Server Operations ============
