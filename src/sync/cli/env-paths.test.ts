@@ -43,13 +43,16 @@ describe("NodeEnv keeps every file operation inside the vault", () => {
 	it("does not resolve a reference to a file symlink leaving the vault", async () => {
 		fs.symlinkSync(path.join(root, "secret.txt"), path.join(vault, "img/s.png"));
 		expect(await env.resolveAssetPath("img/s.png", "a.md")).toBeNull();
-		await expect(env.readBinaryFile("img/s.png")).rejects.toThrow();
+		await expect(env.hashBinaryFile("img/s.png")).rejects.toThrow();
+		await expect(env.openBinaryBlob("img/s.png")).rejects.toThrow();
 	});
 
 	it("refuses to read outside the vault", async () => {
-		await expect(env.readBinaryFile("../secret.txt")).rejects.toThrow();
+		await expect(env.hashBinaryFile("../secret.txt")).rejects.toThrow();
+		await expect(env.openBinaryBlob("../secret.txt")).rejects.toThrow();
 		await expect(env.readFileContent("../secret.txt")).rejects.toThrow();
-		await expect(env.readBinaryFile(path.join(root, "secret.txt"))).rejects.toThrow();
+		await expect(env.hashBinaryFile(path.join(root, "secret.txt"))).rejects.toThrow();
+		await expect(env.openBinaryBlob(path.join(root, "secret.txt"))).rejects.toThrow();
 		expect(env.fileExistsSync("../secret.txt")).toBe(false);
 	});
 

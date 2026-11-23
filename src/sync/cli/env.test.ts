@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import * as crypto from "crypto";
 import { NodeEnv, stateFileNameForApiUrl } from "./env";
 
 describe("stateFileNameForApiUrl", () => {
@@ -244,6 +245,74 @@ describe("NodeEnv push and hide failures", () => {
 			await expect(env.hideNotes(["a.md"])).rejects.toThrow("HTTP 502");
 		} finally {
 			silence.mockRestore();
+		}
+	});
+});
+
+describe("NodeEnv binary files", () => {
+	const makeFolderEnv = (folder: string) =>
+		new NodeEnv({
+			folder,
+			apiUrl: "http://localhost:8081/graphql",
+			apiKey: "test-key",
+			twoWaySync: false,
+		});
+
+	it("hashes a file to the same hex SHA256 as hashing its whole content", async () => {
+		const folder = fs.mkdtempSync(path.join(os.tmpdir(), "obsidian-sync-test-"));
+		try {
+			const content = Buffer.alloc(3 * 1024 * 1024 + 17);
+			for (let i = 0; i < content.length; i++) {
+				content[i] = (i * 31) % 251;
+			}
+			fs.writeFileSync(path.join(folder, "big.bin"), content);
+			fs.writeFileSync(path.join(folder, "empty.bin"), "");
+
+			const env = makeFolderEnv(folder);
+
+			await expect(env.hashBinaryFile("big.bin")).resolves.toBe(
+				crypto.createHash("sha256").update(content).digest("hex"),
+			);
+			await expect(env.hashBinaryFile("empty.bin")).resolves.toBe(
+				"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			);
+		} finally {
+			fs.rmSync(folder, { recursive: true });
+		}
+	});
+
+	it("opens a file as a Blob with the file's bytes", async () => {
+		const folder = fs.mkdtempSync(path.join(os.tmpdir(), "obsidian-sync-test-"));
+		try {
+			const content = Buffer.from([0, 1, 2, 253, 254, 255]);
+			fs.mkdirSync(path.join(folder, "sub"));
+			fs.writeFileSync(path.join(folder, "sub", "a.bin"), content);
+
+			const blob = await makeFolderEnv(folder).openBinaryBlob("sub/a.bin");
+
+			expect(blob.size).toBe(content.length);
+			expect(Buffer.from(await blob.arrayBuffer())).toEqual(content);
+		} finally {
+			fs.rmSync(folder, { recursive: true });
+		}
+	});
+
+	it("rejects paths outside the vault for hashing and opening", async () => {
+		const parent = fs.mkdtempSync(path.join(os.tmpdir(), "obsidian-sync-test-"));
+		try {
+			const folder = path.join(parent, "vault");
+			fs.mkdirSync(folder);
+			fs.writeFileSync(path.join(parent, "secret.bin"), "secret");
+			fs.symlinkSync(path.join(parent, "secret.bin"), path.join(folder, "link.bin"));
+
+			const env = makeFolderEnv(folder);
+
+			for (const bad of ["../secret.bin", path.join(parent, "secret.bin"), "link.bin"]) {
+				await expect(env.hashBinaryFile(bad)).rejects.toThrow(/outside the vault/);
+				await expect(env.openBinaryBlob(bad)).rejects.toThrow(/outside the vault/);
+			}
+		} finally {
+			fs.rmSync(parent, { recursive: true });
 		}
 	});
 });

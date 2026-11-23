@@ -267,10 +267,8 @@ export class NodeEnv implements SyncEnv {
 		writeFileAtomic(fullPath, Buffer.from(data));
 	}
 
-	async readBinaryFile(filePath: string): Promise<ArrayBuffer> {
-		const fullPath = safeJoin(this.folder, filePath);
-		const buffer = fs.readFileSync(fullPath);
-		return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+	async openBinaryBlob(filePath: string): Promise<Blob> {
+		return fs.openAsBlob(safeJoin(this.folder, filePath));
 	}
 
 	async deleteFile(filePath: string): Promise<void> {
@@ -580,9 +578,14 @@ export class NodeEnv implements SyncEnv {
 
 	// ============ Asset Operations ============
 
-	async computeBinaryHash(data: ArrayBuffer): Promise<string> {
+	async hashBinaryFile(filePath: string): Promise<string> {
 		// Return hex format (server expects hex for asset hash validation)
-		return crypto.createHash("sha256").update(Buffer.from(data)).digest("hex");
+		const hash = crypto.createHash("sha256");
+		const stream = fs.createReadStream(safeJoin(this.folder, filePath));
+		for await (const chunk of stream as AsyncIterable<Buffer>) {
+			hash.update(chunk);
+		}
+		return hash.digest("hex");
 	}
 
 	async resolveAssetPath(assetPath: string, notePath: string): Promise<string | null> {

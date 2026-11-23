@@ -49,7 +49,7 @@ class World {
 				this.disk.set(p, c);
 			},
 			writeBinaryFile: async () => {},
-			readBinaryFile: async () => new ArrayBuffer(0),
+			openBinaryBlob: async () => new Blob([]),
 			deleteFile: async (p: string) => {
 				this.disk.delete(p);
 			},
@@ -75,7 +75,7 @@ class World {
 			uploadAsset: async () => true,
 			downloadAsset: async () => null,
 			commitNotes: async () => ({ updated: [] }),
-			computeBinaryHash: async () => "",
+			hashBinaryFile: async () => "",
 			resolveAssetPath: async () => null,
 			saveSyncState: async (s: SyncState) => {
 				this.state = JSON.parse(JSON.stringify(s)) as SyncState;
