@@ -316,3 +316,40 @@ describe("NodeEnv binary files", () => {
 		}
 	});
 });
+
+describe("NodeEnv.downloadAsset", () => {
+	function makeEnv() {
+		const folder = fs.mkdtempSync(path.join(os.tmpdir(), "sync-env-asset-"));
+		return new NodeEnv({
+			folder,
+			apiUrl: "http://127.0.0.1:8080/graphql",
+			apiKey: "test-key",
+			twoWaySync: true,
+		});
+	}
+
+	function stubFetch() {
+		const calls: Array<{ url: string; headers?: Record<string, string> }> = [];
+		vi.stubGlobal("fetch", async (url: string, init?: { headers?: Record<string, string> }) => {
+			calls.push({ url, headers: init?.headers });
+			return { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(0) };
+		});
+		return calls;
+	}
+
+	it("fetches a public-host system asset from the api origin with the key", async () => {
+		const calls = stubFetch();
+		await makeEnv().downloadAsset("https://public.example/_system/assets/abc/x.png");
+		vi.unstubAllGlobals();
+		expect(calls).toEqual([
+			{ url: "http://127.0.0.1:8080/_system/assets/abc/x.png", headers: { "X-API-Key": "test-key" } },
+		]);
+	});
+
+	it("sends no key to a foreign url", async () => {
+		const calls = stubFetch();
+		await makeEnv().downloadAsset("https://cdn.example/x.png");
+		vi.unstubAllGlobals();
+		expect(calls).toEqual([{ url: "https://cdn.example/x.png", headers: undefined }]);
+	});
+});
