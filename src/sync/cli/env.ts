@@ -5,7 +5,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { isAlwaysPublishable, sameOrigin, resolveAssetUrl } from "../utils";
+import { isAlwaysPublishable, assetFetchTarget } from "../utils";
 import type {
 	SyncEnv,
 	SyncState,
@@ -532,9 +532,10 @@ export class NodeEnv implements SyncEnv {
 	}
 
 	async downloadAsset(url: string): Promise<ArrayBuffer | null> {
-		const resolvedUrl = resolveAssetUrl(this.apiUrl, url);
+		const target = assetFetchTarget(this.apiUrl, url);
+		const resolvedUrl = target.url;
 		try {
-			const headers = sameOrigin(this.apiUrl, resolvedUrl) ? { "X-API-Key": this.apiKey } : undefined;
+			const headers = target.sendKey ? { "X-API-Key": this.apiKey } : undefined;
 			const response = await fetch(resolvedUrl, { headers });
 			if (!response.ok) {
 				console.error(`❌ Failed to download asset: HTTP ${response.status}`);

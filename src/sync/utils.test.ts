@@ -6,6 +6,7 @@ import {
 	syncErrorNotice,
 	sameOrigin,
 	resolveAssetUrl,
+	assetFetchTarget,
 	posixBasename,
 	posixDirname,
 	posixJoin,
@@ -271,5 +272,40 @@ describe("isSafeVaultPath service names in any spelling", () => {
 	it("allows ordinary dot folders spelled like service names", () => {
 		expect(isSafeVaultPath(".github/a.png")).toBe(true);
 		expect(isSafeVaultPath(".gitbook/a.png")).toBe(true);
+	});
+});
+
+describe("assetFetchTarget", () => {
+	const apiUrl = "http://127.0.0.1:8080/graphql";
+
+	it("fetches a public-host system asset from the api origin, with the key", () => {
+		expect(assetFetchTarget(apiUrl, "https://public.example/_system/assets/abc/x.png")).toEqual({
+			url: "http://127.0.0.1:8080/_system/assets/abc/x.png",
+			sendKey: true,
+		});
+	});
+
+	it("keeps the query of a system asset url", () => {
+		expect(assetFetchTarget(apiUrl, "https://public.example/_system/assets/abc/x.png?v=2").url).toBe(
+			"http://127.0.0.1:8080/_system/assets/abc/x.png?v=2"
+		);
+	});
+
+	it("resolves a relative system asset url against the api origin, with the key", () => {
+		expect(assetFetchTarget(apiUrl, "/_system/assets/abc/x.png")).toEqual({
+			url: "http://127.0.0.1:8080/_system/assets/abc/x.png",
+			sendKey: true,
+		});
+	});
+
+	it("sends no key to a foreign url outside the system assets path", () => {
+		expect(assetFetchTarget(apiUrl, "https://cdn.example/x.png")).toEqual({
+			url: "https://cdn.example/x.png",
+			sendKey: false,
+		});
+	});
+
+	it("sends the key to a same-origin url outside the system assets path", () => {
+		expect(assetFetchTarget(apiUrl, "http://127.0.0.1:8080/other/x.png").sendKey).toBe(true);
 	});
 });

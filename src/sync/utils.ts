@@ -132,6 +132,30 @@ export function resolveAssetUrl(apiUrl: string, url: string): string {
 	}
 }
 
+const SYSTEM_ASSETS_PATH = "/_system/assets/";
+
+/**
+ * Where to fetch a note asset from and whether the API key goes with the request.
+ * System asset paths are served by the API itself, so they are always fetched from
+ * apiUrl's origin (the server may absolutize them with a public host the client
+ * does not reach the API through). Any other url keeps the same-origin key rule.
+ *
+ * @param apiUrl - Client's configured API URL (CLI: full graphql endpoint; plugin: base URL)
+ * @param url - Asset url as received from the server, absolute or relative
+ */
+export function assetFetchTarget(apiUrl: string, url: string): { url: string; sendKey: boolean } {
+	try {
+		const parsed = new URL(url, apiUrl);
+		if (parsed.pathname.startsWith(SYSTEM_ASSETS_PATH)) {
+			return { url: new URL(parsed.pathname + parsed.search, apiUrl).toString(), sendKey: true };
+		}
+	} catch {
+		// malformed url or apiUrl: fall through to the fail-closed rule below
+	}
+	const resolved = resolveAssetUrl(apiUrl, url);
+	return { url: resolved, sendKey: sameOrigin(apiUrl, resolved) };
+}
+
 const NOTICE_ERROR_LENGTH = 200;
 
 /**
