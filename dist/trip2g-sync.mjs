@@ -12,7 +12,7 @@ var __export = (target, all) => {
 };
 
 // node_modules/readdirp/esm/index.js
-import { stat, lstat, readdir, realpath } from "node:fs/promises";
+import { stat, lstat, readdir, realpath as realpath2 } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { resolve as presolve, relative as prelative, join as pjoin, sep as psep } from "node:path";
 function readdirp(root, options = {}) {
@@ -210,7 +210,7 @@ var init_esm = __esm({
         if (stats && stats.isSymbolicLink()) {
           const full = entry.fullPath;
           try {
-            const entryRealPath = await realpath(full);
+            const entryRealPath = await realpath2(full);
             const entryRealPathStats = await lstat(entryRealPath);
             if (entryRealPathStats.isFile()) {
               return "file";
@@ -907,7 +907,7 @@ var init_handler = __esm({
        * @param realpath
        * @returns closer for the watcher instance.
        */
-      async _handleDir(dir, stats, initialAdd, depth, target, wh, realpath2) {
+      async _handleDir(dir, stats, initialAdd, depth, target, wh, realpath3) {
         const parentDir = this.fsw._getWatchedDir(sysPath.dirname(dir));
         const tracked = parentDir.has(sysPath.basename(dir));
         if (!(initialAdd && this.fsw.options.ignoreInitial) && !target && !tracked) {
@@ -918,7 +918,7 @@ var init_handler = __esm({
         let throttler;
         let closer;
         const oDepth = this.fsw.options.depth;
-        if ((oDepth == null || depth <= oDepth) && !this.fsw._symlinkPaths.has(realpath2)) {
+        if ((oDepth == null || depth <= oDepth) && !this.fsw._symlinkPaths.has(realpath3)) {
           if (!target) {
             await this._handleRead(dir, initialAdd, wh, target, dir, depth, throttler);
             if (this.fsw.closed)
@@ -1769,9 +1769,14 @@ function isSafeVaultPath(p) {
   if (p === "" || p.includes("\0") || p.includes("\\") || p.startsWith("/") || /^[A-Za-z]:/.test(p)) {
     return false;
   }
-  return p.split("/").every((segment) => segment === "" || segment === "." || !segment.startsWith("."));
+  return p.split("/").every((segment) => segment !== ".." && !isServiceSegment(segment));
 }
 __name(isSafeVaultPath, "isSafeVaultPath");
+var SERVICE_SEGMENTS = /* @__PURE__ */ new Set([".obsidian", ".git", ".trash"]);
+function isServiceSegment(segment) {
+  return SERVICE_SEGMENTS.has(segment) || segment.startsWith(".sync-state");
+}
+__name(isServiceSegment, "isServiceSegment");
 function posixBasename(p) {
   return p.slice(p.lastIndexOf("/") + 1);
 }
@@ -1897,11 +1902,12 @@ var PathOutsideVaultError = class extends Error {
     this.name = "PathOutsideVaultError";
   }
 };
+var realpath = process.platform === "win32" ? fs.realpathSync.native : fs.realpathSync;
 function realpathOfDeepestExisting(target) {
   let current = target;
   for (; ; ) {
     try {
-      return path.join(fs.realpathSync(current), path.relative(current, target));
+      return path.join(realpath(current), path.relative(current, target));
     } catch (e) {
       const parent = path.dirname(current);
       if (parent === current || e.code !== "ENOENT") {
@@ -1915,18 +1921,24 @@ function realpathOfDeepestExisting(target) {
   }
 }
 __name(realpathOfDeepestExisting, "realpathOfDeepestExisting");
-function isInside(root, target) {
+function isInsideAndNotService(root, target) {
   const relative6 = path.relative(root, target);
-  return relative6 === "" || !relative6.startsWith("..") && !path.isAbsolute(relative6);
+  if (relative6 === "") {
+    return true;
+  }
+  if (relative6.startsWith("..") || path.isAbsolute(relative6)) {
+    return false;
+  }
+  return !relative6.split(path.sep).some(isServiceSegment);
 }
-__name(isInside, "isInside");
+__name(isInsideAndNotService, "isInsideAndNotService");
 function safeJoin(folder, relativePath) {
   if (!isSafeVaultPath(relativePath)) {
     throw new PathOutsideVaultError(relativePath);
   }
-  const root = fs.realpathSync(folder);
+  const root = realpath(folder);
   const fullPath = path.join(folder, relativePath);
-  if (!isInside(root, realpathOfDeepestExisting(path.join(root, relativePath)))) {
+  if (!isInsideAndNotService(root, realpathOfDeepestExisting(path.join(root, relativePath)))) {
     throw new PathOutsideVaultError(relativePath);
   }
   return fullPath;
@@ -2596,6 +2608,7 @@ function processAlive(pid) {
 __name(processAlive, "processAlive");
 
 // src/sync/cli/env.ts
+var UNWALKABLE_PATH_CODES = /* @__PURE__ */ new Set(["ENOTDIR", "ELOOP", "ENAMETOOLONG", "EACCES"]);
 var LEGACY_STATE_FILE = ".sync-state.json";
 var CorruptSyncStateError = class extends Error {
   static {
@@ -2708,8 +2721,8 @@ var NodeEnv = class {
         if (entry.isDirectory()) {
           walk(fullPath);
         } else if (entry.isFile()) {
-          const relPath = path3.relative(this.folder, fullPath);
-          vaultFiles.push(relPath.split(path3.sep).join("/"));
+          const relPath = path3.relative(this.folder, fullPath).split(path3.sep).join("/");
+          vaultFiles.push(relPath);
           const ext = path3.extname(entry.name).toLowerCase();
           if (ext === ".md" || ext === ".html" || ext === ".canvas" || ext === ".base" || ext === ".excalidraw" || entry.name.endsWith(".html.json")) {
             const stat4 = fs3.statSync(fullPath);
@@ -2780,7 +2793,7 @@ var NodeEnv = class {
     try {
       return fs3.existsSync(safeJoin(this.folder, filePath));
     } catch (e) {
-      if (e instanceof PathOutsideVaultError) {
+      if (e instanceof PathOutsideVaultError || UNWALKABLE_PATH_CODES.has(e.code ?? "")) {
         return false;
       }
       throw e;
@@ -3488,12 +3501,14 @@ async function executePlan(env, plan, options = { twoWaySync: false }) {
     const pullResult = await executePulls(env, toPull, syncState);
     result.pulled = pullResult.count;
     result.errors.push(...pullResult.errors);
+    result.warnings.push(...pullResult.warnings);
     pulledPaths.push(...pullResult.pulledPaths);
   }
   if (pulledPaths.length > 0) {
     const assetResult = await downloadAssetsForNotes(env, pulledPaths);
     result.assetsDownloaded += assetResult.downloaded;
     result.errors.push(...assetResult.errors);
+    result.warnings.push(...assetResult.warnings);
   }
   if (options.twoWaySync) {
     const unchangedServerPaths = plan.classifications.filter((c) => c.action === "unchanged" && c.remoteHash !== null).map((c) => c.path);
@@ -3501,6 +3516,7 @@ async function executePlan(env, plan, options = { twoWaySync: false }) {
       const assetResult = await downloadAssetsForNotes(env, unchangedServerPaths);
       result.assetsDownloaded += assetResult.downloaded;
       result.errors.push(...assetResult.errors);
+      result.warnings.push(...assetResult.warnings);
     }
   }
   if (plan.serverDeleted.length > 0) {
@@ -3544,12 +3560,14 @@ async function executePlan(env, plan, options = { twoWaySync: false }) {
     result.assetsUploaded = assetResult.uploaded;
     result.assetsDownloaded = assetResult.downloaded;
     result.errors.push(...assetResult.errors);
+    result.warnings.push(...assetResult.warnings);
   }
   const unchangedPaths = plan.classifications.filter((c) => c.action === "unchanged" && c.remoteHash !== null).map((c) => c.path);
   if (unchangedPaths.length > 0) {
     const assetResult = await reconcileAssetsForUnchangedNotes(env, unchangedPaths);
     result.assetsUploaded += assetResult.uploaded;
     result.errors.push(...assetResult.errors);
+    result.warnings.push(...assetResult.warnings);
   }
   if (result.pushed > 0 || result.assetsUploaded > 0) {
     const commitResult = await env.commitNotes();
@@ -3600,23 +3618,24 @@ async function localFileIsNonEmpty(env, path6) {
 __name(localFileIsNonEmpty, "localFileIsNonEmpty");
 async function executePulls(env, pulls, syncState) {
   if (pulls.length === 0) {
-    return { count: 0, errors: [], pulledPaths: [] };
+    return { count: 0, errors: [], warnings: [], pulledPaths: [] };
   }
-  const paths = pulls.map((p) => p.path);
+  const safePulls = pulls.filter((p) => isSafeVaultPath(p.path));
+  const warnings = [];
+  for (const path6 of new Set(pulls.filter((p) => !isSafeVaultPath(p.path)).map((p) => p.path))) {
+    warnings.push({ path: path6, level: "WARNING", message: `Skipped ${path6}: path is outside the vault` });
+  }
+  const paths = safePulls.map((p) => p.path);
   const errors = [];
   const pulledPaths = [];
   let count = 0;
   const contents = await env.fetchNoteContents(paths);
   const contentMap = new Map(contents.map((c) => [c.path, c.content]));
-  const total = pulls.length;
+  const total = safePulls.length;
   let current = 0;
-  for (const pull of pulls) {
+  for (const pull of safePulls) {
     current++;
     env.onProgress({ step: "pull", current, total, path: pull.path });
-    if (!isSafeVaultPath(pull.path)) {
-      errors.push(`Refused to write ${pull.path}: path is outside the vault`);
-      continue;
-    }
     const content = contentMap.get(pull.path);
     if (content === void 0) {
       errors.push(`Failed to fetch: ${pull.path}`);
@@ -3641,7 +3660,7 @@ async function executePulls(env, pulls, syncState) {
       errors.push(`Failed to write ${pull.path}: ${e}`);
     }
   }
-  return { count, errors, pulledPaths };
+  return { count, errors, warnings, pulledPaths };
 }
 __name(executePulls, "executePulls");
 async function executePushes(env, pushes, syncState) {
@@ -3854,7 +3873,8 @@ async function reconcileAssets(env, notes, twoWaySync) {
     uploaded: 0,
     downloaded: 0,
     conflictsResolved: 0,
-    errors: []
+    errors: [],
+    warnings: []
   };
   const toUpload = [];
   const toDownload = [];
@@ -3863,6 +3883,13 @@ async function reconcileAssets(env, notes, twoWaySync) {
     for (const asset of note.assets) {
       const localPath = await env.resolveAssetPath(asset.id, note.path);
       if (!localPath) {
+        if (!isSafeVaultPath(asset.id.replace(/^\//, ""))) {
+          result.warnings.push({
+            path: note.path,
+            level: "WARNING",
+            message: `Skipped asset ${asset.id}: path is outside the vault`
+          });
+        }
         continue;
       }
       const exists = await env.fileExists(localPath);
@@ -3974,7 +4001,8 @@ async function handleAssetConflicts(env, conflicts, twoWaySync) {
     uploaded: 0,
     downloaded: 0,
     conflictsResolved: 0,
-    errors: []
+    errors: [],
+    warnings: []
   };
   if (conflicts.length === 0) {
     return result;
@@ -4022,7 +4050,7 @@ async function handleAssetConflicts(env, conflicts, twoWaySync) {
 }
 __name(handleAssetConflicts, "handleAssetConflicts");
 async function downloadAssetsForNotes(env, notePaths) {
-  const result = { downloaded: 0, errors: [] };
+  const result = { downloaded: 0, errors: [], warnings: [] };
   if (notePaths.length === 0) {
     return result;
   }
@@ -4034,8 +4062,15 @@ async function downloadAssetsForNotes(env, notePaths) {
   for (const note of noteAssets) {
     for (const asset of note.assets) {
       const absolutePath = asset.absolutePath.replace(/^\//, "");
+      if (absolutePath === "") {
+        continue;
+      }
       if (!isSafeVaultPath(absolutePath)) {
-        result.errors.push(`Refused to write asset ${asset.absolutePath}: path is outside the vault`);
+        result.warnings.push({
+          path: note.path,
+          level: "WARNING",
+          message: `Skipped asset ${asset.absolutePath}: path is outside the vault`
+        });
         continue;
       }
       if (!toDownload.has(absolutePath)) {
@@ -4075,7 +4110,7 @@ async function downloadAssetsForNotes(env, notePaths) {
 __name(downloadAssetsForNotes, "downloadAssetsForNotes");
 async function reconcileAssetsForUnchangedNotes(env, notePaths) {
   if (notePaths.length === 0) {
-    return { uploaded: 0, downloaded: 0, conflictsResolved: 0, errors: [] };
+    return { uploaded: 0, downloaded: 0, conflictsResolved: 0, errors: [], warnings: [] };
   }
   const noteAssets = await env.fetchNoteAssets(notePaths);
   const notes = noteAssets.map((note) => ({
@@ -4167,7 +4202,15 @@ async function applyLiveChanges(env, changes, syncState) {
       fetchedContent.set(c.path, c.content);
     }
   }
+  const warnedPaths = /* @__PURE__ */ new Set();
   for (const change of changes) {
+    if (!isSafeVaultPath(change.path)) {
+      if (!warnedPaths.has(change.path)) {
+        warnedPaths.add(change.path);
+        console.warn(`Skipped ${change.path}: path is outside the vault`);
+      }
+      continue;
+    }
     if (change.__typename === "NoteHideEvent") {
       if (await env.fileExists(change.path) && syncState.files[change.path] !== void 0) {
         hiddenPaths.push(change.path);
