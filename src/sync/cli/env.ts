@@ -136,10 +136,18 @@ export class NodeEnv implements SyncEnv {
 
 	/** Remove prefix from remote path to get local path */
 	private toLocalPath(remotePath: string): string {
+		if (this.prefix && remotePath === this.prefix) {
+			return "";
+		}
 		if (this.prefix && remotePath.startsWith(this.prefix + "/")) {
 			return remotePath.substring(this.prefix.length + 1);
 		}
 		return remotePath;
+	}
+
+	/** The file on disk for a path as the server names it */
+	private localFile(remotePath: string): string {
+		return safeJoin(this.folder, this.toLocalPath(remotePath));
 	}
 
 	/** Check if remote path belongs to this prefix */
@@ -250,38 +258,35 @@ export class NodeEnv implements SyncEnv {
 	}
 
 	async readFileContent(filePath: string): Promise<string> {
-		// filePath is remote path, convert to local
-		const localPath = this.toLocalPath(filePath);
-		const fullPath = safeJoin(this.folder, localPath);
-		return fs.readFileSync(fullPath, "utf-8");
+		return fs.readFileSync(this.localFile(filePath), "utf-8");
 	}
 
 	// ============ File Operations ============
 
 	async writeFile(filePath: string, content: string): Promise<void> {
-		const fullPath = safeJoin(this.folder, filePath);
-		writeFileAtomic(fullPath, content);
+		writeFileAtomic(this.localFile(filePath), content);
 	}
 
 	async writeBinaryFile(filePath: string, data: ArrayBuffer): Promise<void> {
-		const fullPath = safeJoin(this.folder, filePath);
-		writeFileAtomic(fullPath, Buffer.from(data));
+		writeFileAtomic(this.localFile(filePath), Buffer.from(data));
 	}
 
 	async openBinaryBlob(filePath: string): Promise<Blob> {
-		return fs.openAsBlob(safeJoin(this.folder, filePath));
+		return fs.openAsBlob(this.localFile(filePath));
 	}
 
 	async deleteFile(filePath: string): Promise<void> {
-		const fullPath = safeJoin(this.folder, filePath);
+		const fullPath = this.localFile(filePath);
 		if (fs.existsSync(fullPath)) {
 			fs.unlinkSync(fullPath);
 		}
 	}
 
 	async createFolder(folderPath: string): Promise<void> {
-		const fullPath = safeJoin(this.folder, folderPath);
-		fs.mkdirSync(fullPath, { recursive: true });
+		if (this.toLocalPath(folderPath) === "") {
+			return;
+		}
+		fs.mkdirSync(this.localFile(folderPath), { recursive: true });
 	}
 
 	async fileExists(filePath: string): Promise<boolean> {
@@ -289,8 +294,12 @@ export class NodeEnv implements SyncEnv {
 	}
 
 	fileExistsSync(filePath: string): boolean {
+		return this.localFileExistsSync(this.toLocalPath(filePath));
+	}
+
+	private localFileExistsSync(localPath: string): boolean {
 		try {
-			return fs.existsSync(safeJoin(this.folder, filePath));
+			return fs.existsSync(safeJoin(this.folder, localPath));
 		} catch (e) {
 			if (e instanceof PathOutsideVaultError || UNWALKABLE_PATH_CODES.has((e as NodeJS.ErrnoException).code ?? "")) {
 				return false;
@@ -583,7 +592,7 @@ export class NodeEnv implements SyncEnv {
 	async hashBinaryFile(filePath: string): Promise<string> {
 		// Return hex format (server expects hex for asset hash validation)
 		const hash = crypto.createHash("sha256");
-		const stream = fs.createReadStream(safeJoin(this.folder, filePath));
+		const stream = fs.createReadStream(this.localFile(filePath));
 		for await (const chunk of stream as AsyncIterable<Buffer>) {
 			hash.update(chunk);
 		}
@@ -593,7 +602,13 @@ export class NodeEnv implements SyncEnv {
 	async resolveAssetPath(assetPath: string, notePath: string): Promise<string | null> {
 		// Use the pure function with Obsidian's link resolution algorithm
 		// See docs/obsidian_links.md and src/sync/resolve.ts
-		return resolveAssetPath(this, assetPath, notePath);
+		// Resolution runs on local paths, where the vault root is the folder itself
+		const local = {
+			fileExistsSync: (p: string) => this.localFileExistsSync(p),
+			listVaultFiles: () => this.listVaultFiles(),
+		};
+		const resolved = resolveAssetPath(local, assetPath, this.toLocalPath(notePath));
+		return resolved === null ? null : this.toRemotePath(resolved);
 	}
 
 	// ============ UI Callbacks (CLI versions) ============

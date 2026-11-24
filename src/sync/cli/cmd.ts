@@ -218,7 +218,9 @@ Usage:
 Arguments:
   folder                   Local folder to sync (required)
   prefix                   Remote path prefix (optional, for multi-repo setups).
-                           Not supported together with --two-way.
+                           Local "a.md" is the server's "<prefix>/a.md"; with
+                           --two-way, server notes under the prefix are pulled
+                           back to the same local paths. Not supported with --watch.
 
 Options:
   -u, --api-url <url>      GraphQL endpoint (default: $ENDPOINT or .obsidian/plugins/trip2g/data.json or http://localhost:8081/_system/graphql)
@@ -418,8 +420,8 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 
-	if (args.prefix && args.twoWaySync) {
-		console.error("❌ Error: prefix is not supported with --two-way sync");
+	if (args.prefix && args.watch) {
+		console.error("❌ Error: prefix is not supported with --watch");
 		process.exit(1);
 	}
 
