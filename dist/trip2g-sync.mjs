@@ -2689,10 +2689,17 @@ var NodeEnv = class {
   }
   /** Remove prefix from remote path to get local path */
   toLocalPath(remotePath) {
+    if (this.prefix && remotePath === this.prefix) {
+      return "";
+    }
     if (this.prefix && remotePath.startsWith(this.prefix + "/")) {
       return remotePath.substring(this.prefix.length + 1);
     }
     return remotePath;
+  }
+  /** The file on disk for a path as the server names it */
+  localFile(remotePath) {
+    return safeJoin(this.folder, this.toLocalPath(remotePath));
   }
   /** Check if remote path belongs to this prefix */
   matchesPrefix(remotePath) {
@@ -2783,38 +2790,39 @@ var NodeEnv = class {
     return b64.replace(/\+/g, "-").replace(/\//g, "_");
   }
   async readFileContent(filePath) {
-    const localPath = this.toLocalPath(filePath);
-    const fullPath = safeJoin(this.folder, localPath);
-    return fs3.readFileSync(fullPath, "utf-8");
+    return fs3.readFileSync(this.localFile(filePath), "utf-8");
   }
   // ============ File Operations ============
   async writeFile(filePath, content) {
-    const fullPath = safeJoin(this.folder, filePath);
-    writeFileAtomic(fullPath, content);
+    writeFileAtomic(this.localFile(filePath), content);
   }
   async writeBinaryFile(filePath, data) {
-    const fullPath = safeJoin(this.folder, filePath);
-    writeFileAtomic(fullPath, Buffer.from(data));
+    writeFileAtomic(this.localFile(filePath), Buffer.from(data));
   }
   async openBinaryBlob(filePath) {
-    return fs3.openAsBlob(safeJoin(this.folder, filePath));
+    return fs3.openAsBlob(this.localFile(filePath));
   }
   async deleteFile(filePath) {
-    const fullPath = safeJoin(this.folder, filePath);
+    const fullPath = this.localFile(filePath);
     if (fs3.existsSync(fullPath)) {
       fs3.unlinkSync(fullPath);
     }
   }
   async createFolder(folderPath) {
-    const fullPath = safeJoin(this.folder, folderPath);
-    fs3.mkdirSync(fullPath, { recursive: true });
+    if (this.toLocalPath(folderPath) === "") {
+      return;
+    }
+    fs3.mkdirSync(this.localFile(folderPath), { recursive: true });
   }
   async fileExists(filePath) {
     return this.fileExistsSync(filePath);
   }
   fileExistsSync(filePath) {
+    return this.localFileExistsSync(this.toLocalPath(filePath));
+  }
+  localFileExistsSync(localPath) {
     try {
-      return fs3.existsSync(safeJoin(this.folder, filePath));
+      return fs3.existsSync(safeJoin(this.folder, localPath));
     } catch (e) {
       if (e instanceof PathOutsideVaultError || UNWALKABLE_PATH_CODES.has(e.code ?? "")) {
         return false;
@@ -3067,14 +3075,19 @@ ${body}`);
   // ============ Asset Operations ============
   async hashBinaryFile(filePath) {
     const hash = crypto2.createHash("sha256");
-    const stream = fs3.createReadStream(safeJoin(this.folder, filePath));
+    const stream = fs3.createReadStream(this.localFile(filePath));
     for await (const chunk of stream) {
       hash.update(chunk);
     }
     return hash.digest("hex");
   }
   async resolveAssetPath(assetPath, notePath) {
-    return resolveAssetPath(this, assetPath, notePath);
+    const local = {
+      fileExistsSync: /* @__PURE__ */ __name((p) => this.localFileExistsSync(p), "fileExistsSync"),
+      listVaultFiles: /* @__PURE__ */ __name(() => this.listVaultFiles(), "listVaultFiles")
+    };
+    const resolved = resolveAssetPath(local, assetPath, this.toLocalPath(notePath));
+    return resolved === null ? null : this.toRemotePath(resolved);
   }
   // ============ UI Callbacks (CLI versions) ============
   onProgress(progress) {
@@ -5041,7 +5054,9 @@ Usage:
 Arguments:
   folder                   Local folder to sync (required)
   prefix                   Remote path prefix (optional, for multi-repo setups).
-                           Not supported together with --two-way.
+                           Local "a.md" is the server's "<prefix>/a.md"; with
+                           --two-way, server notes under the prefix are pulled
+                           back to the same local paths. Not supported with --watch.
 
 Options:
   -u, --api-url <url>      GraphQL endpoint (default: $ENDPOINT or .obsidian/plugins/trip2g/data.json or http://localhost:8081/_system/graphql)
@@ -5224,8 +5239,8 @@ async function main() {
     console.error("\u274C Error: --api-key or API_KEY environment variable is required");
     process.exit(1);
   }
-  if (args.prefix && args.twoWaySync) {
-    console.error("\u274C Error: prefix is not supported with --two-way sync");
+  if (args.prefix && args.watch) {
+    console.error("\u274C Error: prefix is not supported with --watch");
     process.exit(1);
   }
   if (args.watch) {
