@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -642,6 +642,124 @@ describe("runWatch flush", () => {
 
 		h.sendSignal("SIGINT");
 		await run;
+	});
+});
+
+describe("runWatch failed sync", () => {
+	const quietErrors = () => vi.spyOn(console, "error").mockImplementation(() => {});
+
+	it("logs a flush that fails because the server is unreachable, and retries it", async () => {
+		const errors = quietErrors();
+		let unreachable = false;
+		const h = makeHarness({
+			local: { "a.md": "A" },
+			server: { "a.md": "A" },
+			syncState: { files: { "a.md": hash("A") } },
+			wrapEnv: (env) => ({
+				...env,
+				getServerHashes: () => (unreachable ? Promise.reject(new Error("fetch failed")) : env.getServerHashes()),
+			}),
+		});
+
+		const run = runWatch(baseArgs(), h.deps);
+		await flushMicrotasks();
+
+		unreachable = true;
+		h.model.local.set("a.md", "A2");
+		h.fireFsEvent("a.md");
+		await h.clock.advance(500);
+		await flushMicrotasks();
+
+		expect(errors.mock.calls.flat().join(" ")).toContain("fetch failed");
+		expect(h.model.server.get("a.md")).toBe("A");
+
+		unreachable = false;
+		await h.clock.advance(1000);
+		await flushMicrotasks();
+
+		expect(h.model.server.get("a.md")).toBe("A2");
+
+		h.sendSignal("SIGINT");
+		await run;
+		errors.mockRestore();
+	});
+
+	it("retries a rejected push with a growing delay until it goes through", async () => {
+		const errors = quietErrors();
+		let failures = 0;
+		const attempts: number[] = [];
+		const h = makeHarness({
+			local: { "a.md": "A" },
+			server: { "a.md": "A" },
+			syncState: { files: { "a.md": hash("A") } },
+		});
+		const base = h.deps.envFactory!;
+		h.deps.envFactory = (args) => {
+			const env = base(args);
+			return {
+				...env,
+				pushNotes: (updates, skipCommit) => {
+					attempts.push(h.clock.now());
+					if (failures > 0) {
+						failures--;
+						return Promise.reject(new Error("HTTP 502"));
+					}
+					return env.pushNotes(updates, skipCommit);
+				},
+			};
+		};
+
+		const run = runWatch(baseArgs(), h.deps);
+		await flushMicrotasks();
+
+		failures = 3;
+		h.model.local.set("a.md", "A2");
+		h.fireFsEvent("a.md");
+		await h.clock.advance(500 + 1000 + 2000 + 4000);
+		await flushMicrotasks();
+
+		expect(attempts).toEqual([500, 1500, 3500, 7500]);
+		expect(h.model.server.get("a.md")).toBe("A2");
+		expect(errors.mock.calls.flat().join(" ")).toContain("HTTP 502");
+
+		h.sendSignal("SIGINT");
+		await run;
+		errors.mockRestore();
+	});
+
+	it("stops retrying once the process drains", async () => {
+		const errors = quietErrors();
+		let calls = 0;
+		const h = makeHarness({
+			local: { "a.md": "A" },
+			server: {},
+			syncState: { files: {} },
+			wrapEnv: (env) => ({
+				...env,
+				getServerHashes: () => {
+					calls++;
+					return calls === 1 ? env.getServerHashes() : Promise.reject(new Error("fetch failed"));
+				},
+			}),
+		});
+
+		const run = runWatch(baseArgs(), h.deps);
+		await flushMicrotasks();
+
+		h.model.local.set("a.md", "A2");
+		h.fireFsEvent("a.md");
+		await h.clock.advance(500);
+		await flushMicrotasks();
+		const callsAtDrain = calls;
+
+		h.sendSignal("SIGINT");
+		const result = await run;
+		await h.clock.advance(600000);
+		await flushMicrotasks();
+
+		expect(result.exitCode).toBe(0);
+		expect(calls).toBe(callsAtDrain);
+		errors.mockRestore();
 	});
 });
 
