@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -13,6 +13,7 @@ import type {
 	Progress,
 } from "../types";
 import type { NoteChangeItem } from "../LivePullConnection";
+import { FakeDisk } from "../fake-disk";
 
 // ============ Fake clock ============
 
@@ -96,7 +97,7 @@ function hash(content: string): string {
 }
 
 interface FakeEnvModel {
-	local: Map<string, string>; // path -> content (local vault)
+	local: FakeDisk; // path -> content (local vault)
 	server: Map<string, string>; // path -> content (remote)
 	pushes: NoteUpdate[][]; // recorded push batches
 }
@@ -107,7 +108,7 @@ function makeFakeEnv(model: FakeEnvModel, syncState: SyncState): WatchEnv {
 
 		// ClassifyEnv
 		async getLocalFiles(): Promise<LocalFile[]> {
-			return Array.from(model.local.keys()).map((path, i) => ({ path, mtime: i + 1 }));
+			return model.local.localFiles();
 		},
 		async getServerHashes(): Promise<ServerHash[]> {
 			return Array.from(model.server.entries()).map(([path, content]) => ({
@@ -229,10 +230,12 @@ function makeHarness(opts: {
 	syncState?: SyncState;
 	/** Omit watcherFactory to force the fs.watch fallback path. */
 	noWatcherFactory?: boolean;
+	/** Wrap the fake env, e.g. to record reads or make the server fail. */
+	wrapEnv?: (env: WatchEnv) => WatchEnv;
 } = {}): Harness {
 	const clock = new FakeClock();
 	const model: FakeEnvModel = {
-		local: new Map(Object.entries(opts.local ?? {})),
+		local: FakeDisk.of(opts.local ?? {}),
 		server: new Map(Object.entries(opts.server ?? {})),
 		pushes: [],
 	};
@@ -247,7 +250,7 @@ function makeHarness(opts: {
 	const deps: WatchDeps = {
 		clock: clockClock(clock),
 		now: clock.now,
-		envFactory: () => makeFakeEnv(model, syncState),
+		envFactory: () => (opts.wrapEnv ?? ((e) => e))(makeFakeEnv(model, syncState)),
 		livePullFactory: (o) => {
 			onChanges = o.onChanges;
 			return {
@@ -436,7 +439,7 @@ describe("runWatch", () => {
 		// Slow reconcile: block getServerHashes until we release it.
 		const clock = new FakeClock();
 		const model: FakeEnvModel = {
-			local: new Map(),
+			local: FakeDisk.of(),
 			server: new Map([[P, REMOTE]]),
 			pushes: [],
 		};
@@ -528,7 +531,7 @@ describe("runWatch", () => {
 
 	it("signal handling: SIGINT during reconcile exits cleanly", async () => {
 		const clock = new FakeClock();
-		const model: FakeEnvModel = { local: new Map(), server: new Map(), pushes: [] };
+		const model: FakeEnvModel = { local: FakeDisk.of(), server: new Map(), pushes: [] };
 		const syncState: SyncState = { files: {} };
 
 		let releaseReconcile!: () => void;
@@ -571,7 +574,7 @@ describe("runWatch", () => {
 		// (not installed), so it falls back to fs.watch with a periodic sweep.
 		const clock = new FakeClock();
 		const model: FakeEnvModel = {
-			local: new Map([["sweep.md", "S"]]),
+			local: FakeDisk.of([["sweep.md", "S"]]),
 			server: new Map(),
 			pushes: [],
 		};
@@ -606,6 +609,210 @@ describe("runWatch", () => {
 
 		signalHandler?.("SIGINT");
 		await run;
+	});
+});
+
+describe("runWatch flush", () => {
+	it("reads only the changed note's content, not the whole vault", async () => {
+		const reads: string[] = [];
+		const h = makeHarness({
+			local: { "a.md": "A", "b.md": "B", "c.md": "C" },
+			server: { "a.md": "A", "b.md": "B", "c.md": "C" },
+			syncState: { files: { "a.md": hash("A"), "b.md": hash("B"), "c.md": hash("C") } },
+			wrapEnv: (env) => ({
+				...env,
+				readFileContent: (p: string) => {
+					reads.push(p);
+					return env.readFileContent(p);
+				},
+			}),
+		});
+
+		const run = runWatch(baseArgs(), h.deps);
+		await flushMicrotasks();
+		reads.length = 0;
+
+		h.model.local.set("b.md", "B2");
+		h.fireFsEvent("b.md");
+		await h.clock.advance(500);
+		await flushMicrotasks();
+
+		expect(new Set(reads)).toEqual(new Set(["b.md"]));
+		expect(h.model.server.get("b.md")).toBe("B2");
+
+		h.sendSignal("SIGINT");
+		await run;
+	});
+});
+
+describe("runWatch failed sync", () => {
+	const quietErrors = () => vi.spyOn(console, "error").mockImplementation(() => {});
+
+	it("logs a flush that fails because the server is unreachable, and retries it", async () => {
+		const errors = quietErrors();
+		let unreachable = false;
+		const h = makeHarness({
+			local: { "a.md": "A" },
+			server: { "a.md": "A" },
+			syncState: { files: { "a.md": hash("A") } },
+			wrapEnv: (env) => ({
+				...env,
+				getServerHashes: () => (unreachable ? Promise.reject(new Error("fetch failed")) : env.getServerHashes()),
+			}),
+		});
+
+		const run = runWatch(baseArgs(), h.deps);
+		await flushMicrotasks();
+
+		unreachable = true;
+		h.model.local.set("a.md", "A2");
+		h.fireFsEvent("a.md");
+		await h.clock.advance(500);
+		await flushMicrotasks();
+
+		expect(errors.mock.calls.flat().join(" ")).toContain("fetch failed");
+		expect(h.model.server.get("a.md")).toBe("A");
+
+		unreachable = false;
+		await h.clock.advance(1000);
+		await flushMicrotasks();
+
+		expect(h.model.server.get("a.md")).toBe("A2");
+
+		h.sendSignal("SIGINT");
+		await run;
+		errors.mockRestore();
+	});
+
+	it("retries a rejected push with a growing delay until it goes through", async () => {
+		const errors = quietErrors();
+		let failures = 0;
+		const attempts: number[] = [];
+		const h = makeHarness({
+			local: { "a.md": "A" },
+			server: { "a.md": "A" },
+			syncState: { files: { "a.md": hash("A") } },
+		});
+		const base = h.deps.envFactory!;
+		h.deps.envFactory = (args) => {
+			const env = base(args);
+			return {
+				...env,
+				pushNotes: (updates, skipCommit) => {
+					attempts.push(h.clock.now());
+					if (failures > 0) {
+						failures--;
+						return Promise.reject(new Error("HTTP 502"));
+					}
+					return env.pushNotes(updates, skipCommit);
+				},
+			};
+		};
+
+		const run = runWatch(baseArgs(), h.deps);
+		await flushMicrotasks();
+
+		failures = 3;
+		h.model.local.set("a.md", "A2");
+		h.fireFsEvent("a.md");
+		await h.clock.advance(500 + 1000 + 2000 + 4000);
+		await flushMicrotasks();
+
+		expect(attempts).toEqual([500, 1500, 3500, 7500]);
+		expect(h.model.server.get("a.md")).toBe("A2");
+		expect(errors.mock.calls.flat().join(" ")).toContain("HTTP 502");
+
+		h.sendSignal("SIGINT");
+		await run;
+		errors.mockRestore();
+	});
+
+	it("stops retrying once the process drains", async () => {
+		const errors = quietErrors();
+		let calls = 0;
+		const h = makeHarness({
+			local: { "a.md": "A" },
+			server: {},
+			syncState: { files: {} },
+			wrapEnv: (env) => ({
+				...env,
+				getServerHashes: () => {
+					calls++;
+					return calls === 1 ? env.getServerHashes() : Promise.reject(new Error("fetch failed"));
+				},
+			}),
+		});
+
+		const run = runWatch(baseArgs(), h.deps);
+		await flushMicrotasks();
+
+		h.model.local.set("a.md", "A2");
+		h.fireFsEvent("a.md");
+		await h.clock.advance(500);
+		await flushMicrotasks();
+		const callsAtDrain = calls;
+
+		h.sendSignal("SIGINT");
+		const result = await run;
+		await h.clock.advance(600000);
+		await flushMicrotasks();
+
+		expect(result.exitCode).toBe(0);
+		expect(calls).toBe(callsAtDrain);
+		errors.mockRestore();
+	});
+});
+
+describe("runWatch --updated-output", () => {
+	it("writes the notes each sync published to the file, as a one-shot run does", async () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "watch-updated-output-"));
+		const out = path.join(dir, "updated.json");
+		const logs = vi.spyOn(console, "log").mockImplementation(() => {});
+		try {
+			const h = makeHarness({
+				local: { "a.md": "A", "b.md": "B" },
+				server: { "a.md": "A", "b.md": "B" },
+				syncState: { files: { "a.md": hash("A"), "b.md": hash("B") } },
+				wrapEnv: (env) => {
+					let pushed: string[] = [];
+					return {
+						...env,
+						pushNotes: async (updates, skipCommit) => {
+							pushed.push(...updates.map((u) => u.path));
+							return env.pushNotes(updates, skipCommit);
+						},
+						commitNotes: async () => {
+							const updated = pushed.map((p) => ({ path: p, url: `https://x/${p}`, warnings: [] }));
+							pushed = [];
+							return { updated };
+						},
+					};
+				},
+			});
+
+			const run = runWatch({ ...baseArgs(), updatedOutput: out }, h.deps);
+			await flushMicrotasks();
+			expect(fs.existsSync(out)).toBe(false);
+
+			h.model.local.set("a.md", "A2");
+			h.fireFsEvent("a.md");
+			await h.clock.advance(500);
+			await flushMicrotasks();
+			expect(JSON.parse(fs.readFileSync(out, "utf-8"))).toEqual([{ path: "a.md", url: "https://x/a.md" }]);
+
+			h.model.local.set("b.md", "B2");
+			h.fireFsEvent("b.md");
+			await h.clock.advance(500);
+			await flushMicrotasks();
+			expect(JSON.parse(fs.readFileSync(out, "utf-8"))).toEqual([{ path: "b.md", url: "https://x/b.md" }]);
+			expect(logs.mock.calls.flat().join("\n")).toContain("b.md → https://x/b.md");
+
+			h.sendSignal("SIGINT");
+			await run;
+		} finally {
+			logs.mockRestore();
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });
 

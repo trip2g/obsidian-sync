@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { classifySync } from "./classify";
 import { filterPlan } from "./filter";
 import { executePlan } from "./execute";
+import { FakeDisk } from "./fake-disk";
 import type {
 	SyncEnv,
 	SyncState,
@@ -23,7 +24,7 @@ type PushFailure = "throw" | "empty";
  * written or rejected.
  */
 class World {
-	disk = new Map<string, string>();
+	disk = new FakeDisk();
 	server = new Map<string, string>();
 	state: SyncState = { files: {} };
 	resolution: ConflictResolution = "keep_local";
@@ -36,7 +37,7 @@ class World {
 	env(): SyncEnv {
 		return {
 			pushBatchSize: this.batchSize,
-			getLocalFiles: async () => [...this.disk.keys()].map((path) => ({ path, mtime: 1 })),
+			getLocalFiles: async () => this.disk.localFiles(),
 			getServerHashes: async () => [...this.server].map(([path, c]) => ({ path, hash: h(c) })),
 			getSyncState: () => this.state,
 			computeHash: async (c: string) => h(c),

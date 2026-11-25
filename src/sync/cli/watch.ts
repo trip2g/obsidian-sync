@@ -24,12 +24,19 @@ import {
 	type LivePullConnectionOptions,
 	type NoteChangeItem,
 } from "../LivePullConnection";
-import type { SyncEnv } from "../types";
+import type { SyncEnv, SyncResult } from "../types";
+import { writeUpdatedOutput } from "./sync-report";
 
 /** Debounce window for batching FS events before a push (ms). */
 const FS_DEBOUNCE_MS = 500;
 /** Periodic reconcile sweep interval when running on the fs.watch fallback (ms). */
 const FALLBACK_SWEEP_MS = 20000;
+/** First delay before retrying a sync that failed; doubles on each failure (ms). */
+const RETRY_BASE_MS = 1000;
+/** Longest delay between retries of a failing sync (ms). */
+const RETRY_MAX_MS = 60000;
+/** Above this many published notes in one sync, log a count instead of each URL. */
+const PUBLISHED_LOG_LIMIT = 20;
 
 // ============ Injectable seams (for tests) ============
 
@@ -118,6 +125,11 @@ export interface WatchArgs {
 	dataExclude?: string[];
 	/** --state-file: the same state a one-shot run with this flag reads and writes. */
 	stateFile?: string;
+	/**
+	 * --updated-output: rewritten after each sync that publishes notes, with
+	 * that sync's notes as JSON [{path, url}], the format a one-shot run writes.
+	 */
+	updatedOutput?: string;
 }
 
 /** Result of a watch run — resolves only after the daemon drains and exits. */
@@ -219,9 +231,33 @@ export async function runWatch(args: WatchArgs, deps: WatchDeps = {}): Promise<W
 	let watcherRef: WatcherLike | null = null;
 	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 	let sweepTimer: ReturnType<typeof setInterval> | null = null;
+	let retryTimer: ReturnType<typeof setTimeout> | null = null;
+	let retryDelay = RETRY_BASE_MS;
 	let resolveRun: ((r: WatchResult) => void) | null = null;
 
 	log(`👀 watch: starting for ${args.folder}`);
+
+	const reportPublished = (result: SyncResult): void => {
+		const urls = result.updatedUrls;
+		if (urls.length === 0) {
+			return;
+		}
+		if (urls.length <= PUBLISHED_LOG_LIMIT) {
+			for (const { path: notePath, url } of urls) {
+				log(`📎 watch: ${notePath} → ${url}`);
+			}
+		} else {
+			log(`📎 watch: published ${urls.length} notes`);
+		}
+		if (!args.updatedOutput) {
+			return;
+		}
+		try {
+			writeUpdatedOutput(args.updatedOutput, urls);
+		} catch (e) {
+			console.error(`❌ watch: cannot write ${args.updatedOutput}: ${String(e)}`);
+		}
+	};
 
 	const drain = async (signal: string): Promise<void> => {
 		if (settled) {
@@ -238,6 +274,10 @@ export async function runWatch(args: WatchArgs, deps: WatchDeps = {}): Promise<W
 		if (sweepTimer !== null) {
 			clock.clearInterval(sweepTimer);
 			sweepTimer = null;
+		}
+		if (retryTimer !== null) {
+			clock.clearTimeout(retryTimer);
+			retryTimer = null;
 		}
 		if (livePullRef) {
 			livePullRef.disconnect();
@@ -319,7 +359,7 @@ export async function runWatch(args: WatchArgs, deps: WatchDeps = {}): Promise<W
 	// ---- 1. Startup reconcile (gates the SSE follower) ----
 	await lock.run(async () => {
 		log("📊 watch: reconciling…");
-		await runOneShot(env, isExcluded);
+		reportPublished(await runOneShot(env, isExcluded));
 		reconcileDone = true;
 		log("✅ watch: reconcile complete");
 	});
@@ -343,6 +383,44 @@ export async function runWatch(args: WatchArgs, deps: WatchDeps = {}): Promise<W
 	// ---- 3. FS watcher (local -> remote) ----
 	const dirtyPaths = new Set<string>();
 
+	// A sync that throws (server unreachable) or leaves a note unpushed is
+	// logged and retried with a doubling delay, since the change that caused
+	// it raises no further fs event.
+	const scheduleRetry = (): void => {
+		if (draining || retryTimer !== null) {
+			return;
+		}
+		const delay = retryDelay;
+		retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS);
+		log(`🔁 watch: retrying in ${delay / 1000}s`);
+		retryTimer = clock.setTimeout(() => {
+			retryTimer = null;
+			void syncLocalChanges();
+		}, delay);
+	};
+
+	const syncLocalChanges = (): Promise<void> =>
+		lock.run(async () => {
+			let succeeded: boolean;
+			try {
+				const result = await runOneShot(env, isExcluded);
+				reportPublished(result);
+				succeeded = result.pushErrors.length === 0;
+			} catch (e) {
+				console.error(`❌ watch: sync failed: ${String(e)}`);
+				succeeded = false;
+			}
+			if (!succeeded) {
+				scheduleRetry();
+				return;
+			}
+			retryDelay = RETRY_BASE_MS;
+			if (retryTimer !== null) {
+				clock.clearTimeout(retryTimer);
+				retryTimer = null;
+			}
+		});
+
 	const flushBatch = (): void => {
 		debounceTimer = null;
 		if (draining) {
@@ -351,12 +429,9 @@ export async function runWatch(args: WatchArgs, deps: WatchDeps = {}): Promise<W
 		if (dirtyPaths.size === 0) {
 			return;
 		}
-		const batch = Array.from(dirtyPaths);
+		log(`📤 watch: pushing ${dirtyPaths.size} local change(s)`);
 		dirtyPaths.clear();
-		void lock.run(async () => {
-			log(`📤 watch: pushing ${batch.length} local change(s)`);
-			await runOneShot(env, isExcluded);
-		});
+		void syncLocalChanges();
 	};
 
 	const onFsChange = (filePath: string): void => {
@@ -389,9 +464,7 @@ export async function runWatch(args: WatchArgs, deps: WatchDeps = {}): Promise<W
 			if (draining) {
 				return;
 			}
-			void lock.run(async () => {
-				await runOneShot(env, isExcluded);
-			});
+			void syncLocalChanges();
 		}, FALLBACK_SWEEP_MS);
 	}
 
@@ -444,13 +517,14 @@ export function createWatchEnv(args: WatchArgs): NodeEnv {
 }
 
 /** Run one two-way one-shot sync (classify -> filter -> execute). */
-async function runOneShot(env: SyncEnv, isExcluded: (p: string) => boolean): Promise<void> {
+async function runOneShot(env: SyncEnv, isExcluded: (p: string) => boolean): Promise<SyncResult> {
 	const plan = await classifySync(env);
 	const filtered = filterPlan(plan, { twoWaySync: true, isExcluded });
 	const result = await executePlan(env, filtered, { twoWaySync: true });
 	for (const err of result.errors) {
 		console.error(`❌ watch: ${err}`);
 	}
+	return result;
 }
 
 /**

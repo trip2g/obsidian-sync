@@ -219,6 +219,7 @@ export class NodeEnv implements SyncEnv {
 							// Use remote path with prefix for sync comparison
 							path: this.toRemotePath(relPath),
 							mtime: stat.mtimeMs,
+							size: stat.size,
 						});
 					}
 				}

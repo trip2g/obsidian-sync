@@ -97,6 +97,7 @@ export class ObsidianSyncEnv implements SyncEnv {
 		return files.map((file) => ({
 			path: this.getRelativePath(file),
 			mtime: file.stat.mtime,
+			size: file.stat.size,
 		}));
 	}
 
