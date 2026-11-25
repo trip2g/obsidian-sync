@@ -763,6 +763,59 @@ describe("runWatch failed sync", () => {
 	});
 });
 
+describe("runWatch --updated-output", () => {
+	it("writes the notes each sync published to the file, as a one-shot run does", async () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "watch-updated-output-"));
+		const out = path.join(dir, "updated.json");
+		const logs = vi.spyOn(console, "log").mockImplementation(() => {});
+		try {
+			const h = makeHarness({
+				local: { "a.md": "A", "b.md": "B" },
+				server: { "a.md": "A", "b.md": "B" },
+				syncState: { files: { "a.md": hash("A"), "b.md": hash("B") } },
+				wrapEnv: (env) => {
+					let pushed: string[] = [];
+					return {
+						...env,
+						pushNotes: async (updates, skipCommit) => {
+							pushed.push(...updates.map((u) => u.path));
+							return env.pushNotes(updates, skipCommit);
+						},
+						commitNotes: async () => {
+							const updated = pushed.map((p) => ({ path: p, url: `https://x/${p}`, warnings: [] }));
+							pushed = [];
+							return { updated };
+						},
+					};
+				},
+			});
+
+			const run = runWatch({ ...baseArgs(), updatedOutput: out }, h.deps);
+			await flushMicrotasks();
+			expect(fs.existsSync(out)).toBe(false);
+
+			h.model.local.set("a.md", "A2");
+			h.fireFsEvent("a.md");
+			await h.clock.advance(500);
+			await flushMicrotasks();
+			expect(JSON.parse(fs.readFileSync(out, "utf-8"))).toEqual([{ path: "a.md", url: "https://x/a.md" }]);
+
+			h.model.local.set("b.md", "B2");
+			h.fireFsEvent("b.md");
+			await h.clock.advance(500);
+			await flushMicrotasks();
+			expect(JSON.parse(fs.readFileSync(out, "utf-8"))).toEqual([{ path: "b.md", url: "https://x/b.md" }]);
+			expect(logs.mock.calls.flat().join("\n")).toContain("b.md → https://x/b.md");
+
+			h.sendSignal("SIGINT");
+			await run;
+		} finally {
+			logs.mockRestore();
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
 describe("createWatchEnv", () => {
 	// Without --state-file, watch and one-shot runs given the same flag kept two
 	// different states, and the one watch read had no base for the files the

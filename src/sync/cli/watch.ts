@@ -25,6 +25,7 @@ import {
 	type NoteChangeItem,
 } from "../LivePullConnection";
 import type { SyncEnv, SyncResult } from "../types";
+import { writeUpdatedOutput } from "./sync-report";
 
 /** Debounce window for batching FS events before a push (ms). */
 const FS_DEBOUNCE_MS = 500;
@@ -34,6 +35,8 @@ const FALLBACK_SWEEP_MS = 20000;
 const RETRY_BASE_MS = 1000;
 /** Longest delay between retries of a failing sync (ms). */
 const RETRY_MAX_MS = 60000;
+/** Above this many published notes in one sync, log a count instead of each URL. */
+const PUBLISHED_LOG_LIMIT = 20;
 
 // ============ Injectable seams (for tests) ============
 
@@ -122,6 +125,11 @@ export interface WatchArgs {
 	dataExclude?: string[];
 	/** --state-file: the same state a one-shot run with this flag reads and writes. */
 	stateFile?: string;
+	/**
+	 * --updated-output: rewritten after each sync that publishes notes, with
+	 * that sync's notes as JSON [{path, url}], the format a one-shot run writes.
+	 */
+	updatedOutput?: string;
 }
 
 /** Result of a watch run — resolves only after the daemon drains and exits. */
@@ -229,6 +237,28 @@ export async function runWatch(args: WatchArgs, deps: WatchDeps = {}): Promise<W
 
 	log(`👀 watch: starting for ${args.folder}`);
 
+	const reportPublished = (result: SyncResult): void => {
+		const urls = result.updatedUrls;
+		if (urls.length === 0) {
+			return;
+		}
+		if (urls.length <= PUBLISHED_LOG_LIMIT) {
+			for (const { path: notePath, url } of urls) {
+				log(`📎 watch: ${notePath} → ${url}`);
+			}
+		} else {
+			log(`📎 watch: published ${urls.length} notes`);
+		}
+		if (!args.updatedOutput) {
+			return;
+		}
+		try {
+			writeUpdatedOutput(args.updatedOutput, urls);
+		} catch (e) {
+			console.error(`❌ watch: cannot write ${args.updatedOutput}: ${String(e)}`);
+		}
+	};
+
 	const drain = async (signal: string): Promise<void> => {
 		if (settled) {
 			return;
@@ -329,7 +359,7 @@ export async function runWatch(args: WatchArgs, deps: WatchDeps = {}): Promise<W
 	// ---- 1. Startup reconcile (gates the SSE follower) ----
 	await lock.run(async () => {
 		log("📊 watch: reconciling…");
-		await runOneShot(env, isExcluded);
+		reportPublished(await runOneShot(env, isExcluded));
 		reconcileDone = true;
 		log("✅ watch: reconcile complete");
 	});
@@ -374,6 +404,7 @@ export async function runWatch(args: WatchArgs, deps: WatchDeps = {}): Promise<W
 			let succeeded: boolean;
 			try {
 				const result = await runOneShot(env, isExcluded);
+				reportPublished(result);
 				succeeded = result.pushErrors.length === 0;
 			} catch (e) {
 				console.error(`❌ watch: sync failed: ${String(e)}`);

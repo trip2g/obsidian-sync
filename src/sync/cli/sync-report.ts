@@ -1,5 +1,10 @@
-import * as fs from "fs";
 import type { SyncResult } from "../types";
+import { writeFileAtomic } from "./atomic-write";
+
+/** Write the notes a sync published, as JSON [{path, url}], to the --updated-output file. */
+export function writeUpdatedOutput(file: string, updatedUrls: SyncResult["updatedUrls"]): void {
+	writeFileAtomic(file, JSON.stringify(updatedUrls, null, 2));
+}
 
 /** The exit code of every failed run, a partial failure included. */
 export const EXIT_FAILURE = 1;
@@ -73,7 +78,7 @@ export function printSyncResult(result: SyncResult, totalActions: number, update
 			}
 		}
 		if (updatedOutput) {
-			fs.writeFileSync(updatedOutput, JSON.stringify(updatedUrls, null, 2));
+			writeUpdatedOutput(updatedOutput, updatedUrls);
 			console.log(`💾 Saved to ${updatedOutput}`);
 		} else {
 			console.log(`💡 --updated-output $(mktemp /tmp/updated-XXXXXX.json)`);

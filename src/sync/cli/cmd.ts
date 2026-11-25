@@ -242,7 +242,9 @@ Options:
                            - fail:   Exit with error on first conflict
   -m, --meta <key=value>   Add/override frontmatter field for all files (can be repeated)
   -o, --updated-output <file>
-                           Write pushed notes as JSON [{path, url}] to file after sync
+                           Write pushed notes as JSON [{path, url}] to file after sync.
+                           With --watch, the file is rewritten after each sync
+                           that publishes notes, holding that sync's notes.
   -s, --state-file <path>  Sync-state file path (default: .sync-state.<host>.json derived from --api-url)
   -x, --exclude <glob>     Exclude paths from sync (can be repeated). Excluded
                            paths are never pushed; if they exist on the server
@@ -439,6 +441,7 @@ async function main(): Promise<void> {
 			dataInclude: dataJson.livePullIncludePatterns,
 			dataExclude: dataJson.livePullExcludePatterns,
 			stateFile: args.stateFile || undefined,
+			updatedOutput: args.updatedOutput || undefined,
 		});
 		process.exit(exitCode);
 	}
