@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { classifySync } from "./classify";
 import { filterPlan } from "./filter";
 import { executePlan } from "./execute";
+import { FakeDisk } from "./fake-disk";
 import type { SyncEnv, SyncState, NoteUpdate, PushedNote, ConflictInfo, ConflictResolution } from "./types";
 
 function makeHash(content: string): string {
@@ -9,7 +10,7 @@ function makeHash(content: string): string {
 }
 
 class FakeVault {
-	disk = new Map<string, string>();
+	disk = new FakeDisk();
 	server = new Map<string, string>();
 	pushed: NoteUpdate[] = [];
 	conflicts: string[] = [];
@@ -18,7 +19,7 @@ class FakeVault {
 	env(): SyncEnv {
 		return {
 			pushBatchSize: 100,
-			getLocalFiles: async () => [...this.disk.keys()].map((path) => ({ path, mtime: 1 })),
+			getLocalFiles: async () => this.disk.localFiles(),
 			getServerHashes: async () => [...this.server].map(([path, content]) => ({ path, hash: makeHash(content) })),
 			getSyncState: () => this.state,
 			computeHash: async (content: string) => makeHash(content),

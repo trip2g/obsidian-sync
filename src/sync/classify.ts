@@ -88,25 +88,40 @@ export async function classifySync(env: ClassifyEnv): Promise<SyncPlan> {
 		serverHashMap.set(item.path, item.hash);
 	}
 
-	// Compute local hashes with mtime caching
+	// Compute local hashes, trusting the cached hash of a note whose mtime and
+	// size are unchanged. The cache is rebuilt for the notes present now and
+	// travels with the sync state, so the next run reads only what changed.
 	const localHashes = new Map<string, string>();
 	const cachedMtimes = syncState.mtimes || {};
+	const cachedSizes = syncState.sizes || {};
 	const cachedLocalHashes = syncState.localHashes || {};
+	const mtimes: Record<string, number> = {};
+	const sizes: Record<string, number> = {};
+	const hashes: Record<string, string> = {};
 
 	for (const file of localFiles) {
-		const cachedMtime = cachedMtimes[file.path];
 		const cachedHash = cachedLocalHashes[file.path];
+		const unchangedOnDisk =
+			cachedMtimes[file.path] === file.mtime && cachedSizes[file.path] === file.size;
 
-		if (cachedMtime === file.mtime && cachedHash) {
-			// Use cached hash if mtime unchanged
-			localHashes.set(file.path, cachedHash);
+		let hash: string;
+		if (cachedHash && unchangedOnDisk) {
+			hash = cachedHash;
 		} else {
-			// Compute new hash
 			const content = await env.readFileContent(file.path);
-			const hash = await env.computeHash(content);
-			localHashes.set(file.path, hash);
+			hash = await env.computeHash(content);
 		}
+		localHashes.set(file.path, hash);
+		mtimes[file.path] = file.mtime;
+		if (file.size !== undefined) {
+			sizes[file.path] = file.size;
+		}
+		hashes[file.path] = hash;
 	}
+
+	syncState.mtimes = mtimes;
+	syncState.sizes = sizes;
+	syncState.localHashes = hashes;
 
 	// Collect all unique paths
 	const allPaths = new Set<string>([

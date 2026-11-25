@@ -39,6 +39,8 @@ export interface SyncState {
 	files: Record<string, string>;
 	// Map of relative path -> mtime (for hash caching)
 	mtimes?: Record<string, number>;
+	// Map of relative path -> size in bytes (for hash caching)
+	sizes?: Record<string, number>;
 	// Map of relative path -> localHash (cache of computed hashes, separate from sync state)
 	localHashes?: Record<string, string>;
 	// Timestamp of last sync

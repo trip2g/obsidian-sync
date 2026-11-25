@@ -13,6 +13,7 @@ import type {
 	Progress,
 } from "../types";
 import type { NoteChangeItem } from "../LivePullConnection";
+import { FakeDisk } from "../fake-disk";
 
 // ============ Fake clock ============
 
@@ -96,7 +97,7 @@ function hash(content: string): string {
 }
 
 interface FakeEnvModel {
-	local: Map<string, string>; // path -> content (local vault)
+	local: FakeDisk; // path -> content (local vault)
 	server: Map<string, string>; // path -> content (remote)
 	pushes: NoteUpdate[][]; // recorded push batches
 }
@@ -107,7 +108,7 @@ function makeFakeEnv(model: FakeEnvModel, syncState: SyncState): WatchEnv {
 
 		// ClassifyEnv
 		async getLocalFiles(): Promise<LocalFile[]> {
-			return Array.from(model.local.keys()).map((path, i) => ({ path, mtime: i + 1 }));
+			return model.local.localFiles();
 		},
 		async getServerHashes(): Promise<ServerHash[]> {
 			return Array.from(model.server.entries()).map(([path, content]) => ({
@@ -232,7 +233,7 @@ function makeHarness(opts: {
 } = {}): Harness {
 	const clock = new FakeClock();
 	const model: FakeEnvModel = {
-		local: new Map(Object.entries(opts.local ?? {})),
+		local: FakeDisk.of(opts.local ?? {}),
 		server: new Map(Object.entries(opts.server ?? {})),
 		pushes: [],
 	};
@@ -436,7 +437,7 @@ describe("runWatch", () => {
 		// Slow reconcile: block getServerHashes until we release it.
 		const clock = new FakeClock();
 		const model: FakeEnvModel = {
-			local: new Map(),
+			local: FakeDisk.of(),
 			server: new Map([[P, REMOTE]]),
 			pushes: [],
 		};
@@ -528,7 +529,7 @@ describe("runWatch", () => {
 
 	it("signal handling: SIGINT during reconcile exits cleanly", async () => {
 		const clock = new FakeClock();
-		const model: FakeEnvModel = { local: new Map(), server: new Map(), pushes: [] };
+		const model: FakeEnvModel = { local: FakeDisk.of(), server: new Map(), pushes: [] };
 		const syncState: SyncState = { files: {} };
 
 		let releaseReconcile!: () => void;
@@ -571,7 +572,7 @@ describe("runWatch", () => {
 		// (not installed), so it falls back to fs.watch with a periodic sweep.
 		const clock = new FakeClock();
 		const model: FakeEnvModel = {
-			local: new Map([["sweep.md", "S"]]),
+			local: FakeDisk.of([["sweep.md", "S"]]),
 			server: new Map(),
 			pushes: [],
 		};

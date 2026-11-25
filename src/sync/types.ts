@@ -15,6 +15,8 @@ export type SyncAction =
 export interface LocalFile {
 	path: string; // relative to sync folder
 	mtime: number;
+	/** Size in bytes; with mtime, decides whether a cached hash still holds. */
+	size?: number;
 }
 
 export interface ServerHash {
@@ -37,6 +39,7 @@ export interface SyncState {
 	lastSyncedAt?: number;
 	// Cache for performance (does NOT affect sync logic)
 	mtimes?: Record<string, number>; // path -> mtime (cache validation)
+	sizes?: Record<string, number>; // path -> size in bytes (cache validation)
 	localHashes?: Record<string, string>; // path -> computed hash
 }
 

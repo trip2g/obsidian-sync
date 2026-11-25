@@ -289,6 +289,7 @@ export class BrowserEnv implements SyncEnv {
 					files.push({
 						path,
 						mtime: file.lastModified,
+						size: file.size,
 					});
 					// Cache the handle for later use
 					this.fileCache.set(path, handle);
