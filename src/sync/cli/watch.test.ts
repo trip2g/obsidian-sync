@@ -230,6 +230,8 @@ function makeHarness(opts: {
 	syncState?: SyncState;
 	/** Omit watcherFactory to force the fs.watch fallback path. */
 	noWatcherFactory?: boolean;
+	/** Wrap the fake env, e.g. to record reads or make the server fail. */
+	wrapEnv?: (env: WatchEnv) => WatchEnv;
 } = {}): Harness {
 	const clock = new FakeClock();
 	const model: FakeEnvModel = {
@@ -248,7 +250,7 @@ function makeHarness(opts: {
 	const deps: WatchDeps = {
 		clock: clockClock(clock),
 		now: clock.now,
-		envFactory: () => makeFakeEnv(model, syncState),
+		envFactory: () => (opts.wrapEnv ?? ((e) => e))(makeFakeEnv(model, syncState)),
 		livePullFactory: (o) => {
 			onChanges = o.onChanges;
 			return {
@@ -606,6 +608,39 @@ describe("runWatch", () => {
 		expect(pushed.some((u) => u.path === "sweep.md")).toBe(true);
 
 		signalHandler?.("SIGINT");
+		await run;
+	});
+});
+
+describe("runWatch flush", () => {
+	it("reads only the changed note's content, not the whole vault", async () => {
+		const reads: string[] = [];
+		const h = makeHarness({
+			local: { "a.md": "A", "b.md": "B", "c.md": "C" },
+			server: { "a.md": "A", "b.md": "B", "c.md": "C" },
+			syncState: { files: { "a.md": hash("A"), "b.md": hash("B"), "c.md": hash("C") } },
+			wrapEnv: (env) => ({
+				...env,
+				readFileContent: (p: string) => {
+					reads.push(p);
+					return env.readFileContent(p);
+				},
+			}),
+		});
+
+		const run = runWatch(baseArgs(), h.deps);
+		await flushMicrotasks();
+		reads.length = 0;
+
+		h.model.local.set("b.md", "B2");
+		h.fireFsEvent("b.md");
+		await h.clock.advance(500);
+		await flushMicrotasks();
+
+		expect(new Set(reads)).toEqual(new Set(["b.md"]));
+		expect(h.model.server.get("b.md")).toBe("B2");
+
+		h.sendSignal("SIGINT");
 		await run;
 	});
 });
